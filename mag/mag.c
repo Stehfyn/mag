@@ -3,6 +3,8 @@
 #include <windowsx.h>
 #include <gl/GL.h>
 
+#include <math.h>
+
 #define ABS(x)         ((x < 0) ? -x : x)
 #define RECTWIDTH(rc)  (ABS(rc.right - rc.left))
 #define RECTHEIGHT(rc) (ABS(rc.bottom - rc.top))
@@ -27,14 +29,17 @@ typedef struct SHAREDWGLDATA
   BITMAPINFOHEADER bi;
   HDC              hDC;
   HGLRC            hRC;
+  FLOAT            fScale;
   HDC              hCaptureDC;
   HDC              hDesktopDC;
   HBITMAP          hBitmapBg;
   GLclampf         cfClearColor[4];
+  FLOAT            fTexScaler;
   GLsizei          glScreenWidth;
   GLsizei          glScreenHeight;
   GLuint           glScreenTexture;
-  GLubyte          glScreenData[3840*2160*4];
+  GLubyte          glScreenData[3*256*256*4];
+  //GLubyte          glScreenData[3840*2160*4];
 
 } SHAREDWGLDATA, *LPSHAREDWGLDATA;
 
@@ -51,9 +56,10 @@ BOOL mag_OnNCCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
 UINT mag_OnNCHittest(HWND hWnd, int x, int y);
 UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
+void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
+void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
 void mag_OnEnterSizeMove(HWND hWnd);
 void mag_OnExitSizeMove(HWND hWnd);
-void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
@@ -135,6 +141,8 @@ void mag_wglInit(HWND hWnd)
     lpsd->bi.biCompression = BI_RGB;
 
     wglSwapIntervalEXT(0);
+    lpsd->fScale = 1.0f;
+    lpsd->fTexScaler = 1.0f;
 }
 
 void mag_wglRender(HWND hWnd)
@@ -164,21 +172,23 @@ void mag_wglRender(HWND hWnd)
 
     glDisable(GL_BLEND);
     glEnable(GL_TEXTURE_2D);
+
     glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->glScreenWidth, lpsd->glScreenHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f);
-    glVertex2f(-1.0f, -1.0f);
+    glVertex2f(-lpsd->fTexScaler, -lpsd->fTexScaler);
     glTexCoord2f(1.0f, 0.0f);
-    glVertex2f(1.0f, -1.0f);
+    glVertex2f(lpsd->fTexScaler, -lpsd->fTexScaler);
     glTexCoord2f(1.0f, 1.0f);
-    glVertex2f(1.0f, 1.0f);
+    glVertex2f(lpsd->fTexScaler, lpsd->fTexScaler);
     glTexCoord2f(0.0f, 1.0f);
-    glVertex2f(-1.0f, 1.0f);
+    glVertex2f(-lpsd->fTexScaler, lpsd->fTexScaler);
     glEnd();
     glBindTexture(GL_TEXTURE_2D, 0);
     glDisable(GL_TEXTURE_2D);
 
+    D3DKMTWaitForVerticalBlank(hWnd);
     SwapBuffers(lpsd->hDC);
 
     glFinish();
@@ -207,9 +217,9 @@ void mag_CaptureScreen(HWND hWnd)
     // BitBlt(hDC, 0, 0, nScreenWidth, nScreenHeight, hCaptureDC, 0, 0, SRCCOPY);
     // here to save the captured image to disk
 
-    for (int i = 0; i < 256; ++i)
-      for (int j = 0; j < 256; ++j)
-        lpsd->glScreenData[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
+    //for (int i = 0; i < 256; ++i)
+    //  for (int j = 0; j < 256; ++j)
+    //    lpsd->glScreenData[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
 
     lpsd->glScreenWidth = 256;
     lpsd->glScreenHeight = 256;
@@ -224,6 +234,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     SetTimer(hWnd, 1, USER_TIMER_MINIMUM, NULL);
 
     //SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
+    SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
     
     DwmEnableWindowComposition(hWnd, TRUE);
 
@@ -254,7 +265,6 @@ void mag_OnPaint(HWND hWnd)
 {
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(hWnd, &ps);
-    mag_wglRender(hWnd);
     EndPaint(hWnd, &ps);
 }
 
@@ -374,8 +384,22 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 
     mag_wglRender(hWnd);
 
-    InvalidateRect(hWnd, NULL, FALSE);
-    UpdateWindow(hWnd);
+void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
+{
+    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    //const FLOAT fScaleScale = powf(-logf(0.5f * lpsd->fScale + 0.5f), 6);
+    const FLOAT fScaleScale = powf(-logf(0.001f * (1.0f - lpsd->fScale) + .575f), 6);
+    const POINT pt = { xPos, yPos };
+
+    UNREFERENCED_PARAMETER(fwKeys);
+
+    if (ScreenToClient(hWnd, &pt) && PtInRect(&lpsd->rc, pt))
+    {
+      lpsd->fScale += fScaleScale * ((!zDelta) ? 0.0f : (0 < zDelta) ? -1.0f : 1.0f);
+      lpsd->fScale = CLAMP(lpsd->fScale, 0.001f, 1.0f);
+      lpsd->fTexScaler = 1.0f + (25.0f * (1.0f - lpsd->fScale));
+    }
 }
 
 void mag_OnEnterSizeMove(HWND hWnd)
@@ -401,6 +425,7 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_NCHITTEST,     mag_OnNCHittest);
     HANDLE_MSG(hWnd,  WM_KEYUP,         mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,         mag_OnTimer);
+    HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,    mag_OnMouseWheel);
     HANDLE_MSG(hWnd,  WM_ENTERSIZEMOVE, mag_OnEnterSizeMove);
     HANDLE_MSG(hWnd,  WM_EXITSIZEMOVE,  mag_OnExitSizeMove);
     FORWARD_MSG(hWnd, message,          DefWindowProc);
@@ -411,7 +436,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
 {
     WNDCLASSEX wcex = { sizeof(wcex) };
 
-    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
     wcex.lpfnWndProc = mag_WndProc;
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
@@ -427,6 +452,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
 
     return RegisterClassEx(&wcex);
 }
+
 
 BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
 {

@@ -9,6 +9,7 @@
 // C RunTime Header Files
 #include <tchar.h>
 // Application Extension Header Files
-#include "mag.h"
+
 #include "wingdix.h"
 #include "dwmapix.h"
+#include "d3dkmtx.h"

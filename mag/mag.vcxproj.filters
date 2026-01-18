@@ -27,6 +27,9 @@
     <ClCompile Include="dwmapix.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="d3dkmtx.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -42,6 +45,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="dwmapix.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="d3dkmtx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

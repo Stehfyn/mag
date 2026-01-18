@@ -135,12 +135,14 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="d3dkmtx.c" />
     <ClCompile Include="dwmapix.c" />
     <ClCompile Include="mag.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="wingdix.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="d3dkmtx.h" />
     <ClInclude Include="dwmapix.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="mag.h" />
