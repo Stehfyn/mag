@@ -139,15 +139,21 @@
     <ClCompile Include="dwmapix.c" />
     <ClCompile Include="mag.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="render.c" />
     <ClCompile Include="wingdix.c" />
+    <ClCompile Include="winuserx.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="cd2d.h" />
+    <ClInclude Include="cdcomp.h" />
     <ClInclude Include="d3dkmtx.h" />
     <ClInclude Include="dwmapix.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="mag.h" />
+    <ClInclude Include="render.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="wingdix.h" />
+    <ClInclude Include="winuserx.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
