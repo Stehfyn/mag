@@ -26,6 +26,8 @@ BOOL D3DKMTWaitForVerticalBlank(HWND hWnd)
       vbe.hAdapter      = oa.hAdapter;
       vbe.VidPnSourceId = oa.VidPnSourceId;
       vbe.hDevice       = 0;
+
+      return TRUE;
     }
     else
     {

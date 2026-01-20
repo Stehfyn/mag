@@ -1,6 +1,8 @@
 #include "render.h"
 
 void render_wglInit(HWND hWnd);
+void render_wglCreateResources(HWND hWnd);
+void render_gdiCreateResources(HWND hWnd);
 void render_wglRender(HWND hWnd);
 void render_gdiCaptureScreen(HWND hWnd);
 
@@ -38,12 +40,11 @@ void render_wglInit(HWND hWnd)
       WGL_SWAP_METHOD_ARB,WGL_SWAP_EXCHANGE_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
-      WGL_SAMPLES_ARB, 4,
+      WGL_SAMPLES_ARB, 8,
       0
     };
 
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
     int pf;
 
     wglInit();
@@ -56,18 +57,32 @@ void render_wglInit(HWND hWnd)
     lpsd->hRC = wglCreateContextAttribsARB(lpsd->hDC, NULL, NULL);
     wglMakeCurrent(lpsd->hDC, lpsd->hRC);
 
+    render_wglCreateResources(hWnd);
+    render_gdiCreateResources(hWnd);
+
+    //wglSwapIntervalEXT(0);
+}
+
+void render_wglCreateResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    
     glGenTextures(1, &lpsd->glScreenTexture);
     glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
-
-    // Upload texture data
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    // glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    // glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, 256, 256, 0, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, DIM, DIM, 0, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
 
+    lpsd->fScale = 1.0f;
+    lpsd->fTexScaler = 1.0f;
+}
+
+void render_gdiCreateResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    
     gdiGetDisplayInfo(&lpsd->di);
     lpsd->hDesktopDC = GetDC(GetDesktopWindow());
     lpsd->hCaptureDC = CreateCompatibleDC(lpsd->hDesktopDC);
@@ -75,15 +90,11 @@ void render_wglInit(HWND hWnd)
     SelectObject(lpsd->hCaptureDC, lpsd->hBitmapBg);
 
     lpsd->bi.biSize = sizeof(lpsd->bi);
-    lpsd->bi.biWidth = 256;
-    lpsd->bi.biHeight = 256;
+    lpsd->bi.biWidth = DIM;
+    lpsd->bi.biHeight = DIM;
     lpsd->bi.biPlanes = 1;
     lpsd->bi.biBitCount = 32; // RGBA
     lpsd->bi.biCompression = BI_RGB;
-
-    wglSwapIntervalEXT(0);
-    lpsd->fScale = 1.0f;
-    lpsd->fTexScaler = 1.0f;
 }
 
 void render_wglRender(HWND hWnd)
@@ -142,41 +153,33 @@ void render_gdiCaptureScreen(HWND hWnd)
         lpsd->hCaptureDC,
         0,
         0,
-        256,
-        256,
+        DIM,
+        DIM,
         lpsd->hDesktopDC,
-        CLAMP(lpsd->pt.x - (LONG)(0.5f * 256), lpsd->di.rc.left, lpsd->di.rc.right - 256),
-        CLAMP(lpsd->pt.y - (LONG)(0.5f * 256), lpsd->di.rc.top, lpsd->di.rc.bottom - 256),
+        CLAMP(lpsd->pt.x - (LONG)(0.5f * DIM), lpsd->di.rc.left, lpsd->di.rc.right - DIM),
+        CLAMP(lpsd->pt.y - (LONG)(0.5f * DIM), lpsd->di.rc.top, lpsd->di.rc.bottom - DIM),
         SRCCOPY | CAPTUREBLT);
 
-      GetDIBits(lpsd->hCaptureDC, lpsd->hBitmapBg, 0, 256, lpsd->glScreenData, (BITMAPINFO*)&lpsd->bi, DIB_RGB_COLORS);
+      GetDIBits(lpsd->hCaptureDC, lpsd->hBitmapBg, 0, DIM, lpsd->glScreenData, (BITMAPINFO*)&lpsd->bi, DIB_RGB_COLORS);
     }
 
-    // BitBlt(hDC, 0, 0, nScreenWidth, nScreenHeight, hCaptureDC, 0, 0, SRCCOPY);
-    // here to save the captured image to disk
-
-    //for (int i = 0; i < 256; ++i)
-    //  for (int j = 0; j < 256; ++j)
-    //    lpsd->glScreenData[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
-
-    lpsd->glScreenWidth = 256;
-    lpsd->glScreenHeight = 256;
+    lpsd->glScreenWidth = DIM;
+    lpsd->glScreenHeight = DIM;
 }
 
 void renderInit(HWND hWnd)
 {
-    //render_wglInit(hWnd);
-    //ShowWindow(hWnd, SW_SHOW);
-    DwmInitPrivate();
-    DwmCreateDevice();
-    DwmCreateThumbnail(hWnd);
-    DwmBindVisual(hWnd);
+    render_wglInit(hWnd);
+}
+
+void renderCreateResources(HWND hWnd)
+{
+    render_wglCreateResources(hWnd);
+    render_gdiCreateResources(hWnd);
 }
 
 void renderRender(HWND hWnd)
 {
     render_gdiCaptureScreen(hWnd);
     render_wglRender(hWnd);
-
-    DwmUpdateVisual(hWnd);
 }

@@ -4,14 +4,6 @@
 #pragma comment(lib, "htmlhelp")
 #pragma comment(lib, "Shlwapi")
 
-/* void Cls_OnEnterSizeMove(HWND hwnd) */
-#define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd)), 0L)
-
-/* void Cls_OnExitSizeMove(HWND hwnd) */
-#define HANDLE_WM_EXITSIZEMOVE(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd)), 0L)
-
 #define FORWARD_MSG(hwnd, message, fn)    \
     default: return (fn)((hwnd), (message), (wParam), (lParam))
 
@@ -32,8 +24,6 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
-void mag_OnEnterSizeMove(HWND hWnd);
-void mag_OnExitSizeMove(HWND hWnd);
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
@@ -45,10 +35,9 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 
     SetWindowDisplayAffinity(hPopupMenu, WDA_EXCLUDEFROMCAPTURE);
 
-    AppendMenu(hPopupMenu, ((WS_EX_TOPMOST & GetWindowExStyle(hWnd)) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Always On Top"));
-    AppendMenu(hPopupMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1002, _T("Follow Mouse"));
-    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1003, _T("Help"));
-    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1004, _T("Exit"));
+    AppendMenu(hPopupMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Follow Mouse"));
+    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Help"));
+    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1003, _T("Exit"));
 
     TrackPopupMenuEx(hPopupMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
 
@@ -66,8 +55,7 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y)
     {
       PathAppend(szFileName, TEXT("mag.chm"));
 
-      HWND hwndHelp = HtmlHelp(hWnd, szFileName, HH_HELP_FINDER, NULL);
-      SetWindowOwner(hwndHelp, GetDesktopWindow());
+      SetWindowOwner(HtmlHelp(hWnd, szFileName, HH_HELP_FINDER, NULL), GetDesktopWindow());
     }
 }
 
@@ -75,12 +63,11 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
-
     SetTimer(hWnd, 1, USER_TIMER_MINIMUM, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
     DwmEnableWindowComposition(hWnd, TRUE);
 
-    
+    SetCurrentProcessEfficiencyQoS();
 
     return TRUE;
 }
@@ -98,10 +85,10 @@ void mag_OnActivate(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized)
     if (!fMinimized)
     {
       const MARGINS margins = { 1, 1, 1, 1 };
-
       DwmExtendFrameIntoClientArea(hWnd, &margins);
 
-      SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+      SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_TOPMOST | GetWindowExStyle(hWnd));
+      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
     }
 }
 
@@ -225,21 +212,17 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
     switch(id){
     case 1001:
     {
-      SetWindowAlwaysOnTop(hWnd, !(WS_EX_TOPMOST & GetWindowExStyle(hWnd)));
+      LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+      lpsd->fTrackCursor = !lpsd->fTrackCursor;
+
       break;
     }
     case 1002:
     {
-      LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
-      lpsd->fTopMostForce = lpsd->fTrackCursor = !lpsd->fTrackCursor;
-      break;
-    }
-    case 1003:
-    {
       mag_ShowHelpMenu(hWnd, 0, 0);
       break;
     }
-    case 1004:
+    case 1003:
     {
       DestroyWindow(hWnd);
       break;
@@ -287,25 +270,25 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 
     UNREFERENCED_PARAMETER(idEvent);
 
-    if (lpsd->fTrackCursor)
+    if (!InMenu())
     {
-      POINT pt;
-      
-      if (GetCursorPos(&pt))
+      if (lpsd->fTrackCursor)
       {
-        pt.x -= 0.5f * RECTWIDTH(lpsd->rc);
-        pt.y -= 0.5f * RECTHEIGHT(lpsd->rc);
+        POINT pt;
+      
+        if (GetCursorPos(&pt))
+        {
+          pt.x -= 0.5f * RECTWIDTH(lpsd->rc);
+          pt.y -= 0.5f * RECTHEIGHT(lpsd->rc);
 
-        SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_ASYNCWINDOWPOS);
+          SetWindowPos(hWnd, 0, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+        }
       }
-    }
 
-    if (lpsd->fTopMostForce)
-    {
       SetWindowAlwaysOnTop(hWnd, TRUE);
-    }
 
-    renderRender(hWnd);
+      renderRender(hWnd);
+    }
 }
 
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
@@ -326,16 +309,6 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
     }
 }
 
-void mag_OnEnterSizeMove(HWND hWnd)
-{
-    SetTimer(hWnd, 0, USER_TIMER_MINIMUM, NULL);
-}
-
-void mag_OnExitSizeMove(HWND hWnd)
-{
-    KillTimer(hWnd, 0);
-}
-
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
@@ -353,8 +326,6 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_KEYUP,         mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,         mag_OnTimer);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,    mag_OnMouseWheel);
-    //HANDLE_MSG(hWnd,  WM_ENTERSIZEMOVE, mag_OnEnterSizeMove);
-    //HANDLE_MSG(hWnd,  WM_EXITSIZEMOVE,  mag_OnExitSizeMove);
     FORWARD_MSG(hWnd, message,          DefWindowProc);
     }
 }
@@ -363,7 +334,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
 {
     WNDCLASSEX wcex = { sizeof(wcex) };
 
-    wcex.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
+    wcex.style = CS_OWNDC | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
     wcex.lpfnWndProc = mag_WndProc;
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
@@ -386,14 +357,16 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
     HWND hWnd;
 
     hWnd = CreateWindowEx(
-      WS_EX_OVERLAPPEDWINDOW | WS_EX_NOREDIRECTIONBITMAP,
+      WS_EX_TRANSPARENT | WS_EX_DLGMODALFRAME,
       (LPTSTR)(atm = mag_RegisterClassEx(hInstance)),
       TEXT("magWindow"),
       WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT,
+      //CW_USEDEFAULT,
       0,
-      CW_USEDEFAULT,
       0,
+      //CW_USEDEFAULT,
+      100,
+      100,
       NULL,
       NULL,
       hInstance,
@@ -404,10 +377,13 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
     }
 
+    SetParent(hWnd, GetDesktopWindow());
+
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
     renderInit(hWnd);
+    renderCreateResources(hWnd);
 
     return TRUE;
 }

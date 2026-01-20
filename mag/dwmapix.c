@@ -1,5 +1,6 @@
 #include "dwmapix.h"
 #include "cdcomp.h"
+#include "render.h"
 //#include "cd2d.h"
 
 #include <Unknwn.h>
@@ -243,17 +244,20 @@ BOOL DwmUpdateVisual(HWND hWnd)
 {
     RECT rc;
     POINT pt = { 0, 0 };
-    GetClientRect(hWnd, &rc);
+    GetWindowRect(hWnd, &rc);
     GetCursorPos(&pt);
     HRESULT hr;
-    RECT monitorSize = { 0, 0, 3440, 1440 };
+    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    gdiGetDisplayInfo(&lpsd->di);
+    RECT monitorSize = { lpsd->di.rc.left, lpsd->di.rc.top, lpsd->di.rc.right, lpsd->di.rc.bottom };
     //RECT monitorSize = { pt.x - 128, pt.y - 128, pt.x + 128, pt.y + 128 };
     SIZE targetSize = { RECTWIDTH(rc), RECTHEIGHT(rc) };
     //SIZE targetSize = { 256, 256 };
     HWND hwndTest = (HWND)0x1; //Exclude from the list what you want to exclude
-    HWND* includeArray = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HWND));
+    //HWND* includeArray = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HWND));
     HWND* excludeArray = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HWND));
-    excludeArray[0] = hwndTest;
+    excludeArray[0] = hWnd;
 
     hr = lDwmpUpdateSharedMultiWindowVisual(hThumbVirtualDesktop, NULL, 0,
       //excludeArray, 1,
@@ -269,6 +273,7 @@ BOOL DwmBindVisual(HWND hWnd)
     HRESULT hr;
 
     hr = IDCompositionDesktopDevice_CreateTargetForHwnd(pDCompositionDesktopDevice, hWnd, FALSE, &pDCompositionTarget);
+    //hr = IDCompositionDesktopDevice_CreateTargetForHwnd(pDCompositionDesktopDevice, hWnd, TRUE, &pDCompositionTarget);
     assert(SUCCEEDED(hr));
 
     hr = IDCompositionTarget_SetRoot(pDCompositionTarget, (IDCompositionVisual*)pVirtualDesktopVisual);

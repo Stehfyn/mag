@@ -30,6 +30,12 @@
     <ClCompile Include="d3dkmtx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="render.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="winuserx.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -48,6 +54,18 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="d3dkmtx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cd2d.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cdcomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="render.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="winuserx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
