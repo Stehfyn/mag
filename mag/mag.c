@@ -31,17 +31,18 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
     LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
     
-    HMENU hPopupMenu = CreatePopupMenu();
+    //HMENU hMenu = CreatePopupMenu();
+    HMENU hMenu = LoadPopupMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU1));
 
-    SetWindowDisplayAffinity(hPopupMenu, WDA_EXCLUDEFROMCAPTURE);
+    //SetWindowDisplayAffinity(hMenu, WDA_EXCLUDEFROMCAPTURE);
 
-    AppendMenu(hPopupMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Follow Mouse"));
-    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Help"));
-    AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1003, _T("Exit"));
+    //AppendMenu(hMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Follow Mouse"));
+    //AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Help"));
+    //AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, 1003, _T("Exit"));
 
-    TrackPopupMenuEx(hPopupMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
+    TrackPopupMenuEx(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
 
-    DestroyMenu(hPopupMenu);
+    DestroyMenu(hMenu);
 }
 
 void mag_ShowHelpMenu(HWND hWnd, int x, int y)
@@ -62,9 +63,10 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y)
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
     UNREFERENCED_PARAMETER(lpCreateStruct);
-
+    renderInit(hWnd);
+    renderCreateResources(hWnd);
     SetTimer(hWnd, 1, USER_TIMER_MINIMUM, NULL);
-    SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
+    //SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
     DwmEnableWindowComposition(hWnd, TRUE);
 
     SetCurrentProcessEfficiencyQoS();
@@ -210,19 +212,18 @@ void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHi
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
 {
     switch(id){
-    case 1001:
+    case ID_CONTEXTMENU_FOCUS:
     {
       LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
       lpsd->fTrackCursor = !lpsd->fTrackCursor;
-
       break;
     }
-    case 1002:
+    case ID_CONTEXTMENU_HELP:
     {
       mag_ShowHelpMenu(hWnd, 0, 0);
       break;
     }
-    case 1003:
+    case ID_CONTEXTMENU_CLOSE:
     {
       DestroyWindow(hWnd);
       break;
@@ -281,13 +282,22 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
           pt.x -= 0.5f * RECTWIDTH(lpsd->rc);
           pt.y -= 0.5f * RECTHEIGHT(lpsd->rc);
 
-          SetWindowPos(hWnd, 0, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+          SetWindowPos(hWnd, 0, pt.x, pt.y, 0, 0, 
+            SWP_NOSIZE | SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
         }
       }
 
       SetWindowAlwaysOnTop(hWnd, TRUE);
 
-      renderRender(hWnd);
+      {
+        DwmSetWindowAttribute(
+          hWnd,
+          DWMWA_EXCLUDED_FROM_PEEK,
+          &(BOOL){ TRUE },
+          sizeof(BOOL));
+
+        renderRender(hWnd);
+      }
     }
 }
 
@@ -357,16 +367,17 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
     HWND hWnd;
 
     hWnd = CreateWindowEx(
-      WS_EX_TRANSPARENT | WS_EX_DLGMODALFRAME,
+      WS_EX_TRANSPARENT | 
+      WS_EX_DLGMODALFRAME,
       (LPTSTR)(atm = mag_RegisterClassEx(hInstance)),
       TEXT("magWindow"),
       WS_OVERLAPPEDWINDOW,
-      //CW_USEDEFAULT,
+      CW_USEDEFAULT,
+      //0,
       0,
+      CW_USEDEFAULT,
       0,
-      //CW_USEDEFAULT,
-      100,
-      100,
+      //100,
       NULL,
       NULL,
       hInstance,
@@ -381,9 +392,6 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
-
-    renderInit(hWnd);
-    renderCreateResources(hWnd);
 
     return TRUE;
 }

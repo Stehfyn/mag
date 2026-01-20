@@ -40,7 +40,7 @@ void render_wglInit(HWND hWnd)
       WGL_SWAP_METHOD_ARB,WGL_SWAP_EXCHANGE_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
-      WGL_SAMPLES_ARB, 8,
+      WGL_SAMPLES_ARB, 4,
       0
     };
 
@@ -60,7 +60,7 @@ void render_wglInit(HWND hWnd)
     render_wglCreateResources(hWnd);
     render_gdiCreateResources(hWnd);
 
-    //wglSwapIntervalEXT(0);
+    wglSwapIntervalEXT(0);
 }
 
 void render_wglCreateResources(HWND hWnd)

@@ -9,3 +9,5 @@ BOOL SetWindowOwner(HWND hWnd, HWND hWndOwner);
 BOOL SetCurrentProcessEfficiencyQoS(void);
 
 BOOL InMenu(void);
+
+HMENU LoadPopupMenu(HINSTANCE hInstance, LPCTSTR lpMenuName);

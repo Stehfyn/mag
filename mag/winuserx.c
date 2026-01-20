@@ -53,3 +53,16 @@ BOOL InMenu(void)
 
     return FALSE;
 }
+
+HMENU LoadPopupMenu(HINSTANCE hInstance, LPCTSTR lpMenuName)
+{
+    HMENU hMenu;
+    HMENU hSubMenu = NULL;
+
+    if (hMenu = LoadMenu(hInstance, lpMenuName))
+    {
+        hSubMenu = GetSubMenu(hMenu, 0);
+    }
+
+    return hSubMenu;
+}
