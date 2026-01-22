@@ -24,6 +24,7 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
+void mag_OnSize(HWND hWnd, UINT state, int cx, int cy);
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
@@ -62,16 +63,20 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y)
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
+    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
     renderInit(hWnd);
     renderCreateResources(hWnd);
 
+    GetWindowRect(hWnd, &lpsd->rc);
+
     SetTimer(hWnd, 1, USER_TIMER_MINIMUM, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
-    SetCurrentProcessEfficiencyQoS();
-
     DwmEnableWindowComposition(hWnd, TRUE);
+
+    SetCurrentProcessEfficiencyQoS();
 
     return TRUE;
 }
@@ -99,7 +104,7 @@ void mag_OnActivate(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized)
 void mag_OnPaint(HWND hWnd)
 {
     PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hWnd, &ps);
+    BeginPaint(hWnd, &ps);
     EndPaint(hWnd, &ps);
 }
 
@@ -313,24 +318,34 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
     }
 }
 
+void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
+{
+    UNREFERENCED_PARAMETER(state);
+    UNREFERENCED_PARAMETER(cx);
+    UNREFERENCED_PARAMETER(cy);
+
+    renderResizeCapture(hWnd);
+}
+
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
-    HANDLE_MSG(hWnd,  WM_CREATE,        mag_OnCreate);
-    HANDLE_MSG(hWnd,  WM_DESTROY,       mag_OnDestroy);
-    HANDLE_MSG(hWnd,  WM_ACTIVATE,      mag_OnActivate);
-    HANDLE_MSG(hWnd,  WM_PAINT,         mag_OnPaint);
-    HANDLE_MSG(hWnd,  WM_ERASEBKGND,    mag_OnEraseBkgnd);
-    HANDLE_MSG(hWnd,  WM_NCCREATE,      mag_OnNCCreate);
-    HANDLE_MSG(hWnd,  WM_NCCALCSIZE,    mag_OnNCCalcSize);
-    HANDLE_MSG(hWnd,  WM_NCHITTEST,     mag_OnNCHittest);
-    HANDLE_MSG(hWnd,  WM_NCACTIVATE,    mag_OnNCActivate);
-    HANDLE_MSG(hWnd,  WM_NCRBUTTONDOWN, mag_OnNCRButtonDown);
-    HANDLE_MSG(hWnd,  WM_COMMAND,       mag_OnCommand);
-    HANDLE_MSG(hWnd,  WM_KEYUP,         mag_OnKeyUp);
-    HANDLE_MSG(hWnd,  WM_TIMER,         mag_OnTimer);
-    HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,    mag_OnMouseWheel);
-    FORWARD_MSG(hWnd, message,          DefWindowProc);
+    HANDLE_MSG(hWnd,  WM_CREATE,            mag_OnCreate);
+    HANDLE_MSG(hWnd,  WM_DESTROY,           mag_OnDestroy);
+    HANDLE_MSG(hWnd,  WM_ACTIVATE,          mag_OnActivate);
+    HANDLE_MSG(hWnd,  WM_PAINT,             mag_OnPaint);
+    HANDLE_MSG(hWnd,  WM_ERASEBKGND,        mag_OnEraseBkgnd);
+    HANDLE_MSG(hWnd,  WM_NCCREATE,          mag_OnNCCreate);
+    HANDLE_MSG(hWnd,  WM_NCCALCSIZE,        mag_OnNCCalcSize);
+    HANDLE_MSG(hWnd,  WM_NCHITTEST,         mag_OnNCHittest);
+    HANDLE_MSG(hWnd,  WM_NCACTIVATE,        mag_OnNCActivate);
+    HANDLE_MSG(hWnd,  WM_NCRBUTTONDOWN,     mag_OnNCRButtonDown);
+    HANDLE_MSG(hWnd,  WM_COMMAND,           mag_OnCommand);
+    HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
+    HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
+    HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
+    HANDLE_MSG(hWnd,  WM_SIZE,              mag_OnSize);
+    FORWARD_MSG(hWnd, message,              DefWindowProc);
     }
 }
 
@@ -386,6 +401,6 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
-
+	
     return TRUE;
 }

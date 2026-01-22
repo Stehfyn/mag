@@ -165,3 +165,26 @@ BOOL gdiGetDisplayInfo(LPDISPLAYINFO lpdi)
 {
     return EnumDisplayMonitors(NULL, NULL, gdi_GetDisplayInfo, (LPARAM)lpdi);
 }
+
+int gdiCheckOcclusionStatus(HWND hwnd)
+{
+    HDC hdc;
+    RECT rc, rcClient;
+    int iType;
+
+    hdc = GetDC(hwnd);
+    iType = GetClipBox(hdc, &rc);
+
+    ReleaseDC(hwnd, hdc);
+
+    if (iType == NULLREGION)
+        return OBS_COMPLETELYCOVERED;
+    if (iType == COMPLEXREGION)
+        return OBS_PARTIALLYVISIBLE;
+
+    GetClientRect(hwnd, &rcClient);
+    if (EqualRect(&rc, &rcClient))
+        return OBS_COMPLETELYVISIBLE;
+
+    return OBS_PARTIALLYVISIBLE;
+}
