@@ -397,7 +397,7 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
     }
 
-    SetParent(hWnd, GetDesktopWindow());
+    //SetParent(hWnd, GetDesktopWindow());
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
