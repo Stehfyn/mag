@@ -4,8 +4,9 @@
 
 #include <gl/GL.h>
 
-#define DIM (256)
 #define CHANNELS (4)
+#define BITS_PER_PIXEL (CHANNELS << 3) // 8 bits = 2^3 
+#define SURFACE_BYTES(rc) (CHANNELS * RECTWIDTH((rc)) * RECTHEIGHT((rc)))
 
 typedef struct SHAREDWGLDATA
 {
@@ -20,18 +21,20 @@ typedef struct SHAREDWGLDATA
   HDC              hCaptureDC;
   HDC              hDesktopDC;
   HBITMAP          hBitmapBg;
+  HBITMAP          hBitmapOld;
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
-  GLsizei          glScreenWidth;
-  GLsizei          glScreenHeight;
   GLuint           glScreenTexture;
-  GLubyte          glScreenData[DIM*DIM*CHANNELS];
+  //GLubyte*         glScreenData;
+  GLubyte          glScreenData[3840*2160*4];
 
 } SHAREDWGLDATA, *LPSHAREDWGLDATA;
 
 void renderInit(HWND hWnd);
 
 void renderCreateResources(HWND hWnd);
+
+void renderResizeCapture(HWND hWnd);
 
 void renderRender(HWND hWnd);
 

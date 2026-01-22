@@ -58,3 +58,9 @@ void wglInit(void);
 int wglFindPixelFormat(HDC hDC, const int* piAttribIList, const FLOAT* pfAttribFList);
 
 BOOL gdiGetDisplayInfo(LPDISPLAYINFO lpdi);
+
+#define OBS_COMPLETELYCOVERED       0
+#define OBS_PARTIALLYVISIBLE        1
+#define OBS_COMPLETELYVISIBLE       2
+
+int gdiCheckOcclusionStatus(HWND hwnd);
