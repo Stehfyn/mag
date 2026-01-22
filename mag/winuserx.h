@@ -11,3 +11,5 @@ BOOL SetCurrentProcessEfficiencyQoS(void);
 BOOL InMenu(void);
 
 HMENU LoadPopupMenu(HINSTANCE hInstance, LPCTSTR lpMenuName);
+
+void ForceTimerMessagesToBeCreatedIfNecessary(LPMSG lpMsg);

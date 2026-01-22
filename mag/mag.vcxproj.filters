@@ -56,12 +56,6 @@
     <ClInclude Include="d3dkmtx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="cd2d.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="cdcomp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="render.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -47,19 +47,23 @@ void render_wglInit(HWND hWnd)
     };
 
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    int pf;
 
     wglInit();
 
     lpsd->hDC = GetDC(hWnd);
-    pf = wglFindPixelFormat(lpsd->hDC, iAttribs, NULL);
-
-    SetPixelFormat(lpsd->hDC, pf, &pfd);
+    SetPixelFormat(lpsd->hDC, wglFindPixelFormat(lpsd->hDC, iAttribs, NULL), &pfd);
     lpsd->hRC = wglCreateContextAttribsARB(lpsd->hDC, NULL, NULL);
     wglMakeCurrent(lpsd->hDC, lpsd->hRC);
 
     render_wglCreateResources(hWnd);
     render_gdiCreateResources(hWnd);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
 
     wglSwapIntervalEXT(0);
 }
@@ -89,7 +93,7 @@ void render_gdiCreateResources(HWND hWnd)
     lpsd->hCaptureDC = CreateCompatibleDC(lpsd->hDesktopDC);
     lpsd->hBitmapBg = CreateCompatibleBitmap(lpsd->hDesktopDC, RECTWIDTH(lpsd->di.rc), RECTHEIGHT(lpsd->di.rc));
     lpsd->hBitmapOld = SelectBitmap(lpsd->hCaptureDC, lpsd->hBitmapBg);
-
+    //UINT  un =SetBoundsRect(lpsd->hCaptureDC, NULL, DCB_ENABLE);
     lpsd->bi.biSize = sizeof(lpsd->bi);
     lpsd->bi.biWidth = RECTWIDTH(lpsd->rc);
     lpsd->bi.biHeight = RECTHEIGHT(lpsd->rc);
@@ -124,11 +128,9 @@ void render_gdiResizeSurface(HWND hWnd)
     //DeleteBitmap(SelectBitmap(lpsd->hCaptureDC, lpsd->hBitmapOld));
     //lpsd->hBitmapBg = CreateCompatibleBitmap(lpsd->hDesktopDC, RECTWIDTH(lpsd->di.rc), RECTHEIGHT(lpsd->di.rc));
     //lpsd->hBitmapOld = SelectBitmap(lpsd->hCaptureDC, lpsd->hBitmapBg);
+    GetClientRect(hWnd, &lpsd->rc);
     lpsd->bi.biWidth = RECTWIDTH(lpsd->rc);
     lpsd->bi.biHeight = RECTHEIGHT(lpsd->rc);
-
-    //HeapFree(GetProcessHeap(), 0, lpsd->glScreenData);
-    //lpsd->glScreenData = HeapAlloc(GetProcessHeap(), 0, SURFACE_BYTES(lpsd->rc));
 }
 
 void render_wglRender(HWND hWnd)
@@ -142,17 +144,7 @@ void render_wglRender(HWND hWnd)
       lpsd->cfClearColor[3]);
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    glDisable(GL_BLEND);
-    glEnable(GL_TEXTURE_2D);
-
-    glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f);
@@ -164,12 +156,9 @@ void render_wglRender(HWND hWnd)
     glTexCoord2f(0.0f, 1.0f);
     glVertex2f(-lpsd->fTexScaler, lpsd->fTexScaler);
     glEnd();
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDisable(GL_TEXTURE_2D);
-
-    D3DKMTWaitForVerticalBlank(hWnd);
-
+    glFlush();
     SwapBuffers(lpsd->hDC);
+    glFinish();
 }
 
 void render_gdiCaptureScreen(HWND hWnd)
@@ -190,6 +179,7 @@ void render_gdiCaptureScreen(HWND hWnd)
         SRCCOPY | CAPTUREBLT);
 
       GetDIBits(lpsd->hCaptureDC, lpsd->hBitmapBg, 0, lpsd->bi.biHeight, lpsd->glScreenData, (BITMAPINFO*)&lpsd->bi, DIB_RGB_COLORS);
+      //GdiFlush();
     }
 }
 

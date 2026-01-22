@@ -72,7 +72,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 
     GetWindowRect(hWnd, &lpsd->rc);
 
-    SetTimer(hWnd, 1, USER_TIMER_MINIMUM, NULL);
+    SetTimer(hWnd, 1, 13, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
     DwmEnableWindowComposition(hWnd, TRUE);
 
@@ -290,7 +290,7 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
           pt.y -= 0.5f * RECTHEIGHT(lpsd->rc);
 
           SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0,
-            SWP_NOSIZE | SWP_ASYNCWINDOWPOS);// | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+            SWP_NOSIZE| SWP_ASYNCWINDOWPOS);// | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
         }
       }
 
@@ -332,6 +332,7 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     switch (message) {
     HANDLE_MSG(hWnd,  WM_CREATE,            mag_OnCreate);
     HANDLE_MSG(hWnd,  WM_DESTROY,           mag_OnDestroy);
+    HANDLE_MSG(hWnd,  WM_SIZE,              mag_OnSize);
     HANDLE_MSG(hWnd,  WM_ACTIVATE,          mag_OnActivate);
     HANDLE_MSG(hWnd,  WM_PAINT,             mag_OnPaint);
     HANDLE_MSG(hWnd,  WM_ERASEBKGND,        mag_OnEraseBkgnd);
@@ -344,7 +345,6 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
-    HANDLE_MSG(hWnd,  WM_SIZE,              mag_OnSize);
     FORWARD_MSG(hWnd, message,              DefWindowProc);
     }
 }
@@ -353,7 +353,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
 {
     WNDCLASSEX wcex = { sizeof(wcex) };
 
-    wcex.style = CS_OWNDC | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
+    wcex.style = CS_OWNDC | CS_SAVEBITS | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
     wcex.lpfnWndProc = mag_WndProc;
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
@@ -376,10 +376,11 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
     HWND hWnd;
 
     hWnd = CreateWindowEx(
-      WS_EX_TRANSPARENT | 
+      WS_EX_TRANSPARENT | WS_EX_PALETTEWINDOW | WS_EX_CONTEXTHELP |
       WS_EX_DLGMODALFRAME,
       (LPTSTR)(atm = mag_RegisterClassEx(hInstance)),
       TEXT("magWindow"),
+      //WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_BORDER,
       WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT,
       //0,
@@ -397,10 +398,8 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
     }
 
-    //SetParent(hWnd, GetDesktopWindow());
-
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
-	
+    //SetWindowLongPtr(hWnd, GWL_EXSTYLE, (WS_EX_COMPOSITED|WS_EX_APPWINDOW) | GetWindowExStyle(hWnd));
     return TRUE;
 }

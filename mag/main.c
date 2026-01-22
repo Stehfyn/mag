@@ -18,11 +18,11 @@ _tWinMain(
       return FALSE;
     }
 
-    while (GetMessage(&msg, NULL, 0, 0))
+    while (PumpMessageQueue(NULL))
     {
-      TranslateMessage(&msg);
-      DispatchMessage(&msg);
+      if(!GetInputState())
+        SleepEx(1, FALSE);
     }
 
-    return (int)msg.wParam;
+    return 0;
 }

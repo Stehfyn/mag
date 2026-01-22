@@ -66,3 +66,24 @@ HMENU LoadPopupMenu(HINSTANCE hInstance, LPCTSTR lpMenuName)
 
     return hSubMenu;
 }
+
+void ForceTimerMessagesToBeCreatedIfNecessary(LPMSG lpMsg)
+{
+    PeekMessage(lpMsg, NULL, WM_TIMER, WM_TIMER, PM_NOREMOVE);
+}
+
+BOOL PumpMessageQueue(HWND hwndPump)
+{
+    MSG  msg;
+    BOOL fQuit = FALSE;
+    SecureZeroMemory(&msg, sizeof(msg));
+
+    ForceTimerMessagesToBeCreatedIfNecessary(&msg);
+    while (PeekMessage(&msg, hwndPump, 0, 0, PM_REMOVE | PM_NOYIELD))
+    {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+      fQuit |= (msg.message == WM_QUIT);
+    }
+    return !fQuit;
+}
