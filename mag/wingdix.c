@@ -15,7 +15,7 @@ ATOM wgl_RegisterClass(void)
 
     wc.hInstance     = GetModuleHandle(NULL);
     wc.lpfnWndProc   = DefWindowProc;
-    wc.lpszClassName = _T("wglDummyWindow");
+    wc.lpszClassName = TEXT("wglDummyWindow");
 
     return RegisterClass(&wc);
 }

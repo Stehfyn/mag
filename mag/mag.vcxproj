@@ -144,8 +144,6 @@
     <ClCompile Include="winuserx.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="cd2d.h" />
-    <ClInclude Include="cdcomp.h" />
     <ClInclude Include="d3dkmtx.h" />
     <ClInclude Include="dwmapix.h" />
     <ClInclude Include="framework.h" />
