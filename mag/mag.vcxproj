@@ -99,7 +99,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
+      <EnableVectorLength>VectorLength512</EnableVectorLength>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -140,7 +140,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
+      <EnableVectorLength>VectorLength512</EnableVectorLength>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>

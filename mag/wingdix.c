@@ -7,7 +7,7 @@ BOOL wgl_SelectPixelFormat(HDC hDC);
 void wgl_Load(void);
 void wgl_GetProc(HMODULE hModule, const char* pszProc, PROC* pProc);
 
-BOOL __stdcall gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
+BOOL CALLBACK gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
 
 ATOM wgl_RegisterClass(void)
 {
@@ -76,7 +76,7 @@ void wgl_GetProc(HMODULE hModule, const char* pszProc, PROC* pProc)
     }
 }
 
-BOOL gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam)
+BOOL CALLBACK gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(hDC);
 

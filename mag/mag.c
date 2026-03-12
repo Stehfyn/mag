@@ -3,9 +3,26 @@
 
 #pragma comment(lib, "htmlhelp")
 #pragma comment(lib, "Shlwapi")
+#pragma comment(lib, "ntdll")
 
 #define FORWARD_MSG(hwnd, message, fn)    \
     default: return (fn)((hwnd), (message), (wParam), (lParam))
+
+/* void Cls_OnEnterSizeMove(HWND hwnd) */
+#define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd)), 0L)
+
+/* void Cls_OnExitSizeMove(HWND hwnd */
+#define HANDLE_WM_EXITSIZEMOVE(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd)), 0L)
+
+/* void Cls_OnExitSizeMove(HWND hwnd */
+#define HANDLE_WM_ENTERMENULOOP(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (BOOL)(wParam)), 0L)
+
+/* void Cls_OnEnterSizeMove(HWND hwnd) */
+#define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (BOOL)(wParam)), 0L)
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
@@ -25,6 +42,12 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy);
+void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu);
+void mag_OnExitMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu);
+void mag_OnEnterSizeMove(HWND hWnd);
+void mag_OnExitSizeMove(HWND hWnd);
+void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos);
+
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
@@ -67,16 +90,16 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
+    SetCurrentProcessEfficiencyQoS();
+
     renderInit(hWnd);
     renderCreateResources(hWnd);
 
     GetWindowRect(hWnd, &lpsd->rc);
 
-    SetTimer(hWnd, 1, 13, NULL);
+    //SetTimer(hWnd, 1, 13, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
     DwmEnableWindowComposition(hWnd, TRUE);
-
-    SetCurrentProcessEfficiencyQoS();
 
     return TRUE;
 }
@@ -148,6 +171,8 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
           return 0;
         }
       }
+
+      mag_OnTimer(hWnd, 0);
       
       lpcsp->rgrc[0].bottom += 1;
 
@@ -223,6 +248,14 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
     {
       LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
       lpsd->fTrackCursor = !lpsd->fTrackCursor;
+
+      if (lpsd->fTrackCursor)
+      {
+        DWORD dwExStyle = GetWindowExStyle(hWnd);
+        dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+        SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
+        SetActiveWindow(GetDesktopWindow());
+      }
       break;
     }
     case 1002:
@@ -283,6 +316,7 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
       if (lpsd->fTrackCursor)
       {
         POINT pt;
+        DWORD dwExStyle = GetWindowExStyle(hWnd);
       
         if (GetCursorPos(&pt))
         {
@@ -292,6 +326,9 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
           SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0,
             SWP_NOSIZE| SWP_ASYNCWINDOWPOS);// | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
         }
+
+        dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_LAYERED;// | WS_EX_COMPOSITED;
+        SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
       }
 
       SetWindowAlwaysOnTop(hWnd, TRUE);
@@ -327,6 +364,40 @@ void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
     renderResizeCapture(hWnd);
 }
 
+void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu)
+{
+    UNREFERENCED_PARAMETER(fIsTrackPopupMenu);
+
+    SetTimer(hWnd, 0x69, USER_TIMER_MINIMUM, 0);
+}
+
+void mag_OnExitMenuLoop(HWND hWnd,BOOL fIsShortcutMenu)
+{
+    UNREFERENCED_PARAMETER(fIsShortcutMenu);
+
+    KillTimer(hWnd, 0x69);
+}
+
+void mag_OnEnterSizeMove(HWND hWnd)
+{
+    SetTimer(hWnd, 0x69, USER_TIMER_MINIMUM, 0);
+}
+
+void mag_OnExitSizeMove(HWND hWnd)
+{
+    KillTimer(hWnd, 0x69);
+}
+
+void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
+{
+    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    
+    if (lpsd->fTrackCursor)
+    {
+      mag_OnTimer(hWnd, 0);
+    }
+}
+
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
@@ -345,6 +416,11 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
+    HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
+    HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);
+    HANDLE_MSG(hWnd,  WM_ENTERSIZEMOVE,     mag_OnEnterSizeMove);
+    HANDLE_MSG(hWnd,  WM_EXITSIZEMOVE,      mag_OnExitSizeMove);
+    HANDLE_MSG(hWnd,  WM_WINDOWPOSCHANGED,  mag_OnWindowPosChanged);
     FORWARD_MSG(hWnd, message,              DefWindowProc);
     }
 }
@@ -376,7 +452,9 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
     HWND hWnd;
 
     hWnd = CreateWindowEx(
-      WS_EX_TRANSPARENT | WS_EX_PALETTEWINDOW | WS_EX_CONTEXTHELP |
+      WS_EX_TRANSPARENT | 
+      WS_EX_PALETTEWINDOW |
+      WS_EX_CONTEXTHELP |
       WS_EX_DLGMODALFRAME,
       (LPTSTR)(atm = mag_RegisterClassEx(hInstance)),
       TEXT("magWindow"),
@@ -386,8 +464,8 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
       //0,
       0,
       CW_USEDEFAULT,
-      0,
-      //100,
+      //0,
+      100,
       NULL,
       NULL,
       hInstance,

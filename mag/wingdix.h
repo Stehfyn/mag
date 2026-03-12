@@ -20,6 +20,7 @@
 #define WGL_ALPHA_BITS_ARB                0x201B
 #define WGL_DEPTH_BITS_ARB                0x2022
 #define WGL_SWAP_EXCHANGE_ARB             0x2028
+#define WGL_SWAP_COPY_ARB                 0x2029
 #define WGL_TYPE_RGBA_ARB                 0x202B
 #define WGL_SAMPLE_BUFFERS_ARB            0x2041
 #define WGL_SAMPLES_ARB                   0x2042

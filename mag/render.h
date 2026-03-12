@@ -19,12 +19,16 @@ typedef struct SHAREDWGLDATA
   HGLRC            hRC;
   FLOAT            fScale;
   HDC              hCaptureDC;
+  HDC              hUIDC;
   HDC              hDesktopDC;
   HBITMAP          hBitmapBg;
+  HBITMAP          hBitmapBg2;
   HBITMAP          hBitmapOld;
+  HBITMAP          hBitmapOld2;
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;
+  GLuint           glTexUI;
   //GLubyte*         glScreenData;
   GLubyte          glScreenData[3840*2160*4];
 

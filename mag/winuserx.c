@@ -2,18 +2,7 @@
 
 BOOL SetWindowAlwaysOnTop(HWND hWnd, BOOL fEnable)
 {
-    DWORD dwExStyle = GetWindowExStyle(hWnd);
     HWND hWndInsertAfter = fEnable ? HWND_TOPMOST : HWND_NOTOPMOST;
-
-    if (fEnable)
-    {
-        dwExStyle |= WS_EX_TOPMOST;
-    }
-    else
-    {
-        dwExStyle &= ~WS_EX_TOPMOST;
-    }
-
     return SetWindowPos(hWnd, hWndInsertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 }
 
@@ -35,7 +24,8 @@ BOOL SetCurrentProcessEfficiencyQoS(void)
     state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
     state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
     state.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-
+    SetThreadPriorityBoost(GetCurrentThread(), FALSE);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
     SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
 
     return SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state));
@@ -78,12 +68,24 @@ BOOL PumpMessageQueue(HWND hwndPump)
     BOOL fQuit = FALSE;
     SecureZeroMemory(&msg, sizeof(msg));
 
-    ForceTimerMessagesToBeCreatedIfNecessary(&msg);
-    while (PeekMessage(&msg, hwndPump, 0, 0, PM_REMOVE | PM_NOYIELD))
+    if (hwndPump && IsWindow(hwndPump))
+    {
+      while (PeekMessage(&msg, hwndPump, 0, 0, PM_REMOVE | PM_NOYIELD))
+      {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+
+        fQuit |= WM_QUIT == msg.message;
+      }
+
+      fQuit |= !IsWindow(hwndPump);
+    }
+
+    while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE | PM_NOYIELD))
     {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
-      fQuit |= (msg.message == WM_QUIT);
     }
+    
     return !fQuit;
 }
