@@ -30,6 +30,9 @@
     <ClCompile Include="d3dkmtx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="help.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="render.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -62,6 +65,9 @@
     <ClInclude Include="winuserx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="help.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -70,5 +76,28 @@
     <ResourceCompile Include="Resource.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="help\help.css">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\index.htm">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\controls.htm">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\context_menu.htm">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\mag.hhc">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\mag.hhk">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="help\mag.hhp">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

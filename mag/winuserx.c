@@ -2,18 +2,7 @@
 
 BOOL SetWindowAlwaysOnTop(HWND hWnd, BOOL fEnable)
 {
-    DWORD dwExStyle = GetWindowExStyle(hWnd);
     HWND hWndInsertAfter = fEnable ? HWND_TOPMOST : HWND_NOTOPMOST;
-
-    if (fEnable)
-    {
-        dwExStyle |= WS_EX_TOPMOST;
-    }
-    else
-    {
-        dwExStyle &= ~WS_EX_TOPMOST;
-    }
-
     return SetWindowPos(hWnd, hWndInsertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 }
 
@@ -30,14 +19,10 @@ BOOL SetWindowOwner(HWND hWnd, HWND hWndOwner)
 
 BOOL SetCurrentProcessEfficiencyQoS(void)
 {
-    PROCESS_POWER_THROTTLING_STATE state = { 0 };
+    PROCESS_POWER_THROTTLING_STATE state = { PROCESS_POWER_THROTTLING_CURRENT_VERSION };
 
-    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
     state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-    state.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-
-    SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
-
+    state.StateMask = 0;
     return SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state));
 
 }
@@ -78,12 +63,78 @@ BOOL PumpMessageQueue(HWND hwndPump)
     BOOL fQuit = FALSE;
     SecureZeroMemory(&msg, sizeof(msg));
 
-    ForceTimerMessagesToBeCreatedIfNecessary(&msg);
-    while (PeekMessage(&msg, hwndPump, 0, 0, PM_REMOVE | PM_NOYIELD))
+    if (hwndPump && IsWindow(hwndPump))
+    {
+      while (PeekMessage(&msg, hwndPump, 0, 0, PM_REMOVE | PM_NOYIELD))
+      {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+
+        fQuit |= WM_QUIT == msg.message;
+      }
+
+      fQuit |= !IsWindow(hwndPump);
+    }
+
+    while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE | PM_NOYIELD))
     {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
-      fQuit |= (msg.message == WM_QUIT);
     }
+    
     return !fQuit;
+}
+
+
+HANDLE
+UnloadFile(
+    LPTSTR  lpszName,
+    LPCVOID lpBuffer,
+    DWORD   nNumberOfBytesToWrite)
+{
+    HANDLE hFile = CreateFile(lpszName, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+
+    if (INVALID_HANDLE_VALUE != hFile)
+    {
+      DWORD nNumberOfBytesWritten = 0;
+      if (!WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, &nNumberOfBytesWritten, 0))
+      {
+        CloseHandle(hFile);
+        hFile = NULL;
+      }
+    }
+
+    return hFile;
+}
+
+HANDLE
+UnloadResource(
+    HMODULE hModule, 
+    UINT    nResourceId, 
+    LPTSTR  lpszName)
+{
+    HANDLE hOut = NULL;
+    HRSRC  hResourceInfo = FindResource(hModule, MAKEINTRESOURCE(nResourceId), RT_RCDATA);
+
+    if (hResourceInfo)
+    {
+      HGLOBAL hResourceData = LoadResource(hModule, hResourceInfo);
+      if (hResourceData)
+      {
+        LPCVOID lpResourceData = (LPCVOID)LockResource(hResourceData);
+        if (lpResourceData)
+        {
+          DWORD dwResourceSize = SizeofResource(hModule, hResourceInfo);
+          if (dwResourceSize)
+          {
+            hOut = UnloadFile(lpszName, lpResourceData, dwResourceSize);
+          }
+          UnlockResource(hResourceData);
+        }
+        FreeResource(hResourceData);
+      }
+      CloseHandle(hResourceInfo);
+    }
+
+    return hOut;
 }

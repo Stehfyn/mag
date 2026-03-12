@@ -1,0 +1,41 @@
+[OPTIONS]
+Compatibility=1.1 or later
+Compiled file=mag.chm
+Contents file=mag.hhc
+Index file=mag.hhk
+Default Window=Main
+Default topic=index.htm
+Display compile progress=No
+Language=0x409 English (United States)
+Title=MAG Screen Magnifier Help
+
+[WINDOWS]
+Main="MAG Screen Magnifier Help","mag.hhc","mag.hhk","index.htm","index.htm",,,,,0x23520,,0x387e,,,,,,,,0
+
+[FILES]
+help.css
+index.htm
+controls.htm
+context_menu.htm
+source.htm
+source/d3dkmtx_c.htm
+source/d3dkmtx_h.htm
+source/dwmapix_c.htm
+source/dwmapix_h.htm
+source/framework_h.htm
+source/help_c.htm
+source/help_h.htm
+source/mag_c.htm
+source/mag_h.htm
+source/main_c.htm
+source/render_c.htm
+source/render_h.htm
+source/resource_h.htm
+source/Resource_rc.htm
+source/targetver_h.htm
+source/wingdix_c.htm
+source/wingdix_h.htm
+source/winuserx_c.htm
+source/winuserx_h.htm
+
+[INFOTYPES]

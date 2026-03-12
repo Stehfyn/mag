@@ -1,0 +1,107 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<HTML>
+<HEAD>
+<meta name="GENERATOR" content="Microsoft&reg; HTML Help Workshop 4.1">
+<!-- Sitemap 1.0 -->
+</HEAD><BODY>
+<OBJECT type="text/site properties">
+  <param name="Window Styles" value="0x800025">
+  <param name="ImageType" value="Folder">
+</OBJECT>
+<UL>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="MAG Screen Magnifier">
+    <param name="Local" value="index.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Controls &amp; Keyboard Shortcuts">
+    <param name="Local" value="controls.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Context Menu">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Source Code">
+    <param name="Local" value="source.htm">
+  </OBJECT>
+  <UL>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="d3dkmtx.c">
+    <param name="Local" value="source/d3dkmtx_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="d3dkmtx.h">
+    <param name="Local" value="source/d3dkmtx_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="dwmapix.c">
+    <param name="Local" value="source/dwmapix_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="dwmapix.h">
+    <param name="Local" value="source/dwmapix_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="framework.h">
+    <param name="Local" value="source/framework_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="help.c">
+    <param name="Local" value="source/help_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="help.h">
+    <param name="Local" value="source/help_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="mag.c">
+    <param name="Local" value="source/mag_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="mag.h">
+    <param name="Local" value="source/mag_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="main.c">
+    <param name="Local" value="source/main_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="render.c">
+    <param name="Local" value="source/render_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="render.h">
+    <param name="Local" value="source/render_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="resource.h">
+    <param name="Local" value="source/resource_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Resource.rc">
+    <param name="Local" value="source/Resource_rc.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="targetver.h">
+    <param name="Local" value="source/targetver_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="wingdix.c">
+    <param name="Local" value="source/wingdix_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="wingdix.h">
+    <param name="Local" value="source/wingdix_h.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="winuserx.c">
+    <param name="Local" value="source/winuserx_c.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="winuserx.h">
+    <param name="Local" value="source/winuserx_h.htm">
+  </OBJECT>
+  </UL>
+</UL>
+</BODY></HTML>

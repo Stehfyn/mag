@@ -1,13 +1,16 @@
 #include "render.h"
 
+#define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
+
 void render_wglInit(HWND hWnd);
+void render_wglInitPBuffer(HWND hWnd);
 void render_wglCreateResources(HWND hWnd);
 void render_gdiCreateResources(HWND hWnd);
 void render_wglResizeSurface(HWND hWnd);
 void render_gdiResizeSurface(HWND hWnd);
 void render_wglRender(HWND hWnd);
 void render_gdiCaptureScreen(HWND hWnd);
-
+void render_gdiDrawUI(HWND hWnd);
 void render_wglInit(HWND hWnd)
 {
     const PIXELFORMATDESCRIPTOR pfd =
@@ -39,7 +42,7 @@ void render_wglInit(HWND hWnd)
       WGL_COLOR_BITS_ARB, 32,
       WGL_DEPTH_BITS_ARB, 24,
       WGL_ALPHA_BITS_ARB, 8,
-      WGL_SWAP_METHOD_ARB,WGL_SWAP_EXCHANGE_ARB,
+      WGL_SWAP_METHOD_ARB,WGL_SWAP_COPY_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
       WGL_SAMPLES_ARB, 4,
@@ -49,7 +52,6 @@ void render_wglInit(HWND hWnd)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     wglInit();
-
     lpsd->hDC = GetDC(hWnd);
     SetPixelFormat(lpsd->hDC, wglFindPixelFormat(lpsd->hDC, iAttribs, NULL), &pfd);
     lpsd->hRC = wglCreateContextAttribsARB(lpsd->hDC, NULL, NULL);
@@ -63,6 +65,102 @@ void render_wglInit(HWND hWnd)
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glDisable(GL_BLEND);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_TEXTURE_2D);
+
+    wglSwapIntervalEXT(0);
+}
+
+void render_wglInitPBuffer(HWND hWnd)
+{
+    // basic pixel format
+    const PIXELFORMATDESCRIPTOR pfd =
+    {
+      sizeof(PIXELFORMATDESCRIPTOR),
+      1,
+      PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+      PFD_TYPE_RGBA,
+      32,
+      0, 0, 0, 0, 0, 0,
+      8,
+      0,
+      0,
+      0, 0, 0, 0,
+      24,
+      8,
+      0,
+      PFD_MAIN_PLANE,
+      0,
+      0, 0, 0
+    };
+
+    const int iAttribs[] =
+    {
+      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+      WGL_COLOR_BITS_ARB, 32,
+      WGL_DEPTH_BITS_ARB, 24,
+      WGL_ALPHA_BITS_ARB, 8,
+      WGL_SWAP_METHOD_ARB,WGL_SWAP_COPY_ARB,
+      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+      WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
+      WGL_SAMPLES_ARB, 4,
+      0
+    };
+
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    
+    wglInit();
+    lpsd->hDC = GetDC(0);
+
+    int pf = ChoosePixelFormat(lpsd->hDC, &pfd);
+    WGLCHECK(SetPixelFormat(lpsd->hDC, pf, &pfd));
+
+    // dummy GL context
+    HGLRC rc = wglCreateContext(lpsd->hDC);
+    WGLCHECK(wglMakeCurrent(lpsd->hDC, rc));
+
+    // choose pbuffer format
+    int iattribs[] = {
+        WGL_DRAW_TO_PBUFFER_ARB, GL_TRUE,
+        WGL_SUPPORT_OPENGL_ARB,  GL_TRUE,
+        WGL_BIND_TO_TEXTURE_RGBA_ARB, GL_TRUE,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        0
+    };
+
+    int formats[1];
+    UINT count;
+    if (!wglChoosePixelFormatARB(lpsd->hDC, iattribs, NULL, 1, formats, &count))
+      __debugbreak();
+
+    // create pbuffer
+    int pattribs[] = {
+        WGL_TEXTURE_FORMAT_ARB, WGL_TEXTURE_RGBA_ARB,
+        WGL_TEXTURE_TARGET_ARB, WGL_TEXTURE_2D_ARB,
+        0
+    };
+
+    lpsd->pb = wglCreatePbufferARB(lpsd->hDC, formats[0], 256, 256, pattribs);
+    HDC pbdc = wglGetPbufferDCARB(lpsd->pb);
+
+    // render context for pbuffer
+    HGLRC pbrc = wglCreateContext(pbdc);
+    wglMakeCurrent(pbdc, pbrc);
+
+    render_wglCreateResources(hWnd);
+    render_gdiCreateResources(hWnd);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_BLEND);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
 
     wglSwapIntervalEXT(0);
@@ -74,6 +172,15 @@ void render_wglCreateResources(HWND hWnd)
     
     glGenTextures(1, &lpsd->glScreenTexture);
     glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, lpsd->bi.biWidth, lpsd->bi.biHeight, 0, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
+
+    glGenTextures(1, &lpsd->glTexUI);
+    glBindTexture(GL_TEXTURE_2D, lpsd->glTexUI);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -91,8 +198,11 @@ void render_gdiCreateResources(HWND hWnd)
     gdiGetDisplayInfo(&lpsd->di);
     lpsd->hDesktopDC = GetDC(GetDesktopWindow());
     lpsd->hCaptureDC = CreateCompatibleDC(lpsd->hDesktopDC);
+    lpsd->hUIDC = CreateCompatibleDC(lpsd->hDesktopDC);
     lpsd->hBitmapBg = CreateCompatibleBitmap(lpsd->hDesktopDC, RECTWIDTH(lpsd->di.rc), RECTHEIGHT(lpsd->di.rc));
+    lpsd->hBitmapBg2 = CreateCompatibleBitmap(lpsd->hUIDC, RECTWIDTH(lpsd->di.rc), RECTHEIGHT(lpsd->di.rc));
     lpsd->hBitmapOld = SelectBitmap(lpsd->hCaptureDC, lpsd->hBitmapBg);
+    lpsd->hBitmapOld2 = SelectBitmap(lpsd->hUIDC, lpsd->hBitmapBg2);
     //UINT  un =SetBoundsRect(lpsd->hCaptureDC, NULL, DCB_ENABLE);
     lpsd->bi.biSize = sizeof(lpsd->bi);
     lpsd->bi.biWidth = RECTWIDTH(lpsd->rc);
@@ -110,9 +220,18 @@ void render_wglResizeSurface(HWND hWnd)
     
     glBindTexture(GL_TEXTURE_2D, 0);
     glDeleteTextures(1, &lpsd->glScreenTexture);
+    glDeleteTextures(1, &lpsd->glTexUI);
 
     glGenTextures(1, &lpsd->glScreenTexture);
     glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, lpsd->bi.biWidth, lpsd->bi.biHeight, 0, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
+
+    glGenTextures(1, &lpsd->glTexUI);
+    glBindTexture(GL_TEXTURE_2D, lpsd->glTexUI);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -137,14 +256,17 @@ void render_wglRender(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    glClearColor(
-      lpsd->cfClearColor[0],
-      lpsd->cfClearColor[1],
-      lpsd->cfClearColor[2],
-      lpsd->cfClearColor[3]);
-    glClear(GL_COLOR_BUFFER_BIT);
+    //glClearColor(
+    //  lpsd->cfClearColor[0],
+    //  lpsd->cfClearColor[1],
+    //  lpsd->cfClearColor[2],
+    //  lpsd->cfClearColor[3]);
+    //glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
+    glDisable(GL_BLEND);
+
+    glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
+    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f);
@@ -156,7 +278,25 @@ void render_wglRender(HWND hWnd)
     glTexCoord2f(0.0f, 1.0f);
     glVertex2f(-lpsd->fTexScaler, lpsd->fTexScaler);
     glEnd();
-    glFlush();
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    render_gdiDrawUI(hWnd);
+    glBindTexture(GL_TEXTURE_2D, lpsd->glTexUI);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f);
+    glVertex2f(-1.0f, -1.0f);
+    glTexCoord2f(1.0f, 0.0f);
+    glVertex2f(1.0f, -1.0f);
+    glTexCoord2f(1.0f, 1.0f);
+    glVertex2f(1.0f, 1.0f);
+    glTexCoord2f(0.0f, 1.0f);
+    glVertex2f(-1.0f, 1.0f);
+    glEnd();
+
+    //glFlush();
+    SwapBuffers(lpsd->hDC);
     SwapBuffers(lpsd->hDC);
     glFinish();
 }
@@ -179,13 +319,34 @@ void render_gdiCaptureScreen(HWND hWnd)
         SRCCOPY | CAPTUREBLT);
 
       GetDIBits(lpsd->hCaptureDC, lpsd->hBitmapBg, 0, lpsd->bi.biHeight, lpsd->glScreenData, (BITMAPINFO*)&lpsd->bi, DIB_RGB_COLORS);
-      //GdiFlush();
+      GdiFlush();
+    }
+}
+
+void render_gdiDrawUI(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd->hBitmapBg2)
+    {
+      //SetBkColor(lpsd->hUIDC, RGB(0, 0, 0));
+      //RGBQUAD bitmapBits = { 100, 100, 100, 0x7F };
+      //RGBQUAD bitmapBits2 = { 1, 1, 1, 0xFF };
+      ////
+      //StretchDIBits(lpsd->hUIDC, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight,
+      //  0, 0, 1, 1, &bitmapBits2, &lpsd->bi,
+      //  DIB_RGB_COLORS, SRCCOPY);
+      //SetBkMode(lpsd->hUIDC, TRANSPARENT);
+      TextOut(lpsd->hUIDC, 0, 0, TEXT("MAG Screen Magnifier"), 20);
+      GetDIBits(lpsd->hUIDC, lpsd->hBitmapBg2, 0, lpsd->bi.biHeight, lpsd->glScreenData, (BITMAPINFO*)&lpsd->bi, DIB_RGB_COLORS);
+      GdiFlush();
     }
 }
 
 void renderInit(HWND hWnd)
 {
     render_wglInit(hWnd);
+    //render_wglInitPBuffer(hWnd);
 }
 
 void renderCreateResources(HWND hWnd)

@@ -17,16 +17,21 @@ typedef struct SHAREDWGLDATA
   BITMAPINFOHEADER bi;
   HDC              hDC;
   HGLRC            hRC;
+  HPBUFFERARB      pb;
   FLOAT            fScale;
   HDC              hCaptureDC;
+  HDC              hUIDC;
   HDC              hDesktopDC;
   HBITMAP          hBitmapBg;
+  HBITMAP          hBitmapBg2;
   HBITMAP          hBitmapOld;
+  HBITMAP          hBitmapOld2;
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;
+  GLuint           glTexUI;
   //GLubyte*         glScreenData;
-  GLubyte          glScreenData[3840*2160*4];
+  __declspec(align(32)) GLubyte glScreenData[3840*2160*4];
 
 } SHAREDWGLDATA, *LPSHAREDWGLDATA;
 

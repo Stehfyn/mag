@@ -1,0 +1,128 @@
+body {
+    font-family: "Segoe UI", "MS Shell Dlg", Tahoma, sans-serif;
+    font-size: 9pt;
+    margin: 14px 18px;
+    color: #1a1a1a;
+    background-color: #ffffff;
+}
+
+h1 {
+    font-size: 13pt;
+    font-weight: bold;
+    color: #1a3a6e;
+    border-bottom: 2px solid #1a3a6e;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+}
+
+h2 {
+    font-size: 10pt;
+    font-weight: bold;
+    color: #1a3a6e;
+    margin-top: 16px;
+    margin-bottom: 6px;
+}
+
+p {
+    margin: 6px 0 10px 0;
+    line-height: 1.5;
+}
+
+a {
+    color: #1a3a6e;
+}
+
+a:hover {
+    color: #c0392b;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0 14px 0;
+}
+
+th {
+    background-color: #1a3a6e;
+    color: #ffffff;
+    padding: 5px 10px;
+    text-align: left;
+    font-size: 9pt;
+    font-weight: bold;
+}
+
+td {
+    padding: 4px 10px;
+    border-bottom: 1px solid #dde3ec;
+    font-size: 9pt;
+    vertical-align: top;
+}
+
+tr:nth-child(even) td {
+    background-color: #f4f6fa;
+}
+
+td.key {
+    font-weight: bold;
+    white-space: nowrap;
+    width: 38%;
+}
+
+.note {
+    background-color: #eef2fa;
+    border-left: 4px solid #1a3a6e;
+    padding: 7px 12px;
+    margin: 10px 0;
+    font-size: 9pt;
+}
+
+.tip {
+    background-color: #eafaf1;
+    border-left: 4px solid #27ae60;
+    padding: 7px 12px;
+    margin: 10px 0;
+    font-size: 9pt;
+}
+
+ul {
+    margin: 6px 0 10px 0;
+    padding-left: 20px;
+}
+
+li {
+    margin-bottom: 4px;
+    line-height: 1.5;
+}
+
+.breadcrumb {
+    font-size: 8pt;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.breadcrumb a {
+    color: #666;
+}
+
+/* VS Dark theme source code block */
+pre.source-code {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8.5pt;
+    background-color: #1E1E1E;
+    border: 1px solid #3C3C3C;
+    padding: 10px 14px;
+    margin: 8px 0;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.4;
+    color: #D4D4D4;
+}
+
+pre.source-code .kw  { color: #569CD6; }  /* keywords */
+pre.source-code .pp  { color: #C586C0; }  /* preprocessor */
+pre.source-code .cm  { color: #6A9955; }  /* comments */
+pre.source-code .str { color: #CE9178; }  /* string / char literals */
+pre.source-code .num { color: #B5CEA8; }  /* numbers */
+pre.source-code .tp  { color: #4EC9B0; }  /* Windows types & macros */
+pre.source-code .fn  { color: #DCDCAA; }  /* function names */
+pre.source-code .mc  { color: #C586C0; }  /* macro constants */

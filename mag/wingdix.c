@@ -7,7 +7,7 @@ BOOL wgl_SelectPixelFormat(HDC hDC);
 void wgl_Load(void);
 void wgl_GetProc(HMODULE hModule, const char* pszProc, PROC* pProc);
 
-BOOL __stdcall gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
+BOOL CALLBACK gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
 
 ATOM wgl_RegisterClass(void)
 {
@@ -25,7 +25,7 @@ BOOL wgl_SelectPixelFormat(HDC hDC)
     PIXELFORMATDESCRIPTOR pfd = { sizeof(pfd) };
 
     pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_SUPPORT_COMPOSITION | PFD_GENERIC_ACCELERATED;
+    pfd.dwFlags = PFD_SUPPORT_OPENGL;
     pfd.cAlphaBits = 8;
     pfd.cDepthBits = 24;
     pfd.cColorBits = 32;
@@ -44,10 +44,17 @@ void wgl_Load(void)
     }
 
 #define pproc(proc) (# proc), ((PROC*)&proc)
+    wgl_GetProc(__opengl32, pproc(wglGetExtensionsStringARB));
     wgl_GetProc(__opengl32, pproc(wglChoosePixelFormatARB));
     wgl_GetProc(__opengl32, pproc(wglCreateContextAttribsARB));
-    wgl_GetProc(__opengl32, pproc(wglSwapIntervalEXT));
     wgl_GetProc(__opengl32, pproc(wglGetSwapIntervalEXT));
+    wgl_GetProc(__opengl32, pproc(wglSwapIntervalEXT));
+    wgl_GetProc(__opengl32, pproc(wglCreatePbufferARB));
+    wgl_GetProc(__opengl32, pproc(wglGetPbufferDCARB));
+    wgl_GetProc(__opengl32, pproc(wglDestroyPbufferARB));
+    wgl_GetProc(__opengl32, pproc(wglQueryPbufferARB));
+    wgl_GetProc(__opengl32, pproc(wglBindTexImageARB));
+    wgl_GetProc(__opengl32, pproc(wglReleaseTexImageARB));
 #undef pproc
 }
 
@@ -76,7 +83,7 @@ void wgl_GetProc(HMODULE hModule, const char* pszProc, PROC* pProc)
     }
 }
 
-BOOL gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam)
+BOOL CALLBACK gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(hDC);
 

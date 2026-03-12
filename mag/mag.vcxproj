@@ -99,7 +99,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
+      <EnableVectorLength>VectorLength512</EnableVectorLength>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -140,7 +140,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
+      <EnableVectorLength>VectorLength512</EnableVectorLength>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -155,6 +155,7 @@
   <ItemGroup>
     <ClCompile Include="d3dkmtx.c" />
     <ClCompile Include="dwmapix.c" />
+    <ClCompile Include="help.c" />
     <ClCompile Include="mag.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="render.c" />
@@ -164,6 +165,7 @@
   <ItemGroup>
     <ClInclude Include="d3dkmtx.h" />
     <ClInclude Include="dwmapix.h" />
+    <ClInclude Include="help.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="mag.h" />
     <ClInclude Include="render.h" />
@@ -175,6 +177,24 @@
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="help\gen_source.ps1" />
+    <None Include="help\help.css" />
+    <None Include="help\index.htm" />
+    <None Include="help\controls.htm" />
+    <None Include="help\context_menu.htm" />
+    <None Include="help\mag.hhc" />
+    <None Include="help\mag.hhk" />
+    <None Include="help\mag.hhp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <PreBuildEvent>
+      <Message>Generating source code help pages and compiling HTML Help...</Message>
+      <Command>powershell -ExecutionPolicy Bypass -File "$(ProjectDir)help\gen_source.ps1" -ProjectDir "$(ProjectDir)"
+"%ProgramFiles(x86)%\HTML Help Workshop\hhc.exe" "$(ProjectDir)help\mag.hhp"
+IF %ERRORLEVEL% LEQ 1 EXIT /B 0</Command>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
