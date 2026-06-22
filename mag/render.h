@@ -100,6 +100,7 @@ typedef struct SHAREDWGLDATA
   POINT            pt;
   POINT            ptSourceOrigin;
   POINT            ptMiniMapDragOffset;
+  DWORD            dwMiniMapLastActivity;
   RECT             rc;
   DISPLAYINFO      di;
   BITMAPINFOHEADER bi;
@@ -135,6 +136,7 @@ LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG 
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
 
 BOOL render_minimapHitTest(HWND hWnd, POINT ptClient);
+void render_minimapNotifyActivity(HWND hWnd);
 BOOL render_minimapBeginDrag(HWND hWnd, POINT ptClient);
 BOOL render_minimapDrag(HWND hWnd, POINT ptClient);
 void render_minimapEndDrag(HWND hWnd);

@@ -85,6 +85,9 @@ static const IID IID_IDirect3DDxgiInterfaceAccess =
 #define MINIMAP_MAX_HEIGHT 140
 #define MINIMAP_MIN_WIDTH 48
 #define MINIMAP_MIN_HEIGHT 36
+#define MINIMAP_VISIBLE_MS 1200U
+#define MINIMAP_FADE_MS 450U
+#define MINIMAP_MIN_ALPHA 0.01f
 
 #ifndef WS_EX_NOREDIRECTIONBITMAP
 #define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
@@ -237,6 +240,7 @@ void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UI
 BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
 BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
+FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd);
 BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout);
 void render_minimapMapSourceRectToClient(const MINIMAPLAYOUT* lpLayout, const RECT* lprcSource, RECT* lprcClient);
 POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptClient);
@@ -692,6 +696,44 @@ BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
     }
 
     return RECTWIDTH((*lprcCapture)) > 0 && RECTHEIGHT((*lprcCapture)) > 0;
+}
+
+void render_minimapNotifyActivity(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd)
+    {
+      lpsd->dwMiniMapLastActivity = GetTickCount();
+    }
+}
+
+FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd)
+{
+    const DWORD now = GetTickCount();
+    const DWORD elapsed = now - lpsd->dwMiniMapLastActivity;
+
+    if (lpsd->fMiniMapDragging)
+    {
+      return 1.0f;
+    }
+
+    if (!lpsd->dwMiniMapLastActivity)
+    {
+      return 0.0f;
+    }
+
+    if (elapsed <= MINIMAP_VISIBLE_MS)
+    {
+      return 1.0f;
+    }
+
+    if (elapsed >= MINIMAP_VISIBLE_MS + MINIMAP_FADE_MS)
+    {
+      return 0.0f;
+    }
+
+    return 1.0f - ((FLOAT)(elapsed - MINIMAP_VISIBLE_MS) / (FLOAT)MINIMAP_FADE_MS);
 }
 
 BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout)
@@ -2218,9 +2260,16 @@ void render_wglDrawMiniMap(HWND hWnd)
     RECT rcClippedSource;
     RECT rcPanel;
     RECT rcVisibleClient;
+    FLOAT opacity;
     UINT i;
 
     if (!render_minimapComputeLayout(hWnd, &layout))
+    {
+      return;
+    }
+
+    opacity = render_minimapGetOpacity(lpsd);
+    if (opacity <= MINIMAP_MIN_ALPHA)
     {
       return;
     }
@@ -2235,15 +2284,15 @@ void render_wglDrawMiniMap(HWND hWnd)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glLineWidth(1.0f);
 
-    render_wglFillClientRect(lpsd, &rcPanel, 0.02f, 0.025f, 0.03f, 0.72f);
-    render_wglFillClientRect(lpsd, &layout.rcMap, 0.11f, 0.12f, 0.13f, 0.78f);
+    render_wglFillClientRect(lpsd, &rcPanel, 0.02f, 0.025f, 0.03f, 0.72f * opacity);
+    render_wglFillClientRect(lpsd, &layout.rcMap, 0.11f, 0.12f, 0.13f, 0.78f * opacity);
 
     for (i = 0; i < lpsd->di.numMonitors; ++i)
     {
       RECT rcMonitor;
 
       render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-      render_wglFillClientRect(lpsd, &rcMonitor, 0.18f, 0.19f, 0.20f, 0.58f);
+      render_wglFillClientRect(lpsd, &rcMonitor, 0.18f, 0.19f, 0.20f, 0.58f * opacity);
     }
 
     for (i = 0; i < lpsd->di.numMonitors; ++i)
@@ -2251,17 +2300,17 @@ void render_wglDrawMiniMap(HWND hWnd)
       RECT rcMonitor;
 
       render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-      render_wglStrokeClientRect(lpsd, &rcMonitor, 0.55f, 0.58f, 0.62f, 0.70f);
+      render_wglStrokeClientRect(lpsd, &rcMonitor, 0.55f, 0.58f, 0.62f, 0.70f * opacity);
     }
 
-    render_wglStrokeClientRect(lpsd, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f);
+    render_wglStrokeClientRect(lpsd, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f * opacity);
 
     if (!IsRectEmpty(&rcClippedSource))
     {
       render_minimapMapSourceRectToClient(&layout, &rcClippedSource, &rcVisibleClient);
-      render_wglFillClientRect(lpsd, &rcVisibleClient, 0.86f, 0.92f, 1.0f, 0.12f);
+      render_wglFillClientRect(lpsd, &rcVisibleClient, 0.86f, 0.92f, 1.0f, 0.12f * opacity);
       glLineWidth(2.0f);
-      render_wglStrokeClientRect(lpsd, &rcVisibleClient, 0.90f, 0.96f, 1.0f, 0.96f);
+      render_wglStrokeClientRect(lpsd, &rcVisibleClient, 0.90f, 0.96f, 1.0f, 0.96f * opacity);
       glLineWidth(1.0f);
     }
 
