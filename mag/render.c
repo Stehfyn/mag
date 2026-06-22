@@ -241,6 +241,7 @@ BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSou
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
 BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
 FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd);
+BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd);
 BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout);
 void render_minimapMapSourceRectToClient(const MINIMAPLAYOUT* lpLayout, const RECT* lprcSource, RECT* lprcClient);
 POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptClient);
@@ -708,12 +709,18 @@ void render_minimapNotifyActivity(HWND hWnd)
     }
 }
 
+BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd)
+{
+    return lpsd->fTexScaler > 1.0001f ||
+           (!lpsd->fTrackCursor && lpsd->fUseSourceOrigin && lpsd->fSourceOriginPinned);
+}
+
 FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd)
 {
     const DWORD now = GetTickCount();
     const DWORD elapsed = now - lpsd->dwMiniMapLastActivity;
 
-    if (lpsd->fTexScaler <= 1.0001f)
+    if (!render_minimapHasVisibleState(lpsd))
     {
       return 0.0f;
     }
@@ -753,7 +760,7 @@ BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout)
     LONG mapWidth;
     LONG mapHeight;
 
-    if (lpsd->fTexScaler <= 1.0001f ||
+    if (!render_minimapHasVisibleState(lpsd) ||
         maxWidth < MINIMAP_MIN_WIDTH ||
         maxHeight < MINIMAP_MIN_HEIGHT ||
         captureWidth < 1 ||
@@ -1498,10 +1505,26 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
     {
       srcW = cw;
       srcH = ch;
-      srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
-      srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
-      lpsd->pt = fCenterOnCursor ? center : tl;
-      if (!fCenterOnCursor)
+      if (fUseSourceOrigin)
+      {
+        srcX = lpsd->ptSourceOrigin.x;
+        srcY = lpsd->ptSourceOrigin.y;
+      }
+      else
+      {
+        srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
+        srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
+      }
+      if (fCenterOnCursor)
+      {
+        lpsd->pt = center;
+      }
+      else
+      {
+        lpsd->pt.x = srcX;
+        lpsd->pt.y = srcY;
+      }
+      if (!fCenterOnCursor && !fUseSourceOrigin)
       {
         lpsd->fUseSourceOrigin = FALSE;
         lpsd->fSourceOriginPinned = FALSE;
@@ -2263,6 +2286,9 @@ void render_wglDrawMiniMap(HWND hWnd)
     MINIMAPLAYOUT layout;
     RECT rcSource;
     RECT rcClippedSource;
+    RECT rcWindow;
+    RECT rcClippedWindow;
+    RECT rcWindowClient;
     RECT rcPanel;
     RECT rcVisibleClient;
     FLOAT opacity;
@@ -2309,6 +2335,16 @@ void render_wglDrawMiniMap(HWND hWnd)
     }
 
     render_wglStrokeClientRect(lpsd, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f * opacity);
+
+    if (GetWindowRect(hWnd, &rcWindow) &&
+        IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
+    {
+      render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
+      render_wglFillClientRect(lpsd, &rcWindowClient, 0.72f, 0.74f, 0.76f, 0.08f * opacity);
+      glLineWidth(1.5f);
+      render_wglStrokeClientRect(lpsd, &rcWindowClient, 0.78f, 0.80f, 0.84f, 0.92f * opacity);
+      glLineWidth(1.0f);
+    }
 
     if (!IsRectEmpty(&rcClippedSource))
     {

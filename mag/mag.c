@@ -634,6 +634,8 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
       const BOOL fAnchorZoom = fMouseRelativeZoom || fKeepSourceOrigin;
       const FLOAT fScaleScale = powf(-logf(0.001f * (1.0f - lpsd->fScale) + .575f), 6);
       const FLOAT fWheelSteps = (FLOAT)zDelta / (FLOAT)WHEEL_DELTA;
+      FLOAT fScaleNew;
+      FLOAT fTexScalerNew;
       DOUBLE anchorX = 0.0;
       DOUBLE anchorY = 0.0;
 
@@ -643,6 +645,12 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
       {
         return;
       }
+
+      fScaleNew = CLAMP(
+        lpsd->fScale + ((0.0f < fScaleScale) ? fScaleScale : -1.0f + fScaleScale) * -fWheelSteps * MOUSE_WHEEL_ZOOM_STEP_SCALE,
+        0.001f,
+        1.0f);
+      fTexScalerNew = 1.0f + (15.0f * (1.0f - fScaleNew));
 
       if (fAnchorZoom)
       {
@@ -664,14 +672,13 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
         }
       }
 
-      lpsd->fScale += ((0.0f < fScaleScale) ? fScaleScale : -1.0f + fScaleScale) * -fWheelSteps * MOUSE_WHEEL_ZOOM_STEP_SCALE;
-      lpsd->fScale = CLAMP(lpsd->fScale, 0.001f, 1.0f);
-      lpsd->fTexScaler = 1.0f + (15.0f * (1.0f - lpsd->fScale));
+      lpsd->fScale = fScaleNew;
+      lpsd->fTexScaler = fTexScalerNew;
 
-      if (fAnchorZoom && lpsd->fTexScaler > 1.0001f)
+      if (fAnchorZoom && (lpsd->fTexScaler > 1.0001f || lpsd->fSourceOriginPinned))
       {
-        const LONG srcW = max(1, (LONG)(clientWidth / lpsd->fTexScaler));
-        const LONG srcH = max(1, (LONG)(clientHeight / lpsd->fTexScaler));
+        const LONG srcW = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(clientWidth / lpsd->fTexScaler)) : clientWidth;
+        const LONG srcH = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(clientHeight / lpsd->fTexScaler)) : clientHeight;
         LONG srcX;
         LONG srcY;
 
@@ -848,6 +855,7 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const BOOL fMoved = !(lpwndpos->flags & SWP_NOMOVE);
     const BOOL fSized = !(lpwndpos->flags & SWP_NOSIZE);
+    const BOOL fActualMove = fMoved && !fSized;
     RECT rcSourceOld;
     RECT rcCapture;
     BOOL fPreservePinnedCenter = FALSE;
@@ -856,9 +864,9 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
 
     if (lpsd &&
         fSized &&
+        !fActualMove &&
         lpsd->fSourceOriginPinned &&
         lpsd->fUseSourceOrigin &&
-        lpsd->fTexScaler > 1.0001f &&
         lpsd->bi.biWidth > 0 &&
         lpsd->bi.biHeight > 0)
     {
@@ -880,13 +888,17 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     {
       render_minimapNotifyActivity(hWnd);
 
-      if (fPreservePinnedCenter &&
-          lpsd->fTexScaler > 1.0001f &&
-          lpsd->bi.biWidth > 0 &&
-          lpsd->bi.biHeight > 0)
+      if (fActualMove)
       {
-        const LONG srcW = max(1, (LONG)(lpsd->bi.biWidth / lpsd->fTexScaler));
-        const LONG srcH = max(1, (LONG)(lpsd->bi.biHeight / lpsd->fTexScaler));
+        lpsd->fUseSourceOrigin = FALSE;
+        lpsd->fSourceOriginPinned = FALSE;
+      }
+      else if (fPreservePinnedCenter &&
+               lpsd->bi.biWidth > 0 &&
+               lpsd->bi.biHeight > 0)
+      {
+        const LONG srcW = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(lpsd->bi.biWidth / lpsd->fTexScaler)) : lpsd->bi.biWidth;
+        const LONG srcH = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(lpsd->bi.biHeight / lpsd->fTexScaler)) : lpsd->bi.biHeight;
         const LONG srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
         const LONG srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
 
