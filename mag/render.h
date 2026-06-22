@@ -22,6 +22,8 @@ typedef enum CAPTUREAPI
   CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
   CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
   CAPTURE_API_MAGNIFICATION,
+  CAPTURE_API_DWM_THUMBNAIL,
+  CAPTURE_API_DWM_PRIVATE_VISUAL,
   CAPTURE_API_COUNT
 } CAPTUREAPI;
 
@@ -58,10 +60,46 @@ typedef struct WGCMONITORCAPTURE
   BOOL                      fHasFrame;
 } WGCMONITORCAPTURE, *LPWGCMONITORCAPTURE;
 
+typedef struct MAGCAPTURE
+{
+  HWND hwndHost;
+  HWND hwndMag;
+  UINT width;
+  UINT height;
+  BOOL fInitialized;
+  BOOL fCallbackCaptured;
+} MAGCAPTURE, *LPMAGCAPTURE;
+
+typedef struct DWMTHUMBNAILCAPTURE
+{
+  HTHUMBNAIL hThumbnail;
+  HWND       hwndSource;
+} DWMTHUMBNAILCAPTURE, *LPDWMTHUMBNAILCAPTURE;
+
+typedef struct DWMPRIVATEVISUALCAPTURE
+{
+  HMODULE      hDComp;
+  HMODULE      hDwmApi;
+  HMODULE      hUser32;
+  FARPROC      pDCompositionCreateDevice;
+  FARPROC      pCreateSharedVisual;
+  FARPROC      pUpdateSharedVisual;
+  FARPROC      pSetWindowCompositionAttribute;
+  ID3D11Device* d3dDevice;
+  IDXGIDevice* dxgiDevice;
+  IUnknown*    dcompDevice;
+  IUnknown*    dcompTarget;
+  IUnknown*    dcompVisual;
+  HTHUMBNAIL   hThumbnail;
+  BOOL         fUseMultiWindow;
+  BOOL         fInitialized;
+} DWMPRIVATEVISUALCAPTURE, *LPDWMPRIVATEVISUALCAPTURE;
+
 typedef struct SHAREDWGLDATA
 {
   BOOL             fTrackCursor;
   BOOL             fWinRtInitialized;
+  BOOL             fMagInitialized;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
   POINT            pt;
@@ -78,6 +116,9 @@ typedef struct SHAREDWGLDATA
   HBITMAP          hBitmapOld;
   DXGIOUTPUTCAPTURE dxgiOutputs[MAX_ENUM_MONITORS];
   WGCMONITORCAPTURE wgcMonitors[MAX_ENUM_MONITORS];
+  MAGCAPTURE       magCapture;
+  DWMTHUMBNAILCAPTURE dwmThumbnail;
+  DWMPRIVATEVISUALCAPTURE dwmPrivate;
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;

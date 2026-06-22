@@ -3,11 +3,13 @@
 #include <roapi.h>
 #include <windows.graphics.capture.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
+#include <magnification.h>
 
 #pragma comment(lib, "d3d11")
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "runtimeobject")
+#pragma comment(lib, "Magnification")
 
 #define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
 #define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)
@@ -77,6 +79,80 @@ struct IDirect3DDxgiInterfaceAccess
 static const IID IID_IDirect3DDxgiInterfaceAccess =
   { 0xA9B3D012, 0x3DF2, 0x4EE3, { 0xB8, 0xD1, 0x86, 0x95, 0xF4, 0x57, 0xD3, 0xC1 } };
 
+#define DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL 163
+#define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164
+#define DWM_PRIVATE_MULTIWINDOW_BUILD 20000
+
+static const IID IID_MAG_IDCompositionDevice =
+  { 0xC37EA93A, 0xE7AA, 0x450D, { 0xB1, 0x6F, 0x97, 0x46, 0xCB, 0x04, 0x07, 0xF3 } };
+
+typedef struct MAG_IDCompositionDevice MAG_IDCompositionDevice;
+typedef struct MAG_IDCompositionTarget MAG_IDCompositionTarget;
+
+typedef struct MAG_IDCompositionDeviceVtbl
+{
+  BEGIN_INTERFACE
+  HRESULT (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionDevice* This, REFIID riid, void** ppvObject);
+  ULONG (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionDevice* This);
+  ULONG (STDMETHODCALLTYPE* Release)(MAG_IDCompositionDevice* This);
+  HRESULT (STDMETHODCALLTYPE* Commit)(MAG_IDCompositionDevice* This);
+  HRESULT (STDMETHODCALLTYPE* WaitForCommitCompletion)(MAG_IDCompositionDevice* This);
+  HRESULT (STDMETHODCALLTYPE* GetFrameStatistics)(MAG_IDCompositionDevice* This, void* statistics);
+  HRESULT (STDMETHODCALLTYPE* CreateTargetForHwnd)(MAG_IDCompositionDevice* This, HWND hwnd, BOOL topmost, MAG_IDCompositionTarget** target);
+  END_INTERFACE
+} MAG_IDCompositionDeviceVtbl;
+
+struct MAG_IDCompositionDevice
+{
+  CONST_VTBL struct MAG_IDCompositionDeviceVtbl* lpVtbl;
+};
+
+typedef struct MAG_IDCompositionTargetVtbl
+{
+  BEGIN_INTERFACE
+  HRESULT (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionTarget* This, REFIID riid, void** ppvObject);
+  ULONG (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionTarget* This);
+  ULONG (STDMETHODCALLTYPE* Release)(MAG_IDCompositionTarget* This);
+  HRESULT (STDMETHODCALLTYPE* SetRoot)(MAG_IDCompositionTarget* This, IUnknown* visual);
+  END_INTERFACE
+} MAG_IDCompositionTargetVtbl;
+
+struct MAG_IDCompositionTarget
+{
+  CONST_VTBL struct MAG_IDCompositionTargetVtbl* lpVtbl;
+};
+
+typedef HRESULT (WINAPI* PFN_DCOMPOSITIONCREATEDEVICE)(IDXGIDevice* dxgiDevice, REFIID iid, void** dcompositionDevice);
+typedef HRESULT (WINAPI* PFN_DWMPCREATESHAREDDESKTOPVISUAL)(HWND hwndDestination, VOID* pDCompDevice, VOID** ppVisual, PHTHUMBNAIL phThumbnailId);
+typedef HRESULT (WINAPI* PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize);
+typedef HRESULT (WINAPI* PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize, DWORD dwFlags);
+
+typedef enum MAG_WINDOWCOMPOSITIONATTRIB
+{
+  MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW = 0x0D
+} MAG_WINDOWCOMPOSITIONATTRIB;
+
+typedef struct MAG_WINDOWCOMPOSITIONATTRIBDATA
+{
+  MAG_WINDOWCOMPOSITIONATTRIB Attrib;
+  PVOID pvData;
+  DWORD cbData;
+} MAG_WINDOWCOMPOSITIONATTRIBDATA, *LPMAG_WINDOWCOMPOSITIONATTRIBDATA;
+
+typedef BOOL (WINAPI* PFN_SETWINDOWCOMPOSITIONATTRIBUTE)(HWND hwnd, LPMAG_WINDOWCOMPOSITIONATTRIBDATA pwcad);
+
+typedef struct MAG_RTL_OSVERSIONINFOW
+{
+  ULONG dwOSVersionInfoSize;
+  ULONG dwMajorVersion;
+  ULONG dwMinorVersion;
+  ULONG dwBuildNumber;
+  ULONG dwPlatformId;
+  WCHAR szCSDVersion[128];
+} MAG_RTL_OSVERSIONINFOW, *LPMAG_RTL_OSVERSIONINFOW;
+
+typedef LONG (WINAPI* PFN_RTLGETVERSION)(LPMAG_RTL_OSVERSIONINFOW lpVersionInformation);
+
 #define IDirect3DDxgiInterfaceAccess_GetInterface(This, iid, p) ((This)->lpVtbl->GetInterface((This), (iid), (p)))
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
@@ -116,6 +192,20 @@ BOOL render_wgcEnsureStagingTexture(LPWGCMONITORCAPTURE lpCapture, UINT width, U
 BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture);
 BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_wgcCaptureScreen(HWND hWnd);
+void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
+BOOL CALLBACK render_magImageScalingCallback(HWND hwnd, void* srcdata, MAGIMAGEHEADER srcheader, void* destdata, MAGIMAGEHEADER destheader, RECT unclipped, RECT clipped, HRGN dirty);
+void render_magDeleteResources(HWND hWnd);
+BOOL render_magEnsureResources(HWND hWnd);
+BOOL render_magSetTransform(HWND hwndMag, const RECT* lprcSource, LONG dstWidth, LONG dstHeight);
+void render_magCaptureScreen(HWND hWnd);
+void render_dwmThumbnailDeleteResources(HWND hWnd);
+BOOL render_dwmThumbnailEnsureResources(HWND hWnd);
+void render_dwmThumbnailCaptureScreen(HWND hWnd);
+BOOL render_dwmPrivateIsMultiWindowBuild(void);
+void render_dwmPrivateSetExcludedFromLivePreview(HWND hWnd, BOOL fExcluded);
+void render_dwmPrivateDeleteResources(HWND hWnd);
+BOOL render_dwmPrivateEnsureResources(HWND hWnd);
+void render_dwmPrivateCaptureScreen(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
 {
@@ -1026,6 +1116,617 @@ BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpC
     return TRUE;
 }
 
+void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const LONG cw = lpsd->bi.biWidth;
+    const LONG ch = lpsd->bi.biHeight;
+    POINT tl = { 0, 0 };
+    POINT center = { 0, 0 };
+    RECT rcVirtual = lpsd->di.rc;
+    const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
+    BOOL fCenterOnCursor;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+
+    if (!ClientToScreen(hWnd, &tl))
+    {
+      SetRectEmpty(lprcSource);
+      return;
+    }
+
+    fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
+    if (!fCenterOnCursor)
+    {
+      center.x = tl.x + cw / 2;
+      center.y = tl.y + ch / 2;
+    }
+
+    if (m <= 1.0001f)
+    {
+      srcW = cw;
+      srcH = ch;
+      srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
+      srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
+      lpsd->pt = fCenterOnCursor ? center : tl;
+    }
+    else
+    {
+      srcW = (LONG)(cw / m);
+      srcH = (LONG)(ch / m);
+
+      if (srcW < 1) srcW = 1;
+      if (srcH < 1) srcH = 1;
+
+      srcX = center.x - srcW / 2;
+      srcY = center.y - srcH / 2;
+      lpsd->pt = center;
+    }
+
+    if (IsRectEmpty(&rcVirtual))
+    {
+      rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+      rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+      rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    }
+
+    srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
+    srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
+    SetRect(lprcSource, srcX, srcY, srcX + srcW, srcY + srcH);
+}
+
+BOOL CALLBACK render_magImageScalingCallback(HWND hwnd, void* srcdata, MAGIMAGEHEADER srcheader, void* destdata, MAGIMAGEHEADER destheader, RECT unclipped, RECT clipped, HRGN dirty)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    RECT rcDst;
+    UINT y;
+
+    UNREFERENCED_PARAMETER(unclipped);
+    UNREFERENCED_PARAMETER(clipped);
+    UNREFERENCED_PARAMETER(dirty);
+
+    if (!lpsd || !srcdata || !lpsd->glScreenData || !srcheader.width || !srcheader.height || !srcheader.stride)
+    {
+      return FALSE;
+    }
+
+    SetRect(&rcDst, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
+    ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+    render_dxgiCopyMappedPixelsToRect(
+      lpsd,
+      (const BYTE*)srcdata,
+      srcheader.width,
+      srcheader.height,
+      srcheader.stride,
+      &rcDst);
+
+    if (destdata && destheader.width && destheader.height && destheader.stride)
+    {
+      for (y = 0; y < destheader.height; ++y)
+      {
+        const UINT srcY = min((UINT)(((ULONGLONG)y * srcheader.height) / destheader.height), srcheader.height - 1);
+        const BYTE* srcRow = ((const BYTE*)srcdata) + (srcY * srcheader.stride);
+        BYTE* dstRow = ((BYTE*)destdata) + (y * destheader.stride);
+        UINT x;
+
+        for (x = 0; x < destheader.width; ++x)
+        {
+          const UINT srcX = min((UINT)(((ULONGLONG)x * srcheader.width) / destheader.width), srcheader.width - 1);
+          CopyMemory(dstRow + (x * CHANNELS), srcRow + (srcX * CHANNELS), CHANNELS);
+        }
+      }
+    }
+
+    lpsd->magCapture.fCallbackCaptured = TRUE;
+    return TRUE;
+}
+
+void render_magDeleteResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd->magCapture.hwndMag)
+    {
+      MagSetImageScalingCallback(lpsd->magCapture.hwndMag, NULL);
+      DestroyWindow(lpsd->magCapture.hwndMag);
+    }
+
+    if (lpsd->magCapture.hwndHost)
+    {
+      DestroyWindow(lpsd->magCapture.hwndHost);
+    }
+
+    ZeroMemory(&lpsd->magCapture, sizeof(lpsd->magCapture));
+
+    if (lpsd->fMagInitialized)
+    {
+      MagUninitialize();
+      lpsd->fMagInitialized = FALSE;
+    }
+}
+
+BOOL render_magEnsureResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const UINT width = (UINT)lpsd->bi.biWidth;
+    const UINT height = (UINT)lpsd->bi.biHeight;
+    HWND excluded[3];
+    int excludedCount = 0;
+
+    if (lpsd->magCapture.hwndMag &&
+        lpsd->magCapture.width == width &&
+        lpsd->magCapture.height == height)
+    {
+      return TRUE;
+    }
+
+    render_magDeleteResources(hWnd);
+
+    if (!lpsd->fMagInitialized)
+    {
+      if (!MagInitialize())
+      {
+        return FALSE;
+      }
+
+      lpsd->fMagInitialized = TRUE;
+    }
+
+    lpsd->magCapture.hwndHost = CreateWindowEx(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+      TEXT("STATIC"),
+      TEXT("magCaptureHost"),
+      WS_POPUP,
+      GetSystemMetrics(SM_XVIRTUALSCREEN),
+      GetSystemMetrics(SM_YVIRTUALSCREEN),
+      (int)width,
+      (int)height,
+      NULL,
+      NULL,
+      GetModuleHandle(NULL),
+      NULL);
+
+    if (!lpsd->magCapture.hwndHost)
+    {
+      render_magDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    SetLayeredWindowAttributes(lpsd->magCapture.hwndHost, 0, 1, LWA_ALPHA);
+
+    lpsd->magCapture.hwndMag = CreateWindow(
+      WC_MAGNIFIER,
+      TEXT("magCapture"),
+      WS_CHILD | WS_VISIBLE,
+      0,
+      0,
+      (int)width,
+      (int)height,
+      lpsd->magCapture.hwndHost,
+      NULL,
+      GetModuleHandle(NULL),
+      NULL);
+
+    if (!lpsd->magCapture.hwndMag)
+    {
+      render_magDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    SetWindowLongPtr(lpsd->magCapture.hwndMag, GWLP_USERDATA, (LONG_PTR)lpsd);
+
+    excluded[excludedCount++] = hWnd;
+    excluded[excludedCount++] = lpsd->magCapture.hwndHost;
+    excluded[excludedCount++] = lpsd->magCapture.hwndMag;
+    MagSetWindowFilterList(lpsd->magCapture.hwndMag, MW_FILTERMODE_EXCLUDE, excludedCount, excluded);
+
+    if (!MagSetImageScalingCallback(lpsd->magCapture.hwndMag, render_magImageScalingCallback))
+    {
+      render_magDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    ShowWindow(lpsd->magCapture.hwndHost, SW_SHOWNOACTIVATE);
+    lpsd->magCapture.width = width;
+    lpsd->magCapture.height = height;
+    lpsd->magCapture.fInitialized = TRUE;
+    return TRUE;
+}
+
+BOOL render_magSetTransform(HWND hwndMag, const RECT* lprcSource, LONG dstWidth, LONG dstHeight)
+{
+    MAGTRANSFORM transform = { 0 };
+    const LONG srcWidth = RECTWIDTH((*lprcSource));
+    const LONG srcHeight = RECTHEIGHT((*lprcSource));
+
+    if (srcWidth < 1 || srcHeight < 1)
+    {
+      return FALSE;
+    }
+
+    transform.v[0][0] = (FLOAT)dstWidth / (FLOAT)srcWidth;
+    transform.v[1][1] = (FLOAT)dstHeight / (FLOAT)srcHeight;
+    transform.v[2][2] = 1.0f;
+    return MagSetWindowTransform(hwndMag, &transform);
+}
+
+void render_magCaptureScreen(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcSource;
+
+    render_computeSourceRect(hWnd, &rcSource);
+    if (IsRectEmpty(&rcSource) ||
+        !render_magEnsureResources(hWnd) ||
+        !render_magSetTransform(lpsd->magCapture.hwndMag, &rcSource, lpsd->bi.biWidth, lpsd->bi.biHeight))
+    {
+      render_gdiCaptureScreen(hWnd);
+      return;
+    }
+
+    lpsd->magCapture.fCallbackCaptured = FALSE;
+    MagSetWindowSource(lpsd->magCapture.hwndMag, rcSource);
+    InvalidateRect(lpsd->magCapture.hwndMag, NULL, TRUE);
+    UpdateWindow(lpsd->magCapture.hwndMag);
+
+    if (!lpsd->magCapture.fCallbackCaptured)
+    {
+      render_gdiCaptureScreen(hWnd);
+    }
+}
+
+void render_dwmThumbnailDeleteResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd->dwmThumbnail.hThumbnail)
+    {
+      DwmUnregisterThumbnail(lpsd->dwmThumbnail.hThumbnail);
+      lpsd->dwmThumbnail.hThumbnail = NULL;
+    }
+
+    lpsd->dwmThumbnail.hwndSource = NULL;
+}
+
+BOOL render_dwmThumbnailEnsureResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    HWND hwndSource = GetDesktopWindow();
+
+    if (lpsd->dwmThumbnail.hThumbnail && lpsd->dwmThumbnail.hwndSource == hwndSource)
+    {
+      return TRUE;
+    }
+
+    render_dwmThumbnailDeleteResources(hWnd);
+
+    if (!hwndSource ||
+        FAILED(DwmRegisterThumbnail(hWnd, hwndSource, &lpsd->dwmThumbnail.hThumbnail)))
+    {
+      lpsd->dwmThumbnail.hThumbnail = NULL;
+      return FALSE;
+    }
+
+    lpsd->dwmThumbnail.hwndSource = hwndSource;
+    return TRUE;
+}
+
+void render_dwmThumbnailCaptureScreen(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    DWM_THUMBNAIL_PROPERTIES props = { 0 };
+    RECT rcSource;
+    RECT rcVirtual = lpsd->di.rc;
+
+    if (!render_dwmThumbnailEnsureResources(hWnd))
+    {
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
+      return;
+    }
+
+    render_computeSourceRect(hWnd, &rcSource);
+    if (IsRectEmpty(&rcSource))
+    {
+      return;
+    }
+
+    if (IsRectEmpty(&rcVirtual))
+    {
+      rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    }
+
+    OffsetRect(&rcSource, -rcVirtual.left, -rcVirtual.top);
+
+    props.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
+    SetRect(&props.rcDestination, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
+    props.rcSource = rcSource;
+    props.opacity = 255;
+    props.fVisible = TRUE;
+    props.fSourceClientAreaOnly = FALSE;
+
+    if (FAILED(DwmUpdateThumbnailProperties(lpsd->dwmThumbnail.hThumbnail, &props)))
+    {
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
+      return;
+    }
+
+    DwmFlush();
+}
+
+BOOL render_dwmPrivateIsMultiWindowBuild(void)
+{
+    HMODULE hNtdll = GetModuleHandle(TEXT("ntdll.dll"));
+    PFN_RTLGETVERSION pRtlGetVersion = hNtdll ? (PFN_RTLGETVERSION)GetProcAddress(hNtdll, "RtlGetVersion") : NULL;
+    MAG_RTL_OSVERSIONINFOW version = { 0 };
+
+    version.dwOSVersionInfoSize = sizeof(version);
+
+    if (pRtlGetVersion && pRtlGetVersion(&version) >= 0)
+    {
+      return version.dwBuildNumber >= DWM_PRIVATE_MULTIWINDOW_BUILD;
+    }
+
+#if defined(_WIN64)
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
+
+void render_dwmPrivateSetExcludedFromLivePreview(HWND hWnd, BOOL fExcluded)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    PFN_SETWINDOWCOMPOSITIONATTRIBUTE pSetWindowCompositionAttribute;
+    MAG_WINDOWCOMPOSITIONATTRIBDATA data = { 0 };
+    BOOL fEnable = fExcluded;
+
+    if (!lpsd || !lpsd->dwmPrivate.pSetWindowCompositionAttribute)
+    {
+      return;
+    }
+
+    pSetWindowCompositionAttribute = (PFN_SETWINDOWCOMPOSITIONATTRIBUTE)lpsd->dwmPrivate.pSetWindowCompositionAttribute;
+    data.Attrib = MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW;
+    data.pvData = &fEnable;
+    data.cbData = sizeof(fEnable);
+    pSetWindowCompositionAttribute(hWnd, &data);
+}
+
+void render_dwmPrivateDeleteResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
+
+    if (lpCapture->dcompTarget)
+    {
+      ((MAG_IDCompositionTarget*)lpCapture->dcompTarget)->lpVtbl->SetRoot((MAG_IDCompositionTarget*)lpCapture->dcompTarget, NULL);
+    }
+
+    if (lpCapture->dcompDevice)
+    {
+      ((MAG_IDCompositionDevice*)lpCapture->dcompDevice)->lpVtbl->Commit((MAG_IDCompositionDevice*)lpCapture->dcompDevice);
+    }
+
+    if (lpCapture->pSetWindowCompositionAttribute)
+    {
+      render_dwmPrivateSetExcludedFromLivePreview(hWnd, FALSE);
+    }
+
+    if (lpCapture->hThumbnail)
+    {
+      DwmUnregisterThumbnail(lpCapture->hThumbnail);
+      lpCapture->hThumbnail = NULL;
+    }
+
+    SAFERELEASE(lpCapture->dcompVisual);
+    SAFERELEASE(lpCapture->dcompTarget);
+    SAFERELEASE(lpCapture->dcompDevice);
+    SAFERELEASE(lpCapture->dxgiDevice);
+    SAFERELEASE(lpCapture->d3dDevice);
+
+    if (lpCapture->hUser32)
+    {
+      FreeLibrary(lpCapture->hUser32);
+    }
+
+    if (lpCapture->hDwmApi)
+    {
+      FreeLibrary(lpCapture->hDwmApi);
+    }
+
+    if (lpCapture->hDComp)
+    {
+      FreeLibrary(lpCapture->hDComp);
+    }
+
+    ZeroMemory(lpCapture, sizeof(*lpCapture));
+}
+
+BOOL render_dwmPrivateEnsureResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
+    PFN_DCOMPOSITIONCREATEDEVICE pDCompositionCreateDevice;
+    PFN_DWMPCREATESHAREDDESKTOPVISUAL pCreateSharedVisual;
+    D3D_FEATURE_LEVEL featureLevel;
+    HRESULT hr;
+
+    if (lpCapture->fInitialized &&
+        lpCapture->dcompDevice &&
+        lpCapture->dcompTarget &&
+        lpCapture->dcompVisual &&
+        lpCapture->hThumbnail)
+    {
+      return TRUE;
+    }
+
+    render_dwmPrivateDeleteResources(hWnd);
+
+    lpCapture->hDComp = LoadLibrary(TEXT("dcomp.dll"));
+    lpCapture->hDwmApi = LoadLibrary(TEXT("dwmapi.dll"));
+    lpCapture->hUser32 = LoadLibrary(TEXT("user32.dll"));
+
+    if (!lpCapture->hDComp || !lpCapture->hDwmApi)
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    lpCapture->pDCompositionCreateDevice = GetProcAddress(lpCapture->hDComp, "DCompositionCreateDevice");
+    lpCapture->pCreateSharedVisual = GetProcAddress(lpCapture->hDwmApi, MAKEINTRESOURCEA(DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL));
+    lpCapture->pUpdateSharedVisual = GetProcAddress(lpCapture->hDwmApi, MAKEINTRESOURCEA(DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL));
+
+    if (lpCapture->hUser32)
+    {
+      lpCapture->pSetWindowCompositionAttribute = GetProcAddress(lpCapture->hUser32, "SetWindowCompositionAttribute");
+    }
+
+    if (!lpCapture->pDCompositionCreateDevice ||
+        !lpCapture->pCreateSharedVisual ||
+        !lpCapture->pUpdateSharedVisual)
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    render_dwmPrivateSetExcludedFromLivePreview(hWnd, TRUE);
+
+    hr = D3D11CreateDevice(
+      NULL,
+      D3D_DRIVER_TYPE_HARDWARE,
+      NULL,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+      NULL,
+      0,
+      D3D11_SDK_VERSION,
+      &lpCapture->d3dDevice,
+      &featureLevel,
+      NULL);
+
+    if (FAILED(hr))
+    {
+      hr = D3D11CreateDevice(
+        NULL,
+        D3D_DRIVER_TYPE_WARP,
+        NULL,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        NULL,
+        0,
+        D3D11_SDK_VERSION,
+        &lpCapture->d3dDevice,
+        &featureLevel,
+        NULL);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      hr = ID3D11Device_QueryInterface(lpCapture->d3dDevice, &IID_IDXGIDevice, (void**)&lpCapture->dxgiDevice);
+    }
+
+    pDCompositionCreateDevice = (PFN_DCOMPOSITIONCREATEDEVICE)lpCapture->pDCompositionCreateDevice;
+    if (SUCCEEDED(hr))
+    {
+      hr = pDCompositionCreateDevice(lpCapture->dxgiDevice, &IID_MAG_IDCompositionDevice, (void**)&lpCapture->dcompDevice);
+    }
+
+    pCreateSharedVisual = (PFN_DWMPCREATESHAREDDESKTOPVISUAL)lpCapture->pCreateSharedVisual;
+    if (SUCCEEDED(hr))
+    {
+      hr = pCreateSharedVisual(hWnd, lpCapture->dcompDevice, (void**)&lpCapture->dcompVisual, &lpCapture->hThumbnail);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      hr = ((MAG_IDCompositionDevice*)lpCapture->dcompDevice)->lpVtbl->CreateTargetForHwnd(
+        (MAG_IDCompositionDevice*)lpCapture->dcompDevice,
+        hWnd,
+        FALSE,
+        (MAG_IDCompositionTarget**)&lpCapture->dcompTarget);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      hr = ((MAG_IDCompositionTarget*)lpCapture->dcompTarget)->lpVtbl->SetRoot(
+        (MAG_IDCompositionTarget*)lpCapture->dcompTarget,
+        lpCapture->dcompVisual);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      hr = ((MAG_IDCompositionDevice*)lpCapture->dcompDevice)->lpVtbl->Commit((MAG_IDCompositionDevice*)lpCapture->dcompDevice);
+    }
+
+    if (FAILED(hr))
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    lpCapture->fUseMultiWindow = render_dwmPrivateIsMultiWindowBuild();
+    lpCapture->fInitialized = TRUE;
+    return TRUE;
+}
+
+void render_dwmPrivateCaptureScreen(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
+    RECT rcSource;
+    SIZE destinationSize;
+    HWND exclude[1];
+    HRESULT hr;
+
+    if (!render_dwmPrivateEnsureResources(hWnd))
+    {
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
+      return;
+    }
+
+    render_computeSourceRect(hWnd, &rcSource);
+    if (IsRectEmpty(&rcSource))
+    {
+      return;
+    }
+
+    destinationSize.cx = lpsd->bi.biWidth;
+    destinationSize.cy = lpsd->bi.biHeight;
+    exclude[0] = hWnd;
+
+    if (lpCapture->fUseMultiWindow)
+    {
+      PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL pUpdate =
+        (PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)lpCapture->pUpdateSharedVisual;
+
+      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, ARRAYSIZE(exclude), &rcSource, &destinationSize, 1);
+    }
+    else
+    {
+      PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL pUpdate =
+        (PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)lpCapture->pUpdateSharedVisual;
+
+      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, ARRAYSIZE(exclude), &rcSource, &destinationSize);
+    }
+
+    if (FAILED(hr))
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
+      return;
+    }
+
+    ((MAG_IDCompositionDevice*)lpCapture->dcompDevice)->lpVtbl->Commit((MAG_IDCompositionDevice*)lpCapture->dcompDevice);
+    DwmFlush();
+}
+
 void render_wglInit(HWND hWnd)
 {
     const PIXELFORMATDESCRIPTOR pfd =
@@ -1600,6 +2301,9 @@ void renderCleanup(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
+    render_dwmPrivateDeleteResources(hWnd);
+    render_dwmThumbnailDeleteResources(hWnd);
+    render_magDeleteResources(hWnd);
     render_wgcDeleteResources(hWnd);
     render_dxgiDeleteResources(hWnd);
 
@@ -1624,16 +2328,46 @@ void renderRender(HWND hWnd)
     {
     case CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE:
       render_dxgiDeleteResources(hWnd);
+      render_magDeleteResources(hWnd);
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_dwmPrivateDeleteResources(hWnd);
       render_wgcCaptureScreen(hWnd);
       break;
     case CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
       render_wgcDeleteResources(hWnd);
+      render_magDeleteResources(hWnd);
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_dwmPrivateDeleteResources(hWnd);
       render_dxgiCaptureScreen(hWnd);
       break;
+    case CAPTURE_API_MAGNIFICATION:
+      render_wgcDeleteResources(hWnd);
+      render_dxgiDeleteResources(hWnd);
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_dwmPrivateDeleteResources(hWnd);
+      render_magCaptureScreen(hWnd);
+      break;
+    case CAPTURE_API_DWM_THUMBNAIL:
+      render_wgcDeleteResources(hWnd);
+      render_dxgiDeleteResources(hWnd);
+      render_magDeleteResources(hWnd);
+      render_dwmPrivateDeleteResources(hWnd);
+      render_dwmThumbnailCaptureScreen(hWnd);
+      return;
+    case CAPTURE_API_DWM_PRIVATE_VISUAL:
+      render_wgcDeleteResources(hWnd);
+      render_dxgiDeleteResources(hWnd);
+      render_magDeleteResources(hWnd);
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_dwmPrivateCaptureScreen(hWnd);
+      return;
     case CAPTURE_API_GDI_BITBLT:
     default:
       render_wgcDeleteResources(hWnd);
       render_dxgiDeleteResources(hWnd);
+      render_magDeleteResources(hWnd);
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_dwmPrivateDeleteResources(hWnd);
       render_gdiCaptureScreen(hWnd);
       break;
     }
