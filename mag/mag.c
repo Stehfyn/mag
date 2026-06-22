@@ -52,12 +52,11 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     
     HMENU hMenu = CreatePopupMenu();
     //HMENU hMenu = LoadPopupMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU1));
 
-    SetWindowDisplayAffinity(hMenu, WDA_EXCLUDEFROMCAPTURE);
 
     AppendMenu(hMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Follow Mouse"));
     AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Help"));
@@ -78,16 +77,11 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y)
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
     SetCurrentProcessEfficiencyQoS();
 
     renderInit(hWnd);
-    renderCreateResources(hWnd);
-
-    GetWindowRect(hWnd, &lpsd->rc);
 
     //SetTimer(hWnd, 1, 13, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
@@ -242,7 +236,7 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
     switch(id){
     case 1001:
     {
-      LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+      LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
       lpsd->fTrackCursor = !lpsd->fTrackCursor;
 
       if (lpsd->fTrackCursor)
@@ -273,7 +267,7 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
 
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(fDown);
     UNREFERENCED_PARAMETER(cRepeat);
@@ -303,7 +297,7 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
 
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(idEvent);
 
@@ -316,8 +310,8 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
       
         if (GetCursorPos(&pt))
         {
-          pt.x -= 0.5f * RECTWIDTH(lpsd->rc);
-          pt.y -= 0.5f * RECTHEIGHT(lpsd->rc);
+          pt.x -= RECTWIDTH(lpsd->rc) / 2;
+          pt.y -= RECTHEIGHT(lpsd->rc) / 2;
 
           SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0,
             SWP_NOSIZE| SWP_ASYNCWINDOWPOS);// | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
@@ -335,7 +329,7 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     POINT pt = { xPos, yPos };
 
@@ -386,11 +380,16 @@ void mag_OnExitSizeMove(HWND hWnd)
 
 void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
 {
-    LPSHAREDWGLDATA lpsd = GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    DefWindowProc(hWnd, WM_WINDOWPOSCHANGED, 0, (LPARAM)lpwndpos);
     
-    if (lpsd->fTrackCursor)
+    if (lpsd &&
+        lpsd->hDC &&
+        lpsd->hCaptureDC &&
+        (!(lpwndpos->flags & SWP_NOMOVE) || !(lpwndpos->flags & SWP_NOSIZE)))
     {
-      mag_OnTimer(hWnd, 0);
+      renderRender(hWnd);
     }
 }
 
