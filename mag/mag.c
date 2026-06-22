@@ -23,6 +23,10 @@
 #define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \
         ((fn)((hwnd), (BOOL)(wParam)), 0L)
 
+/* void Cls_OnCaptureChanged(HWND hwnd, HWND hwndNewCapture) */
+#define HANDLE_WM_CAPTURECHANGED(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (HWND)(lParam)), 0L)
+
 typedef struct SETTINGSOPTION
 {
   UINT    id;
@@ -36,6 +40,7 @@ void mag_ShowSettingsDialog(HWND hWnd);
 void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId);
 BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
 void mag_UpdateSettingsDialogState(HWND hDlg);
+void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
 INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
@@ -53,6 +58,10 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
+void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
+void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags);
+void mag_OnMouseMove(HWND hWnd, int x, int y, UINT keyFlags);
+void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture);
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy);
 void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu);
 void mag_OnExitMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu);
@@ -76,6 +85,19 @@ static const SETTINGSOPTION g_captureApiOptions[] =
   { CAPTURE_API_DWM_THUMBNAIL, _T("DWM Thumbnail"), TRUE },
   { CAPTURE_API_DWM_PRIVATE_VISUAL, _T("DWM Private Visual"), TRUE },
 };
+
+void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
+{
+    *lprcCapture = lpsd->di.rc;
+
+    if (IsRectEmpty(lprcCapture))
+    {
+      lprcCapture->left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      lprcCapture->top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+      lprcCapture->right = lprcCapture->left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+      lprcCapture->bottom = lprcCapture->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    }
+}
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
@@ -254,7 +276,7 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
           }
 
           lpsd->fMouseRelativeZoom = fMouseRelativeZoom;
-          if (!lpsd->fMouseRelativeZoom)
+          if (!lpsd->fMouseRelativeZoom && !lpsd->fSourceOriginPinned)
           {
             lpsd->fUseSourceOrigin = FALSE;
           }
@@ -462,7 +484,17 @@ UINT mag_OnNCHittest(HWND hWnd, int x, int y)
     case top | right:    return HTTOPRIGHT;
     case bottom | left:  return HTBOTTOMLEFT;
     case bottom | right: return HTBOTTOMRIGHT;
-    case client:         return HTCAPTION;
+    case client:
+    {
+      POINT ptClient = cursor;
+
+      if (ScreenToClient(hWnd, &ptClient) && render_minimapHitTest(hWnd, ptClient))
+      {
+        return HTCLIENT;
+      }
+
+      return HTCAPTION;
+    }
     default:             return FORWARD_WM_NCHITTEST(hWnd, x, y, DefWindowProc);
     }
 }
@@ -493,6 +525,7 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
       LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
       lpsd->fTrackCursor = !lpsd->fTrackCursor;
       lpsd->fUseSourceOrigin = FALSE;
+      lpsd->fSourceOriginPinned = FALSE;
 
       if (lpsd->fTrackCursor)
       {
@@ -588,9 +621,12 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
     if (ScreenToClient(hWnd, &ptClient) && PtInRect(&lpsd->rc, ptClient))
     {
       RECT rcSourceOld;
+      RECT rcCapture;
       const LONG clientWidth = lpsd->bi.biWidth;
       const LONG clientHeight = lpsd->bi.biHeight;
       const BOOL fMouseRelativeZoom = lpsd->fMouseRelativeZoom && !lpsd->fTrackCursor;
+      const BOOL fKeepSourceOrigin = !lpsd->fTrackCursor && lpsd->fUseSourceOrigin;
+      const BOOL fAnchorZoom = fMouseRelativeZoom || fKeepSourceOrigin;
       const FLOAT fScaleScale = powf(-logf(0.001f * (1.0f - lpsd->fScale) + .575f), 6);
       DOUBLE anchorX = 0.0;
       DOUBLE anchorY = 0.0;
@@ -600,7 +636,7 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
         return;
       }
 
-      if (fMouseRelativeZoom)
+      if (fAnchorZoom)
       {
         render_computeSourceRect(hWnd, &rcSourceOld);
         if (IsRectEmpty(&rcSourceOld))
@@ -608,30 +644,110 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
           return;
         }
 
-        anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)ptClient.x * (DOUBLE)RECTWIDTH(rcSourceOld) / (DOUBLE)clientWidth);
-        anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)ptClient.y * (DOUBLE)RECTHEIGHT(rcSourceOld) / (DOUBLE)clientHeight);
+        if (fMouseRelativeZoom)
+        {
+          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)ptClient.x * (DOUBLE)RECTWIDTH(rcSourceOld) / (DOUBLE)clientWidth);
+          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)ptClient.y * (DOUBLE)RECTHEIGHT(rcSourceOld) / (DOUBLE)clientHeight);
+        }
+        else
+        {
+          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)RECTWIDTH(rcSourceOld) / 2.0);
+          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)RECTHEIGHT(rcSourceOld) / 2.0);
+        }
       }
 
       lpsd->fScale += ((0.0f < fScaleScale) ? fScaleScale : -1.0f + fScaleScale) * ((!zDelta) ? 0.0f : (0 < zDelta) ? -1.0f : 1.0f);
       lpsd->fScale = CLAMP(lpsd->fScale, 0.001f, 1.0f);
       lpsd->fTexScaler = 1.0f + (15.0f * (1.0f - lpsd->fScale));
 
-      if (fMouseRelativeZoom && lpsd->fTexScaler > 1.0001f)
+      if (fAnchorZoom && lpsd->fTexScaler > 1.0001f)
       {
         const LONG srcW = max(1, (LONG)(clientWidth / lpsd->fTexScaler));
         const LONG srcH = max(1, (LONG)(clientHeight / lpsd->fTexScaler));
+        LONG srcX;
+        LONG srcY;
 
-        lpsd->ptSourceOrigin.x = (LONG)(anchorX - ((DOUBLE)ptClient.x * (DOUBLE)srcW / (DOUBLE)clientWidth));
-        lpsd->ptSourceOrigin.y = (LONG)(anchorY - ((DOUBLE)ptClient.y * (DOUBLE)srcH / (DOUBLE)clientHeight));
+        mag_GetCaptureRect(lpsd, &rcCapture);
+
+        if (fMouseRelativeZoom)
+        {
+          srcX = (LONG)(anchorX - ((DOUBLE)ptClient.x * (DOUBLE)srcW / (DOUBLE)clientWidth));
+          srcY = (LONG)(anchorY - ((DOUBLE)ptClient.y * (DOUBLE)srcH / (DOUBLE)clientHeight));
+        }
+        else
+        {
+          srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
+          srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
+        }
+
+        lpsd->ptSourceOrigin.x = render_clipSourceOrigin(srcX, srcW, rcCapture.left, rcCapture.right);
+        lpsd->ptSourceOrigin.y = render_clipSourceOrigin(srcY, srcH, rcCapture.top, rcCapture.bottom);
         lpsd->fUseSourceOrigin = TRUE;
+        if (!fKeepSourceOrigin)
+        {
+          lpsd->fSourceOriginPinned = FALSE;
+        }
       }
       else
       {
         lpsd->fUseSourceOrigin = FALSE;
+        lpsd->fSourceOriginPinned = FALSE;
       }
 
       renderRender(hWnd);
     }
+}
+
+void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
+{
+    POINT ptClient = { x, y };
+
+    UNREFERENCED_PARAMETER(fDoubleClick);
+    UNREFERENCED_PARAMETER(keyFlags);
+
+    if (render_minimapBeginDrag(hWnd, ptClient))
+    {
+      SetCapture(hWnd);
+      renderRender(hWnd);
+    }
+}
+
+void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    UNREFERENCED_PARAMETER(x);
+    UNREFERENCED_PARAMETER(y);
+    UNREFERENCED_PARAMETER(keyFlags);
+
+    if (lpsd && lpsd->fMiniMapDragging)
+    {
+      render_minimapEndDrag(hWnd);
+      if (GetCapture() == hWnd)
+      {
+        ReleaseCapture();
+      }
+      renderRender(hWnd);
+    }
+}
+
+void mag_OnMouseMove(HWND hWnd, int x, int y, UINT keyFlags)
+{
+    POINT ptClient = { x, y };
+
+    UNREFERENCED_PARAMETER(keyFlags);
+
+    if (render_minimapDrag(hWnd, ptClient))
+    {
+      renderRender(hWnd);
+    }
+}
+
+void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture)
+{
+    UNREFERENCED_PARAMETER(hwndNewCapture);
+
+    render_minimapEndDrag(hWnd);
 }
 
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
@@ -678,7 +794,10 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
         lpsd->hCaptureDC &&
         (!(lpwndpos->flags & SWP_NOMOVE) || !(lpwndpos->flags & SWP_NOSIZE)))
     {
-      lpsd->fUseSourceOrigin = FALSE;
+      if (!lpsd->fSourceOriginPinned)
+      {
+        lpsd->fUseSourceOrigin = FALSE;
+      }
       renderRender(hWnd);
     }
 }
@@ -701,6 +820,10 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
+    HANDLE_MSG(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
+    HANDLE_MSG(hWnd,  WM_LBUTTONUP,         mag_OnLButtonUp);
+    HANDLE_MSG(hWnd,  WM_MOUSEMOVE,         mag_OnMouseMove);
+    HANDLE_MSG(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
     HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
     HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);
     HANDLE_MSG(hWnd,  WM_ENTERSIZEMOVE,     mag_OnEnterSizeMove);

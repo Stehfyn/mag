@@ -52,9 +52,14 @@ DWORD WINAPI main_VBlankThreadProc(LPVOID lpParameter)
       {
         SetEvent(lpThread->hVBlankEvent);
       }
-      else if (WAIT_OBJECT_0 == WaitForSingleObject(lpThread->hStopEvent, MAIN_RENDER_INTERVAL_MS))
+      else
       {
-        break;
+        if (WAIT_OBJECT_0 == WaitForSingleObject(lpThread->hStopEvent, MAIN_RENDER_INTERVAL_MS))
+        {
+          break;
+        }
+
+        SetEvent(lpThread->hVBlankEvent);
       }
     }
 

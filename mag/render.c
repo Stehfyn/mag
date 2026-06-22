@@ -80,6 +80,11 @@ static const IID IID_IDirect3DDxgiInterfaceAccess =
 #define DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL 163
 #define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164
 #define DWM_PRIVATE_MULTIWINDOW_BUILD 20000
+#define MINIMAP_MARGIN 12
+#define MINIMAP_MAX_WIDTH 220
+#define MINIMAP_MAX_HEIGHT 140
+#define MINIMAP_MIN_WIDTH 48
+#define MINIMAP_MIN_HEIGHT 36
 
 #ifndef WS_EX_NOREDIRECTIONBITMAP
 #define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
@@ -196,6 +201,12 @@ typedef struct MAG_RTL_OSVERSIONINFOW
 
 typedef LONG (WINAPI* PFN_RTLGETVERSION)(LPMAG_RTL_OSVERSIONINFOW lpVersionInformation);
 
+typedef struct MINIMAPLAYOUT
+{
+  RECT rcCapture;
+  RECT rcMap;
+} MINIMAPLAYOUT, *LPMINIMAPLAYOUT;
+
 #define IDirect3DDxgiInterfaceAccess_GetInterface(This, iid, p) ((This)->lpVtbl->GetInterface((This), (iid), (p)))
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
@@ -206,6 +217,10 @@ void render_gdiCreateResources(HWND hWnd);
 void render_wglResizeSurface(HWND hWnd);
 void render_gdiResizeSurface(HWND hWnd);
 void render_wglRender(HWND hWnd);
+void render_wglDrawMiniMap(HWND hWnd);
+void render_wglClientVertex(LPSHAREDWGLDATA lpsd, FLOAT x, FLOAT y);
+void render_wglFillClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
+void render_wglStrokeClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
 void render_gdiCaptureScreen(HWND hWnd);
 void render_updateSurfaceInfo(HWND hWnd);
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd);
@@ -221,6 +236,11 @@ BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
 void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
 BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
+BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
+BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout);
+void render_minimapMapSourceRectToClient(const MINIMAPLAYOUT* lpLayout, const RECT* lprcSource, RECT* lprcClient);
+POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptClient);
+BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient);
 BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_dxgiCaptureScreen(HWND hWnd);
 void render_wgcCloseObject(IUnknown* object);
@@ -657,6 +677,194 @@ BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedS
            lprcSource->top != lprcClippedSource->top ||
            lprcSource->right != lprcClippedSource->right ||
            lprcSource->bottom != lprcClippedSource->bottom;
+}
+
+BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
+{
+    *lprcCapture = lpsd->di.rc;
+
+    if (IsRectEmpty(lprcCapture))
+    {
+      lprcCapture->left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      lprcCapture->top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+      lprcCapture->right = lprcCapture->left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+      lprcCapture->bottom = lprcCapture->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    }
+
+    return RECTWIDTH((*lprcCapture)) > 0 && RECTHEIGHT((*lprcCapture)) > 0;
+}
+
+BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const LONG clientWidth = lpsd->bi.biWidth;
+    const LONG clientHeight = lpsd->bi.biHeight;
+    const LONG maxWidth = min(MINIMAP_MAX_WIDTH, clientWidth - (MINIMAP_MARGIN * 2));
+    const LONG maxHeight = min(MINIMAP_MAX_HEIGHT, clientHeight - (MINIMAP_MARGIN * 2));
+    const LONG captureWidth = render_minimapGetCaptureRect(lpsd, &lpLayout->rcCapture) ? RECTWIDTH(lpLayout->rcCapture) : 0;
+    const LONG captureHeight = RECTHEIGHT(lpLayout->rcCapture);
+    LONG mapWidth;
+    LONG mapHeight;
+
+    if (lpsd->fTexScaler <= 1.0001f ||
+        maxWidth < MINIMAP_MIN_WIDTH ||
+        maxHeight < MINIMAP_MIN_HEIGHT ||
+        captureWidth < 1 ||
+        captureHeight < 1)
+    {
+      SetRectEmpty(&lpLayout->rcMap);
+      return FALSE;
+    }
+
+    if (MulDiv(maxWidth, captureHeight, captureWidth) <= maxHeight)
+    {
+      mapWidth = maxWidth;
+      mapHeight = max(1, MulDiv(maxWidth, captureHeight, captureWidth));
+    }
+    else
+    {
+      mapHeight = maxHeight;
+      mapWidth = max(1, MulDiv(maxHeight, captureWidth, captureHeight));
+    }
+
+    SetRect(
+      &lpLayout->rcMap,
+      MINIMAP_MARGIN,
+      MINIMAP_MARGIN,
+      MINIMAP_MARGIN + mapWidth,
+      MINIMAP_MARGIN + mapHeight);
+
+    return TRUE;
+}
+
+void render_minimapMapSourceRectToClient(const MINIMAPLAYOUT* lpLayout, const RECT* lprcSource, RECT* lprcClient)
+{
+    const LONG captureWidth = RECTWIDTH(lpLayout->rcCapture);
+    const LONG captureHeight = RECTHEIGHT(lpLayout->rcCapture);
+    const LONG mapWidth = RECTWIDTH(lpLayout->rcMap);
+    const LONG mapHeight = RECTHEIGHT(lpLayout->rcMap);
+
+    lprcClient->left = lpLayout->rcMap.left + MulDiv(lprcSource->left - lpLayout->rcCapture.left, mapWidth, captureWidth);
+    lprcClient->top = lpLayout->rcMap.top + MulDiv(lprcSource->top - lpLayout->rcCapture.top, mapHeight, captureHeight);
+    lprcClient->right = lpLayout->rcMap.left + MulDiv(lprcSource->right - lpLayout->rcCapture.left, mapWidth, captureWidth);
+    lprcClient->bottom = lpLayout->rcMap.top + MulDiv(lprcSource->bottom - lpLayout->rcCapture.top, mapHeight, captureHeight);
+}
+
+POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptClient)
+{
+    POINT ptSource;
+    const LONG captureWidth = RECTWIDTH(lpLayout->rcCapture);
+    const LONG captureHeight = RECTHEIGHT(lpLayout->rcCapture);
+    const LONG mapWidth = RECTWIDTH(lpLayout->rcMap);
+    const LONG mapHeight = RECTHEIGHT(lpLayout->rcMap);
+
+    ptClient.x = CLAMP(ptClient.x, lpLayout->rcMap.left, lpLayout->rcMap.right);
+    ptClient.y = CLAMP(ptClient.y, lpLayout->rcMap.top, lpLayout->rcMap.bottom);
+    ptSource.x = lpLayout->rcCapture.left + MulDiv(ptClient.x - lpLayout->rcMap.left, captureWidth, mapWidth);
+    ptSource.y = lpLayout->rcCapture.top + MulDiv(ptClient.y - lpLayout->rcMap.top, captureHeight, mapHeight);
+    ptSource.x = CLAMP(ptSource.x, lpLayout->rcCapture.left, lpLayout->rcCapture.right);
+    ptSource.y = CLAMP(ptSource.y, lpLayout->rcCapture.top, lpLayout->rcCapture.bottom);
+    return ptSource;
+}
+
+BOOL render_minimapHitTest(HWND hWnd, POINT ptClient)
+{
+    MINIMAPLAYOUT layout;
+
+    return render_minimapComputeLayout(hWnd, &layout) && PtInRect(&layout.rcMap, ptClient);
+}
+
+BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    POINT ptSource;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+
+    if (!render_minimapComputeLayout(hWnd, &layout))
+    {
+      return FALSE;
+    }
+
+    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+    srcW = RECTWIDTH(rcSource);
+    srcH = RECTHEIGHT(rcSource);
+    if (srcW < 1 || srcH < 1)
+    {
+      return FALSE;
+    }
+
+    ptSource = render_minimapClientPointToSource(&layout, ptClient);
+    srcX = ptSource.x - lpsd->ptMiniMapDragOffset.x;
+    srcY = ptSource.y - lpsd->ptMiniMapDragOffset.y;
+    srcX = render_clipSourceOrigin(srcX, srcW, layout.rcCapture.left, layout.rcCapture.right);
+    srcY = render_clipSourceOrigin(srcY, srcH, layout.rcCapture.top, layout.rcCapture.bottom);
+
+    lpsd->fTrackCursor = FALSE;
+    lpsd->fUseSourceOrigin = TRUE;
+    lpsd->fSourceOriginPinned = TRUE;
+    lpsd->ptSourceOrigin.x = srcX;
+    lpsd->ptSourceOrigin.y = srcY;
+    return TRUE;
+}
+
+BOOL render_minimapBeginDrag(HWND hWnd, POINT ptClient)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    POINT ptSource;
+
+    if (!render_minimapComputeLayout(hWnd, &layout) || !PtInRect(&layout.rcMap, ptClient))
+    {
+      return FALSE;
+    }
+
+    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+    if (IsRectEmpty(&rcSource))
+    {
+      return FALSE;
+    }
+
+    ptSource = render_minimapClientPointToSource(&layout, ptClient);
+    if (!IsRectEmpty(&rcClippedSource) && PtInRect(&rcClippedSource, ptSource))
+    {
+      lpsd->ptMiniMapDragOffset.x = ptSource.x - rcSource.left;
+      lpsd->ptMiniMapDragOffset.y = ptSource.y - rcSource.top;
+    }
+    else
+    {
+      lpsd->ptMiniMapDragOffset.x = RECTWIDTH(rcSource) / 2;
+      lpsd->ptMiniMapDragOffset.y = RECTHEIGHT(rcSource) / 2;
+    }
+
+    lpsd->fMiniMapDragging = TRUE;
+    return render_minimapSetSourceFromPoint(hWnd, ptClient);
+}
+
+BOOL render_minimapDrag(HWND hWnd, POINT ptClient)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd->fMiniMapDragging)
+    {
+      return FALSE;
+    }
+
+    return render_minimapSetSourceFromPoint(hWnd, ptClient);
+}
+
+void render_minimapEndDrag(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    lpsd->fMiniMapDragging = FALSE;
 }
 
 BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection)
@@ -1249,6 +1457,7 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
       if (!fCenterOnCursor)
       {
         lpsd->fUseSourceOrigin = FALSE;
+        lpsd->fSourceOriginPinned = FALSE;
       }
     }
     else
@@ -1786,7 +1995,7 @@ void render_wglInit(HWND hWnd)
       WGL_COLOR_BITS_ARB, 32,
       WGL_DEPTH_BITS_ARB, 24,
       WGL_ALPHA_BITS_ARB, 8,
-      WGL_SWAP_METHOD_ARB,WGL_SWAP_COPY_ARB,
+      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       0
     };
@@ -1812,7 +2021,7 @@ void render_wglInit(HWND hWnd)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
 
-    wglSwapIntervalEXT(0);
+    wglSwapIntervalEXT(-1);
 }
 
 void render_wglInitPBuffer(HWND hWnd)
@@ -1847,7 +2056,7 @@ void render_wglInitPBuffer(HWND hWnd)
       WGL_COLOR_BITS_ARB, 32,
       WGL_DEPTH_BITS_ARB, 24,
       WGL_ALPHA_BITS_ARB, 8,
-      WGL_SWAP_METHOD_ARB,WGL_SWAP_COPY_ARB,
+      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       0
     };
@@ -1972,6 +2181,95 @@ void render_gdiResizeSurface(HWND hWnd)
     render_gdiCreateCaptureBitmap(hWnd);
 }
 
+void render_wglClientVertex(LPSHAREDWGLDATA lpsd, FLOAT x, FLOAT y)
+{
+    glVertex2f(
+      -1.0f + (2.0f * x / (FLOAT)lpsd->bi.biWidth),
+      1.0f - (2.0f * y / (FLOAT)lpsd->bi.biHeight));
+}
+
+void render_wglFillClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
+{
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->top);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->top);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->bottom);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->bottom);
+    glEnd();
+}
+
+void render_wglStrokeClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
+{
+    glColor4f(r, g, b, a);
+    glBegin(GL_LINE_LOOP);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->top);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->top);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->bottom);
+    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->bottom);
+    glEnd();
+}
+
+void render_wglDrawMiniMap(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    RECT rcPanel;
+    RECT rcVisibleClient;
+    UINT i;
+
+    if (!render_minimapComputeLayout(hWnd, &layout))
+    {
+      return;
+    }
+
+    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+
+    rcPanel = layout.rcMap;
+    InflateRect(&rcPanel, 4, 4);
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glLineWidth(1.0f);
+
+    render_wglFillClientRect(lpsd, &rcPanel, 0.02f, 0.025f, 0.03f, 0.72f);
+    render_wglFillClientRect(lpsd, &layout.rcMap, 0.11f, 0.12f, 0.13f, 0.78f);
+
+    for (i = 0; i < lpsd->di.numMonitors; ++i)
+    {
+      RECT rcMonitor;
+
+      render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
+      render_wglFillClientRect(lpsd, &rcMonitor, 0.18f, 0.19f, 0.20f, 0.58f);
+    }
+
+    for (i = 0; i < lpsd->di.numMonitors; ++i)
+    {
+      RECT rcMonitor;
+
+      render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
+      render_wglStrokeClientRect(lpsd, &rcMonitor, 0.55f, 0.58f, 0.62f, 0.70f);
+    }
+
+    render_wglStrokeClientRect(lpsd, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f);
+
+    if (!IsRectEmpty(&rcClippedSource))
+    {
+      render_minimapMapSourceRectToClient(&layout, &rcClippedSource, &rcVisibleClient);
+      render_wglFillClientRect(lpsd, &rcVisibleClient, 0.86f, 0.92f, 1.0f, 0.12f);
+      glLineWidth(2.0f);
+      render_wglStrokeClientRect(lpsd, &rcVisibleClient, 0.90f, 0.96f, 1.0f, 0.96f);
+      glLineWidth(1.0f);
+    }
+
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 void render_wglRender(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -1981,19 +2279,20 @@ void render_wglRender(HWND hWnd)
       return;
     }
 
-    //glClearColor(
-    //  lpsd->cfClearColor[0],
-    //  lpsd->cfClearColor[1],
-    //  lpsd->cfClearColor[2],
-    //  lpsd->cfClearColor[3]);
-    //glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
     glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
 
+    glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
     //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
 
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f);
     glVertex2f(-1.0f, -1.0f);
@@ -2004,6 +2303,9 @@ void render_wglRender(HWND hWnd)
     glTexCoord2f(0.0f, 1.0f);
     glVertex2f(-1.0f, 1.0f);
     glEnd();
+
+    render_wglDrawMiniMap(hWnd);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     //glFlush();
     SwapBuffers(lpsd->hDC);
