@@ -112,6 +112,7 @@ typedef struct SHAREDWGLDATA
   POINT            ptSourceOrigin;
   POINT            ptMiniMapDragOffset;
   POINT            ptMiniMapLastCursor;
+  HWND             hwndLensMouseTarget;
   DWORD            dwMiniMapLastActivity;
   RECT             rc;
   DISPLAYINFO      di;
