@@ -71,7 +71,7 @@ static const SETTINGSOPTION g_captureApiOptions[] =
 {
   { CAPTURE_API_GDI_BITBLT, _T("GDI BitBlt"), TRUE },
   { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, _T("DXGI Desktop Duplication"), TRUE },
-  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, _T("Windows Graphics Capture (planned)"), FALSE },
+  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, _T("Windows Graphics Capture"), TRUE },
   { CAPTURE_API_MAGNIFICATION, _T("Magnification API (planned)"), FALSE },
 };
 

@@ -64,11 +64,11 @@ _tWinMain(
       GUITHREADINFO gti = { sizeof(gti) };
 
       if (GetGUIThreadInfo(GetCurrentThreadId(), &gti) &&
-          SetWaitableTimer(hTimer, &liDueTime, 2 *USER_TIMER_MINIMUM, TimerAPCProc, gti.hwndActive, FALSE))
+          SetWaitableTimer(hTimer, &liDueTime, USER_TIMER_MINIMUM, TimerAPCProc, gti.hwndActive, FALSE))
       {
         LARGE_INTEGER liPumpTime;
 
-        liPumpTime.QuadPart = -MILLISECONDS_TO_100NANOSECONDS(1.0);
+        liPumpTime.QuadPart = -MILLISECONDS_TO_100NANOSECONDS(7.0);
 
         while (PumpMessageQueue(gti.hwndActive))
         {

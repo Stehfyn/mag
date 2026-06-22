@@ -1,11 +1,83 @@
 #include "render.h"
 
+#include <roapi.h>
+#include <windows.graphics.capture.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
+
 #pragma comment(lib, "d3d11")
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "dxguid")
+#pragma comment(lib, "runtimeobject")
 
 #define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
 #define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)
+
+typedef __x_ABI_CWindows_CFoundation_CIClosable WGCCLOSABLE;
+typedef __x_ABI_CWindows_CGraphics_CSizeInt32 WGCSIZE;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureItem WGCITEM;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession WGCSESSION;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession3 WGCSESSION3;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame WGCFRAME;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool WGCFRAMEPOOL;
+typedef __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePoolStatics2 WGCFRAMEPOOLSTATICS2;
+typedef __x_ABI_CWindows_CGraphics_CDirectX_CDirect3D11_CIDirect3DDevice WGCD3DDEVICE;
+typedef __x_ABI_CWindows_CGraphics_CDirectX_CDirect3D11_CIDirect3DSurface WGCSURFACE;
+
+typedef struct IGraphicsCaptureItemInterop IGraphicsCaptureItemInterop;
+typedef struct IGraphicsCaptureItemInteropVtbl
+{
+  BEGIN_INTERFACE
+  HRESULT (STDMETHODCALLTYPE* QueryInterface)(IGraphicsCaptureItemInterop* This, REFIID riid, void** ppvObject);
+  ULONG (STDMETHODCALLTYPE* AddRef)(IGraphicsCaptureItemInterop* This);
+  ULONG (STDMETHODCALLTYPE* Release)(IGraphicsCaptureItemInterop* This);
+  HRESULT (STDMETHODCALLTYPE* CreateForWindow)(IGraphicsCaptureItemInterop* This, HWND window, REFIID riid, void** result);
+  HRESULT (STDMETHODCALLTYPE* CreateForMonitor)(IGraphicsCaptureItemInterop* This, HMONITOR monitor, REFIID riid, void** result);
+  END_INTERFACE
+} IGraphicsCaptureItemInteropVtbl;
+
+struct IGraphicsCaptureItemInterop
+{
+  CONST_VTBL struct IGraphicsCaptureItemInteropVtbl* lpVtbl;
+};
+
+static const IID IID_IGraphicsCaptureItemInterop =
+  { 0x3628E81B, 0x3CAC, 0x4C60, { 0xB7, 0xF4, 0x23, 0xCE, 0x0E, 0x0C, 0x33, 0x56 } };
+
+static const IID IID_WGC_IClosable =
+  { 0x30D5A829, 0x7FA4, 0x4026, { 0x83, 0xBB, 0xD7, 0x5B, 0xAE, 0x4E, 0xA9, 0x9E } };
+
+static const IID IID_WGC_IDirect3DDevice =
+  { 0xA37624AB, 0x8D5F, 0x4650, { 0x9D, 0x3E, 0x9E, 0xAE, 0x3D, 0x9B, 0xC6, 0x70 } };
+
+static const IID IID_WGC_IGraphicsCaptureItem =
+  { 0x79C3F95B, 0x31F7, 0x4EC2, { 0xA4, 0x64, 0x63, 0x2E, 0xF5, 0xD3, 0x07, 0x60 } };
+
+static const IID IID_WGC_IGraphicsCaptureSession3 =
+  { 0xF2CDD966, 0x22AE, 0x5EA1, { 0x95, 0x96, 0x3A, 0x28, 0x93, 0x44, 0xC3, 0xBE } };
+
+static const IID IID_WGC_IDirect3D11CaptureFramePoolStatics2 =
+  { 0x589B103F, 0x6BBC, 0x5DF5, { 0xA9, 0x91, 0x02, 0xE2, 0x8B, 0x3B, 0x66, 0xD5 } };
+
+typedef struct IDirect3DDxgiInterfaceAccess IDirect3DDxgiInterfaceAccess;
+typedef struct IDirect3DDxgiInterfaceAccessVtbl
+{
+  BEGIN_INTERFACE
+  HRESULT (STDMETHODCALLTYPE* QueryInterface)(IDirect3DDxgiInterfaceAccess* This, REFIID riid, void** ppvObject);
+  ULONG (STDMETHODCALLTYPE* AddRef)(IDirect3DDxgiInterfaceAccess* This);
+  ULONG (STDMETHODCALLTYPE* Release)(IDirect3DDxgiInterfaceAccess* This);
+  HRESULT (STDMETHODCALLTYPE* GetInterface)(IDirect3DDxgiInterfaceAccess* This, REFIID iid, void** p);
+  END_INTERFACE
+} IDirect3DDxgiInterfaceAccessVtbl;
+
+struct IDirect3DDxgiInterfaceAccess
+{
+  CONST_VTBL struct IDirect3DDxgiInterfaceAccessVtbl* lpVtbl;
+};
+
+static const IID IID_IDirect3DDxgiInterfaceAccess =
+  { 0xA9B3D012, 0x3DF2, 0x4EE3, { 0xB8, 0xD1, 0x86, 0x95, 0xF4, 0x57, 0xD3, 0xC1 } };
+
+#define IDirect3DDxgiInterfaceAccess_GetInterface(This, iid, p) ((This)->lpVtbl->GetInterface((This), (iid), (p)))
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
 void render_wglInit(HWND hWnd);
@@ -30,6 +102,20 @@ BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
 void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
 BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_dxgiCaptureScreen(HWND hWnd);
+void render_wgcCloseObject(IUnknown* object);
+HRESULT render_wgcGetActivationFactory(PCWSTR pszRuntimeClass, REFIID riid, void** ppv);
+BOOL render_wgcEnsureWinRt(HWND hWnd);
+void render_wgcDeleteMonitorResources(LPWGCMONITORCAPTURE lpCapture);
+void render_wgcDeleteResources(HWND hWnd);
+LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor);
+LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPSHAREDWGLDATA lpsd);
+BOOL render_wgcCreateItemForMonitor(HMONITOR hMonitor, WGCITEM** lplpItem);
+BOOL render_wgcCreateCaptureForMonitor(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture);
+BOOL render_wgcEnsureCapture(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture);
+BOOL render_wgcEnsureStagingTexture(LPWGCMONITORCAPTURE lpCapture, UINT width, UINT height);
+BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture);
+BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
+void render_wgcCaptureScreen(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
 {
@@ -449,6 +535,494 @@ BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lp
     render_dxgiCopyMappedPixelsToRect(lpsd, (const BYTE*)mapped.pData, srcPartWidth, srcPartHeight, mapped.RowPitch, &rcDst);
     ID3D11DeviceContext_Unmap(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiStagingTexture, 0);
 
+    return TRUE;
+}
+
+void render_wgcCloseObject(IUnknown* object)
+{
+    WGCCLOSABLE* closable = NULL;
+
+    if (object &&
+        SUCCEEDED(IUnknown_QueryInterface(object, &IID_WGC_IClosable, (void**)&closable)))
+    {
+      __x_ABI_CWindows_CFoundation_CIClosable_Close(closable);
+      SAFERELEASE(closable);
+    }
+}
+
+HRESULT render_wgcGetActivationFactory(PCWSTR pszRuntimeClass, REFIID riid, void** ppv)
+{
+    HSTRING runtimeClass = NULL;
+    HRESULT hr;
+
+    *ppv = NULL;
+
+    hr = WindowsCreateString(pszRuntimeClass, (UINT32)lstrlenW(pszRuntimeClass), &runtimeClass);
+    if (SUCCEEDED(hr))
+    {
+      hr = RoGetActivationFactory(runtimeClass, riid, ppv);
+      WindowsDeleteString(runtimeClass);
+    }
+
+    return hr;
+}
+
+BOOL render_wgcEnsureWinRt(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    HRESULT hr;
+
+    if (lpsd->fWinRtInitialized)
+    {
+      return TRUE;
+    }
+
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
+    if (SUCCEEDED(hr))
+    {
+      lpsd->fWinRtInitialized = TRUE;
+      return TRUE;
+    }
+
+    return RPC_E_CHANGED_MODE == hr;
+}
+
+void render_wgcDeleteMonitorResources(LPWGCMONITORCAPTURE lpCapture)
+{
+    render_wgcCloseObject(lpCapture->wgcSession);
+    render_wgcCloseObject(lpCapture->wgcFramePool);
+
+    SAFERELEASE(lpCapture->wgcStagingTexture);
+    SAFERELEASE(lpCapture->wgcFrameTexture);
+    SAFERELEASE(lpCapture->wgcSession);
+    SAFERELEASE(lpCapture->wgcFramePool);
+    SAFERELEASE(lpCapture->wgcItem);
+    SAFERELEASE(lpCapture->wgcDevice);
+    SAFERELEASE(lpCapture->d3dContext);
+    SAFERELEASE(lpCapture->d3dDevice);
+    ZeroMemory(lpCapture, sizeof(*lpCapture));
+}
+
+void render_wgcDeleteResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->wgcMonitors); ++i)
+    {
+      render_wgcDeleteMonitorResources(&lpsd->wgcMonitors[i]);
+    }
+}
+
+LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor)
+{
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->wgcMonitors); ++i)
+    {
+      if (lpsd->wgcMonitors[i].hMonitor == hMonitor)
+      {
+        return &lpsd->wgcMonitors[i];
+      }
+    }
+
+    return NULL;
+}
+
+LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPSHAREDWGLDATA lpsd)
+{
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->wgcMonitors); ++i)
+    {
+      if (!lpsd->wgcMonitors[i].hMonitor)
+      {
+        return &lpsd->wgcMonitors[i];
+      }
+    }
+
+    return NULL;
+}
+
+BOOL render_wgcCreateItemForMonitor(HMONITOR hMonitor, WGCITEM** lplpItem)
+{
+    IGraphicsCaptureItemInterop* interop = NULL;
+    HRESULT hr;
+
+    *lplpItem = NULL;
+
+    hr = render_wgcGetActivationFactory(
+      RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem,
+      &IID_IGraphicsCaptureItemInterop,
+      (void**)&interop);
+
+    if (SUCCEEDED(hr))
+    {
+      hr = interop->lpVtbl->CreateForMonitor(
+        interop,
+        hMonitor,
+        &IID_WGC_IGraphicsCaptureItem,
+        (void**)lplpItem);
+    }
+
+    SAFERELEASE(interop);
+    return SUCCEEDED(hr) && *lplpItem;
+}
+
+BOOL render_wgcCreateCaptureForMonitor(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPWGCMONITORCAPTURE lpCapture = render_wgcFindFreeMonitorCapture(lpsd);
+    IDXGIFactory1* factory = NULL;
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* output = NULL;
+    IDXGIDevice* dxgiDevice = NULL;
+    IInspectable* inspectableDevice = NULL;
+    WGCITEM* item = NULL;
+    WGCFRAMEPOOLSTATICS2* framePoolStatics = NULL;
+    WGCSESSION3* session3 = NULL;
+    HRESULT hr;
+    UINT adapterIndex;
+    BOOL fResult = FALSE;
+
+    if (!lpCapture || !render_wgcEnsureWinRt(hWnd))
+    {
+      return FALSE;
+    }
+
+    hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void**)&factory);
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    for (adapterIndex = 0; SUCCEEDED(IDXGIFactory1_EnumAdapters1(factory, adapterIndex, &adapter)); ++adapterIndex)
+    {
+      UINT outputIndex;
+
+      for (outputIndex = 0; SUCCEEDED(IDXGIAdapter1_EnumOutputs(adapter, outputIndex, &output)); ++outputIndex)
+      {
+        DXGI_OUTPUT_DESC outputDesc;
+
+        if (SUCCEEDED(IDXGIOutput_GetDesc(output, &outputDesc)) && outputDesc.Monitor == hMonitor)
+        {
+          D3D11_TEXTURE2D_DESC frameDesc = { 0 };
+          D3D_FEATURE_LEVEL featureLevel;
+          WGCSIZE itemSize = { 0 };
+
+          hr = D3D11CreateDevice(
+            (IDXGIAdapter*)adapter,
+            D3D_DRIVER_TYPE_UNKNOWN,
+            NULL,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            NULL,
+            0,
+            D3D11_SDK_VERSION,
+            &lpCapture->d3dDevice,
+            &featureLevel,
+            &lpCapture->d3dContext);
+
+          if (SUCCEEDED(hr))
+          {
+            hr = ID3D11Device_QueryInterface(lpCapture->d3dDevice, &IID_IDXGIDevice, (void**)&dxgiDevice);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, &inspectableDevice);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = IUnknown_QueryInterface(
+              (IUnknown*)inspectableDevice,
+              &IID_WGC_IDirect3DDevice,
+              (void**)&lpCapture->wgcDevice);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            if (render_wgcCreateItemForMonitor(hMonitor, &item))
+            {
+              lpCapture->wgcItem = (IUnknown*)item;
+              item = NULL;
+              hr = __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureItem_get_Size((WGCITEM*)lpCapture->wgcItem, &itemSize);
+            }
+            else
+            {
+              hr = E_FAIL;
+            }
+          }
+
+          if (SUCCEEDED(hr) && (itemSize.Width < 1 || itemSize.Height < 1))
+          {
+            itemSize.Width = RECTWIDTH(outputDesc.DesktopCoordinates);
+            itemSize.Height = RECTHEIGHT(outputDesc.DesktopCoordinates);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = render_wgcGetActivationFactory(
+              RuntimeClass_Windows_Graphics_Capture_Direct3D11CaptureFramePool,
+              &IID_WGC_IDirect3D11CaptureFramePoolStatics2,
+              (void**)&framePoolStatics);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePoolStatics2_CreateFreeThreaded(
+              framePoolStatics,
+              (WGCD3DDEVICE*)lpCapture->wgcDevice,
+              DirectXPixelFormat_B8G8R8A8UIntNormalized,
+              2,
+              itemSize,
+              (WGCFRAMEPOOL**)&lpCapture->wgcFramePool);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool_CreateCaptureSession(
+              (WGCFRAMEPOOL*)lpCapture->wgcFramePool,
+              (WGCITEM*)lpCapture->wgcItem,
+              (WGCSESSION**)&lpCapture->wgcSession);
+          }
+
+          if (SUCCEEDED(hr) &&
+              SUCCEEDED(IUnknown_QueryInterface(
+                lpCapture->wgcSession,
+                &IID_WGC_IGraphicsCaptureSession3,
+                (void**)&session3)))
+          {
+            __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession3_put_IsBorderRequired(session3, FALSE);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession_StartCapture((WGCSESSION*)lpCapture->wgcSession);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            frameDesc.Width = (UINT)itemSize.Width;
+            frameDesc.Height = (UINT)itemSize.Height;
+            frameDesc.MipLevels = 1;
+            frameDesc.ArraySize = 1;
+            frameDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            frameDesc.SampleDesc.Count = 1;
+            frameDesc.Usage = D3D11_USAGE_DEFAULT;
+
+            hr = ID3D11Device_CreateTexture2D(lpCapture->d3dDevice, &frameDesc, NULL, &lpCapture->wgcFrameTexture);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            lpCapture->hMonitor = hMonitor;
+            lpCapture->rcOutput = outputDesc.DesktopCoordinates;
+            lpCapture->wgcFrameWidth = (UINT)itemSize.Width;
+            lpCapture->wgcFrameHeight = (UINT)itemSize.Height;
+            *lplpCapture = lpCapture;
+            fResult = TRUE;
+          }
+
+          SAFERELEASE(session3);
+          SAFERELEASE(framePoolStatics);
+          SAFERELEASE(item);
+          SAFERELEASE(inspectableDevice);
+          SAFERELEASE(dxgiDevice);
+          SAFERELEASE(output);
+          SAFERELEASE(adapter);
+          SAFERELEASE(factory);
+
+          if (!fResult)
+          {
+            render_wgcDeleteMonitorResources(lpCapture);
+          }
+
+          return fResult;
+        }
+
+        SAFERELEASE(output);
+      }
+
+      SAFERELEASE(adapter);
+    }
+
+    SAFERELEASE(factory);
+    return FALSE;
+}
+
+BOOL render_wgcEnsureCapture(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPWGCMONITORCAPTURE lpCapture = render_wgcFindMonitorCapture(lpsd, hMonitor);
+
+    if (lpCapture && lpCapture->wgcFramePool && lpCapture->wgcSession)
+    {
+      *lplpCapture = lpCapture;
+      return TRUE;
+    }
+
+    return render_wgcCreateCaptureForMonitor(hWnd, hMonitor, lplpCapture);
+}
+
+BOOL render_wgcEnsureStagingTexture(LPWGCMONITORCAPTURE lpCapture, UINT width, UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc = { 0 };
+
+    if (lpCapture->wgcStagingTexture &&
+        lpCapture->wgcStagingWidth == width &&
+        lpCapture->wgcStagingHeight == height)
+    {
+      return TRUE;
+    }
+
+    SAFERELEASE(lpCapture->wgcStagingTexture);
+    lpCapture->wgcStagingWidth = 0;
+    lpCapture->wgcStagingHeight = 0;
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    if (FAILED(ID3D11Device_CreateTexture2D(lpCapture->d3dDevice, &desc, NULL, &lpCapture->wgcStagingTexture)))
+    {
+      return FALSE;
+    }
+
+    lpCapture->wgcStagingWidth = width;
+    lpCapture->wgcStagingHeight = height;
+    return TRUE;
+}
+
+BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture)
+{
+    WGCFRAME* frame = NULL;
+    WGCFRAME* latestFrame = NULL;
+    WGCSURFACE* surface = NULL;
+    IDirect3DDxgiInterfaceAccess* access = NULL;
+    ID3D11Texture2D* frameTexture = NULL;
+    WGCSIZE contentSize = { 0 };
+    HRESULT hr;
+
+    while (SUCCEEDED(__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool_TryGetNextFrame(
+      (WGCFRAMEPOOL*)lpCapture->wgcFramePool,
+      &frame)) && frame)
+    {
+      SAFERELEASE(latestFrame);
+      latestFrame = frame;
+      frame = NULL;
+    }
+
+    if (!latestFrame)
+    {
+      return lpCapture->fHasFrame;
+    }
+
+    hr = __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame_get_ContentSize(latestFrame, &contentSize);
+    if (FAILED(hr) ||
+        contentSize.Width < 1 ||
+        contentSize.Height < 1 ||
+        (UINT)contentSize.Width != lpCapture->wgcFrameWidth ||
+        (UINT)contentSize.Height != lpCapture->wgcFrameHeight)
+    {
+      SAFERELEASE(latestFrame);
+      render_wgcDeleteMonitorResources(lpCapture);
+      return FALSE;
+    }
+
+    hr = __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame_get_Surface(latestFrame, &surface);
+    if (SUCCEEDED(hr))
+    {
+      hr = IUnknown_QueryInterface((IUnknown*)surface, &IID_IDirect3DDxgiInterfaceAccess, (void**)&access);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      hr = IDirect3DDxgiInterfaceAccess_GetInterface(access, &IID_ID3D11Texture2D, (void**)&frameTexture);
+    }
+
+    if (SUCCEEDED(hr))
+    {
+      ID3D11DeviceContext_CopyResource(
+        lpCapture->d3dContext,
+        (ID3D11Resource*)lpCapture->wgcFrameTexture,
+        (ID3D11Resource*)frameTexture);
+      lpCapture->fHasFrame = TRUE;
+    }
+
+    SAFERELEASE(frameTexture);
+    SAFERELEASE(access);
+    SAFERELEASE(surface);
+    SAFERELEASE(latestFrame);
+
+    return lpCapture->fHasFrame;
+}
+
+BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection)
+{
+    RECT rcDst;
+    D3D11_BOX box;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr;
+
+    if (!render_wgcUpdateFrame(lpCapture))
+    {
+      return FALSE;
+    }
+
+    box.left = (UINT)MulDiv(lprcIntersection->left - lpCapture->rcOutput.left, lpCapture->wgcFrameWidth, RECTWIDTH(lpCapture->rcOutput));
+    box.top = (UINT)MulDiv(lprcIntersection->top - lpCapture->rcOutput.top, lpCapture->wgcFrameHeight, RECTHEIGHT(lpCapture->rcOutput));
+    box.front = 0;
+    box.right = (UINT)MulDiv(lprcIntersection->right - lpCapture->rcOutput.left, lpCapture->wgcFrameWidth, RECTWIDTH(lpCapture->rcOutput));
+    box.bottom = (UINT)MulDiv(lprcIntersection->bottom - lpCapture->rcOutput.top, lpCapture->wgcFrameHeight, RECTHEIGHT(lpCapture->rcOutput));
+    box.back = 1;
+
+    if (box.right <= box.left || box.bottom <= box.top)
+    {
+      return FALSE;
+    }
+
+    if (!render_wgcEnsureStagingTexture(lpCapture, box.right - box.left, box.bottom - box.top))
+    {
+      return FALSE;
+    }
+
+    ID3D11DeviceContext_CopySubresourceRegion(
+      lpCapture->d3dContext,
+      (ID3D11Resource*)lpCapture->wgcStagingTexture,
+      0,
+      0,
+      0,
+      0,
+      (ID3D11Resource*)lpCapture->wgcFrameTexture,
+      0,
+      &box);
+
+    hr = ID3D11DeviceContext_Map(lpCapture->d3dContext, (ID3D11Resource*)lpCapture->wgcStagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    rcDst.left = MulDiv(lprcIntersection->left - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
+    rcDst.top = MulDiv(lprcIntersection->top - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+    rcDst.right = MulDiv(lprcIntersection->right - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
+    rcDst.bottom = MulDiv(lprcIntersection->bottom - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+
+    render_dxgiCopyMappedPixelsToRect(
+      lpsd,
+      (const BYTE*)mapped.pData,
+      box.right - box.left,
+      box.bottom - box.top,
+      mapped.RowPitch,
+      &rcDst);
+
+    ID3D11DeviceContext_Unmap(lpCapture->d3dContext, (ID3D11Resource*)lpCapture->wgcStagingTexture, 0);
     return TRUE;
 }
 
@@ -913,6 +1487,109 @@ void render_dxgiCaptureScreen(HWND hWnd)
     }
 }
 
+void render_wgcCaptureScreen(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd->glScreenData)
+    {
+      const LONG cw = lpsd->bi.biWidth;
+      const LONG ch = lpsd->bi.biHeight;
+      POINT tl = { 0, 0 };
+      POINT center = { 0, 0 };
+      RECT rcVirtual = lpsd->di.rc;
+      RECT rcSource;
+      const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
+      BOOL fCenterOnCursor;
+      LONG srcW;
+      LONG srcH;
+      LONG srcX;
+      LONG srcY;
+      UINT i;
+      BOOL fCapturedAny = FALSE;
+
+      if (!ClientToScreen(hWnd, &tl))
+      {
+        return;
+      }
+
+      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
+      if (!fCenterOnCursor)
+      {
+        center.x = tl.x + cw / 2;
+        center.y = tl.y + ch / 2;
+      }
+
+      if (m <= 1.0001f)
+      {
+        srcW = cw;
+        srcH = ch;
+        srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
+        srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
+        lpsd->pt = fCenterOnCursor ? center : tl;
+      }
+      else
+      {
+        srcW = (LONG)(cw / m);
+        srcH = (LONG)(ch / m);
+
+        if (srcW < 1) srcW = 1;
+        if (srcH < 1) srcH = 1;
+
+        srcX = center.x - srcW / 2;
+        srcY = center.y - srcH / 2;
+        lpsd->pt = center;
+      }
+
+      if (IsRectEmpty(&rcVirtual))
+      {
+        rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+      }
+
+      srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
+      srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
+      SetRect(&rcSource, srcX, srcY, srcX + srcW, srcY + srcH);
+
+      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+
+      for (i = 0; i < lpsd->di.numMonitors; ++i)
+      {
+        RECT rcMonitor = lpsd->di.monitors[i].monitorInfoEx.rcMonitor;
+        RECT rcIntersection;
+        POINT ptIntersection;
+        HMONITOR hMonitor;
+        LPWGCMONITORCAPTURE lpCapture = NULL;
+
+        if (!IntersectRect(&rcIntersection, &rcSource, &rcMonitor))
+        {
+          continue;
+        }
+
+        ptIntersection.x = rcIntersection.left + RECTWIDTH(rcIntersection) / 2;
+        ptIntersection.y = rcIntersection.top + RECTHEIGHT(rcIntersection) / 2;
+        hMonitor = MonitorFromPoint(ptIntersection, MONITOR_DEFAULTTONULL);
+
+        if (!hMonitor ||
+            !render_wgcEnsureCapture(hWnd, hMonitor, &lpCapture) ||
+            !render_wgcCaptureIntersection(lpsd, lpCapture, &rcSource, &rcIntersection))
+        {
+          render_gdiCaptureScreen(hWnd);
+          return;
+        }
+
+        fCapturedAny = TRUE;
+      }
+
+      if (!fCapturedAny)
+      {
+        render_gdiCaptureScreen(hWnd);
+      }
+    }
+}
+
 void renderInit(HWND hWnd)
 {
     render_wglInit(hWnd);
@@ -921,7 +1598,16 @@ void renderInit(HWND hWnd)
 
 void renderCleanup(HWND hWnd)
 {
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    render_wgcDeleteResources(hWnd);
     render_dxgiDeleteResources(hWnd);
+
+    if (lpsd->fWinRtInitialized)
+    {
+      RoUninitialize();
+      lpsd->fWinRtInitialized = FALSE;
+    }
 }
 
 void renderResizeCapture(HWND hWnd)
@@ -936,11 +1622,18 @@ void renderRender(HWND hWnd)
 
     switch (lpsd->captureApi)
     {
+    case CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE:
+      render_dxgiDeleteResources(hWnd);
+      render_wgcCaptureScreen(hWnd);
+      break;
     case CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
+      render_wgcDeleteResources(hWnd);
       render_dxgiCaptureScreen(hWnd);
       break;
     case CAPTURE_API_GDI_BITBLT:
     default:
+      render_wgcDeleteResources(hWnd);
+      render_dxgiDeleteResources(hWnd);
       render_gdiCaptureScreen(hWnd);
       break;
     }

@@ -39,9 +39,29 @@ typedef struct DXGIOUTPUTCAPTURE
   BOOL                      fHasFrame;
 } DXGIOUTPUTCAPTURE, *LPDXGIOUTPUTCAPTURE;
 
+typedef struct WGCMONITORCAPTURE
+{
+  ID3D11Device*             d3dDevice;
+  ID3D11DeviceContext*      d3dContext;
+  IUnknown*                 wgcDevice;
+  IUnknown*                 wgcItem;
+  IUnknown*                 wgcFramePool;
+  IUnknown*                 wgcSession;
+  ID3D11Texture2D*          wgcFrameTexture;
+  ID3D11Texture2D*          wgcStagingTexture;
+  HMONITOR                  hMonitor;
+  RECT                      rcOutput;
+  UINT                      wgcFrameWidth;
+  UINT                      wgcFrameHeight;
+  UINT                      wgcStagingWidth;
+  UINT                      wgcStagingHeight;
+  BOOL                      fHasFrame;
+} WGCMONITORCAPTURE, *LPWGCMONITORCAPTURE;
+
 typedef struct SHAREDWGLDATA
 {
   BOOL             fTrackCursor;
+  BOOL             fWinRtInitialized;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
   POINT            pt;
@@ -57,6 +77,7 @@ typedef struct SHAREDWGLDATA
   HBITMAP          hBitmapBg;
   HBITMAP          hBitmapOld;
   DXGIOUTPUTCAPTURE dxgiOutputs[MAX_ENUM_MONITORS];
+  WGCMONITORCAPTURE wgcMonitors[MAX_ENUM_MONITORS];
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;
