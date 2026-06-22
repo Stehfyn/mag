@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>winuserx.h - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; winuserx.h</p>
+<h1>winuserx.h</h1>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include "framework.h"</span>
+
+BOOL <span class='fn'>SetWindowAlwaysOnTop</span>(HWND hWnd, BOOL fEnable);
+
+BOOL <span class='fn'>SetWindowOwner</span>(HWND hWnd, HWND hWndOwner);
+
+BOOL <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>);
+
+BOOL <span class='fn'>InMenu</span>(<span class='kw'>void</span>);
+
+HMENU <span class='fn'>LoadPopupMenu</span>(HINSTANCE hInstance, LPCTSTR lpMenuName);
+
+<span class='kw'>void</span> <span class='fn'>ForceTimerMessagesToBeCreatedIfNecessary</span>(LPMSG lpMsg);
+
+HANDLE
+<span class='fn'>UnloadFile</span>(
+    LPTSTR  lpszName,
+    LPCVOID lpBuffer,
+    DWORD   nNumberOfBytesToWrite);
+
+HANDLE
+<span class='fn'>UnloadResource</span>(
+    HMODULE hModule, 
+    UINT    nResourceId, 
+    LPTSTR  lpszName);</pre>
+</body>
+</html>

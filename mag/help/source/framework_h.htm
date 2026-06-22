@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>framework.h - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; framework.h</p>
+<h1>framework.h</h1>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include "targetver.h"</span>
+<span class='pp'>#include "resource.h"</span>
+<span class='cm'>// Windows Header Files</span>
+<span class='pp'>#define WIN32_LEAN_AND_MEAN // Exclude rarely-used stuff from Windows headers</span>
+<span class='pp'>#define COBJMACROS</span>
+<span class='pp'>#include &lt;windows.h&gt;</span>
+<span class='pp'>#include &lt;windowsx.h&gt;</span>
+<span class='pp'>#include &lt;shellapi.h&gt;</span>
+<span class='pp'>#include &lt;htmlhelp.h&gt;</span>
+<span class='pp'>#include &lt;dwmapi.h&gt;</span>
+<span class='pp'>#include &lt;uxtheme.h&gt;</span>
+<span class='pp'>#include &lt;Shlwapi.h&gt;</span>
+<span class='cm'>// C RunTime Header Files</span>
+<span class='pp'>#include &lt;math.h&gt;</span>
+<span class='pp'>#include &lt;tchar.h&gt;</span>
+
+<span class='cm'>// Application Extension Header Files</span>
+<span class='pp'>#include "wingdix.h"</span>
+<span class='pp'>#include "winuserx.h"</span>
+<span class='pp'>#include "dwmapix.h"</span>
+<span class='pp'>#include "d3dkmtx.h"</span>
+
+<span class='pp'>#define ABS(x)         ((x &lt; 0) ? -x : x)</span>
+<span class='pp'>#define RECTWIDTH(rc)  (ABS(rc.right - rc.left))</span>
+<span class='pp'>#define RECTHEIGHT(rc) (ABS(rc.bottom - rc.top))</span>
+<span class='pp'>#define CLAMP(x,lo,hi) (max(min(x, hi),lo))</span>
+</pre>
+</body>
+</html>

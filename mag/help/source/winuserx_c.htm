@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>winuserx.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; winuserx.c</p>
+<h1>winuserx.c</h1>
+<pre class="source-code"><span class='pp'>#include "winuserx.h"</span>
+
+BOOL <span class='fn'>SetWindowAlwaysOnTop</span>(HWND hWnd, BOOL fEnable)
+{
+    HWND hWndInsertAfter = fEnable ? HWND_TOPMOST : HWND_NOTOPMOST;
+    <span class='kw'>return</span> <span class='fn'>SetWindowPos</span>(hWnd, hWndInsertAfter, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, SWP_NOMOVE | SWP_NOSIZE);
+}
+
+BOOL <span class='fn'>SetWindowOwner</span>(HWND hWnd, HWND hWndOwner)
+{
+    LONG_PTR offset;
+
+    <span class='fn'>SetLastError</span>(NO_ERROR);
+
+    offset = <span class='fn'>SetWindowLongPtr</span>(hWnd, GWLP_HWNDPARENT, (LONG_PTR)hWndOwner);
+
+    <span class='kw'>return</span> (<span class='num'>0</span> == offset) &amp;&amp; (NO_ERROR != <span class='fn'>GetLastError</span>());
+}
+
+BOOL <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>)
+{
+    PROCESS_POWER_THROTTLING_STATE state = { PROCESS_POWER_THROTTLING_CURRENT_VERSION };
+
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    state.StateMask = <span class='num'>0</span>;
+    <span class='kw'>return</span> <span class='fn'>SetProcessInformation</span>(<span class='fn'>GetCurrentProcess</span>(), ProcessPowerThrottling, &amp;state, <span class='kw'>sizeof</span>(state));
+
+}
+
+BOOL <span class='fn'>InMenu</span>(<span class='kw'>void</span>)
+{
+    GUITHREADINFO gti = { <span class='kw'>sizeof</span>(gti) };
+
+    <span class='kw'>if</span> (<span class='fn'>GetGUIThreadInfo</span>(<span class='fn'>GetCurrentThreadId</span>(), &amp;gti))
+    {
+      <span class='kw'>return</span> (GUI_INMENUMODE | GUI_SYSTEMMENUMODE | GUI_POPUPMENUMODE) &amp; gti.flags;
+    }
+
+    <span class='kw'>return</span> FALSE;
+}
+
+HMENU <span class='fn'>LoadPopupMenu</span>(HINSTANCE hInstance, LPCTSTR lpMenuName)
+{
+    HMENU hMenu;
+    HMENU hSubMenu = NULL;
+
+    <span class='kw'>if</span> (hMenu = <span class='fn'>LoadMenu</span>(hInstance, lpMenuName))
+    {
+        hSubMenu = <span class='fn'>GetSubMenu</span>(hMenu, <span class='num'>0</span>);
+    }
+
+    <span class='kw'>return</span> hSubMenu;
+}
+
+<span class='kw'>void</span> <span class='fn'>ForceTimerMessagesToBeCreatedIfNecessary</span>(LPMSG lpMsg)
+{
+    <span class='fn'>PeekMessage</span>(lpMsg, NULL, WM_TIMER, WM_TIMER, PM_NOREMOVE);
+}
+
+BOOL <span class='fn'>PumpMessageQueue</span>(HWND hwndPump)
+{
+    MSG  msg;
+    BOOL fQuit = FALSE;
+    <span class='fn'>SecureZeroMemory</span>(&amp;msg, <span class='kw'>sizeof</span>(msg));
+
+    <span class='kw'>if</span> (hwndPump &amp;&amp; <span class='fn'>IsWindow</span>(hwndPump))
+    {
+      <span class='kw'>while</span> (<span class='fn'>PeekMessage</span>(&amp;msg, hwndPump, <span class='num'>0</span>, <span class='num'>0</span>, PM_REMOVE | PM_NOYIELD))
+      {
+        <span class='fn'>TranslateMessage</span>(&amp;msg);
+        <span class='fn'>DispatchMessage</span>(&amp;msg);
+
+        fQuit |= WM_QUIT == msg.message;
+      }
+
+      fQuit |= !<span class='fn'>IsWindow</span>(hwndPump);
+    }
+
+    <span class='kw'>while</span> (<span class='fn'>PeekMessage</span>(&amp;msg, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, PM_REMOVE | PM_NOYIELD))
+    {
+      <span class='fn'>TranslateMessage</span>(&amp;msg);
+      <span class='fn'>DispatchMessage</span>(&amp;msg);
+    }
+    
+    <span class='kw'>return</span> !fQuit;
+}
+
+
+HANDLE
+<span class='fn'>UnloadFile</span>(
+    LPTSTR  lpszName,
+    LPCVOID lpBuffer,
+    DWORD   nNumberOfBytesToWrite)
+{
+    HANDLE hFile = <span class='fn'>CreateFile</span>(lpszName, GENERIC_WRITE, <span class='num'>0</span>, <span class='num'>0</span>, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, <span class='num'>0</span>);
+
+    <span class='kw'>if</span> (INVALID_HANDLE_VALUE != hFile)
+    {
+      DWORD nNumberOfBytesWritten = <span class='num'>0</span>;
+      <span class='kw'>if</span> (!<span class='fn'>WriteFile</span>(hFile, lpBuffer, nNumberOfBytesToWrite, &amp;nNumberOfBytesWritten, <span class='num'>0</span>))
+      {
+        <span class='fn'>CloseHandle</span>(hFile);
+        hFile = NULL;
+      }
+    }
+
+    <span class='kw'>return</span> hFile;
+}
+
+HANDLE
+<span class='fn'>UnloadResource</span>(
+    HMODULE hModule, 
+    UINT    nResourceId, 
+    LPTSTR  lpszName)
+{
+    HANDLE hOut = NULL;
+    HRSRC  hResourceInfo = <span class='fn'>FindResource</span>(hModule, <span class='fn'>MAKEINTRESOURCE</span>(nResourceId), RT_RCDATA);
+
+    <span class='kw'>if</span> (hResourceInfo)
+    {
+      HGLOBAL hResourceData = <span class='fn'>LoadResource</span>(hModule, hResourceInfo);
+      <span class='kw'>if</span> (hResourceData)
+      {
+        LPCVOID lpResourceData = (LPCVOID)<span class='fn'>LockResource</span>(hResourceData);
+        <span class='kw'>if</span> (lpResourceData)
+        {
+          DWORD dwResourceSize = <span class='fn'>SizeofResource</span>(hModule, hResourceInfo);
+          <span class='kw'>if</span> (dwResourceSize)
+          {
+            hOut = <span class='fn'>UnloadFile</span>(lpszName, lpResourceData, dwResourceSize);
+          }
+          <span class='fn'>UnlockResource</span>(hResourceData);
+        }
+        <span class='fn'>FreeResource</span>(hResourceData);
+      }
+      <span class='fn'>CloseHandle</span>(hResourceInfo);
+    }
+
+    <span class='kw'>return</span> hOut;
+}
+</pre>
+</body>
+</html>

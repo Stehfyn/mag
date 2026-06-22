@@ -12,8 +12,8 @@
 
 <p>
   MAG is a lightweight, high-performance screen magnifier for Windows. It renders a
-  real-time zoomed view of the area around your cursor using OpenGL, with sub-frame
-  latency and support for high-DPI and multi-monitor setups.
+  real-time zoomed view using OpenGL, with vblank-paced updates, high-DPI support,
+  and multi-monitor capture support.
 </p>
 
 <h2>Getting Started</h2>
@@ -25,24 +25,47 @@
   <li>Scroll the <strong>mouse wheel</strong> over the window to zoom in or out.</li>
   <li>Drag the window by its frame to position it anywhere on screen.</li>
   <li><strong>Right-click</strong> the window frame to open the context menu.</li>
+  <li>Open <strong>Settings</strong> to choose the capture backend and optional mouse-relative wheel zoom.</li>
 </ul>
 
 <div class="tip">
-  <strong>Tip:</strong> Enable <em>Follow Mouse</em> from the context menu to center the
-  captured area on your cursor. The window stays in place and remains interactive
-  while tracking is active.
+  <strong>Tip:</strong> Use <em>Window</em> mode for a fixed magnifier, <em>Follow Mouse</em>
+  to keep the window in place while centering capture on the cursor, or <em>Lens</em>
+  for a click-through lens that follows the cursor.
 </div>
+
+<h2>View Modes</h2>
+<table>
+  <tr>
+    <th>Mode</th>
+    <th>Behavior</th>
+  </tr>
+  <tr>
+    <td class="key">Window</td>
+    <td>The capture is tied to the magnifier window position. At 1.0x scale, the view matches the desktop area behind the window.</td>
+  </tr>
+  <tr>
+    <td class="key">Follow Mouse</td>
+    <td>The window stays where it is, but the capture is centered on the cursor and clipped to the active capture bounds.</td>
+  </tr>
+  <tr>
+    <td class="key">Lens</td>
+    <td>The magnifier follows the cursor and remains click-through so pointer input reaches the window underneath.</td>
+  </tr>
+</table>
 
 <h2>Topics</h2>
 <ul>
   <li><a href="controls.htm">Controls &amp; Keyboard Shortcuts</a></li>
   <li><a href="context_menu.htm">Context Menu</a></li>
+  <li><a href="source.htm">Source Code</a></li>
 </ul>
 
 <h2>System Requirements</h2>
 <ul>
   <li>Windows 10 or later</li>
   <li>OpenGL-capable graphics adapter</li>
+  <li>Capture backend availability depends on the Windows version, graphics driver, and desktop configuration.</li>
 </ul>
 
 </body>

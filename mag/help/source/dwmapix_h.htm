@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>dwmapix.h - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dwmapix.h</p>
+<h1>dwmapix.h</h1>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include "framework.h"</span>
+
+BOOL <span class='fn'>DwmInitPrivate</span>(<span class='kw'>void</span>);
+
+BOOL <span class='fn'>DwmCreateDevice</span>(<span class='kw'>void</span>);
+
+BOOL <span class='fn'>DwmCreateThumbnail</span>(HWND hWnd);
+
+BOOL <span class='fn'>DwmUpdateVisual</span>(HWND hWnd);
+
+BOOL <span class='fn'>DwmBindVisual</span>(HWND hWnd);
+
+BOOL <span class='fn'>DwmEnableWindowComposition</span>(HWND hWnd, BOOL fEnable);</pre>
+</body>
+</html>

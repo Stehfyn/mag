@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Resource.rc - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; Resource.rc</p>
+<h1>Resource.rc</h1>
+<pre class="source-code"><span class='cm'>// Microsoft Visual C++ generated resource script.</span>
+<span class='cm'>//</span>
+<span class='pp'>#include "resource.h"</span>
+
+<span class='pp'>#define APSTUDIO_READONLY_SYMBOLS</span>
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//</span>
+<span class='cm'>// Generated from the TEXTINCLUDE 2 resource.</span>
+<span class='cm'>//</span>
+<span class='pp'>#include "winres.h"</span>
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='pp'>#undef APSTUDIO_READONLY_SYMBOLS</span>
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//</span>
+<span class='cm'>// English (United States) resources</span>
+
+<span class='pp'>#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)</span>
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+<span class='pp'>#ifdef APSTUDIO_INVOKED</span>
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//</span>
+<span class='cm'>// TEXTINCLUDE</span>
+<span class='cm'>//</span>
+
+<span class='num'>1</span> TEXTINCLUDE
+<span class='kw'>BEGIN</span>
+    <span class='str'>"resource.h\0"</span>
+<span class='kw'>END</span>
+
+<span class='num'>2</span> TEXTINCLUDE
+<span class='kw'>BEGIN</span>
+    <span class='str'>"#include "</span><span class='str'>"winres.h"</span><span class='str'>"\r\n"</span>
+    <span class='str'>"\0"</span>
+<span class='kw'>END</span>
+
+<span class='num'>3</span> TEXTINCLUDE
+<span class='kw'>BEGIN</span>
+    <span class='str'>"\r\n"</span>
+    <span class='str'>"\0"</span>
+<span class='kw'>END</span>
+
+<span class='pp'>#endif    // APSTUDIO_INVOKED</span>
+
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//
+// Icon</span>
+<span class='cm'>//
+</span>
+IDI_APPICON     ICON                    <span class='str'>"mag.ico"</span>
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//
+// Menu</span>
+<span class='cm'>//
+</span>
+IDR_MENU1 <span class='kw'>MENU</span>
+<span class='kw'>BEGIN</span>
+    <span class='kw'>POPUP</span> <span class='str'>"Context Menu"</span>
+    <span class='kw'>BEGIN</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>"Window"</span>,                              ID_CONTEXTMENU_WINDOW_MODE
+        <span class='kw'>MENUITEM</span> <span class='str'>"Follow Mouse"</span>,                        ID_CONTEXTMENU_FOLLOW_MOUSE
+        <span class='kw'>MENUITEM</span> <span class='str'>"Lens"</span>,                                ID_CONTEXTMENU_LENS_MODE
+        <span class='kw'>MENUITEM</span> <span class='str'>"Settings..."</span>,                         ID_CONTEXTMENU_SETTINGS
+        <span class='kw'>MENUITEM</span> <span class='kw'>SEPARATOR</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>"Help"</span>,                                ID_CONTEXTMENU_HELP
+        <span class='kw'>MENUITEM</span> <span class='str'>"Exit"</span>,                                ID_CONTEXTMENU_CLOSE
+    <span class='kw'>END</span>
+<span class='kw'>END</span>
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//
+// Dialog</span>
+<span class='cm'>//
+</span>
+IDD_SETTINGS DIALOGEX <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>260</span>, <span class='num'>136</span>
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION <span class='str'>"Settings"</span>
+FONT <span class='num'>9</span>, <span class='str'>"Segoe UI"</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0x1</span>
+<span class='kw'>BEGIN</span>
+    LTEXT           <span class='str'>"Graphics API:"</span>,IDC_STATIC,<span class='num'>12</span>,<span class='num'>16</span>,<span class='num'>76</span>,<span class='num'>8</span>
+    COMBOBOX        IDC_SETTINGS_GRAPHICS_API,<span class='num'>96</span>,<span class='num'>14</span>,<span class='num'>148</span>,<span class='num'>48</span>,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>"Capture API:"</span>,IDC_STATIC,<span class='num'>12</span>,<span class='num'>40</span>,<span class='num'>76</span>,<span class='num'>8</span>
+    COMBOBOX        IDC_SETTINGS_CAPTURE_API,<span class='num'>96</span>,<span class='num'>38</span>,<span class='num'>148</span>,<span class='num'>72</span>,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         <span class='str'>"Mouse-relative wheel zoom"</span>,IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,<span class='str'>"Button"</span>,BS_AUTOCHECKBOX | WS_TABSTOP,<span class='num'>96</span>,<span class='num'>64</span>,<span class='num'>148</span>,<span class='num'>10</span>
+    LTEXT           <span class='str'>""</span>,IDC_SETTINGS_STATUS,<span class='num'>12</span>,<span class='num'>88</span>,<span class='num'>232</span>,<span class='num'>18</span>
+    DEFPUSHBUTTON   <span class='str'>"OK"</span>,IDOK,<span class='num'>148</span>,<span class='num'>114</span>,<span class='num'>50</span>,<span class='num'>14</span>
+    PUSHBUTTON      <span class='str'>"Cancel"</span>,IDCANCEL,<span class='num'>204</span>,<span class='num'>114</span>,<span class='num'>50</span>,<span class='num'>14</span>
+<span class='kw'>END</span>
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//
+// RCDATA</span>
+<span class='cm'>//
+</span>
+IDR_CHM         <span class='kw'>RCDATA</span>                  <span class='str'>"help/mag.chm"</span>
+
+<span class='pp'>#endif    // English (United States) resources</span>
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+
+
+
+<span class='pp'>#ifndef APSTUDIO_INVOKED</span>
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='cm'>//</span>
+<span class='cm'>// Generated from the TEXTINCLUDE 3 resource.</span>
+<span class='cm'>//</span>
+
+
+<span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
+<span class='pp'>#endif    // not APSTUDIO_INVOKED</span>
+</pre>
+</body>
+</html>

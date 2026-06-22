@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>d3dkmtx.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; d3dkmtx.c</p>
+<h1>d3dkmtx.c</h1>
+<pre class="source-code"><span class='pp'>#include "d3dkmtx.h"</span>
+
+<span class='kw'>typedef</span> LONG <span class='tp'>NTSTATUS</span>;
+<span class='pp'>#include &lt;d3dkmthk.h&gt;</span>
+
+BOOL <span class='fn'>D3DKMTWaitForVerticalBlank</span>(HWND hWnd)
+{
+    <span class='tp'>NTSTATUS</span> status;
+    <span class='kw'>static</span> D3DKMT_WAITFORVERTICALBLANKEVENT vbe = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (!vbe.hAdapter)
+    {
+      D3DKMT_OPENADAPTERFROMHDC oa = { <span class='num'>0</span> };
+      oa.hDc = <span class='fn'>GetDC</span>(hWnd);
+
+      <span class='kw'>if</span> (!oa.hDc)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+
+      status = <span class='fn'>D3DKMTOpenAdapterFromHdc</span>(&amp;oa);
+
+      <span class='fn'>ReleaseDC</span>(hWnd, oa.hDc);
+    
+      <span class='kw'>if</span> (<span class='num'>0</span> != status)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+
+      vbe.hAdapter      = oa.hAdapter;
+      vbe.VidPnSourceId = oa.VidPnSourceId;
+      vbe.hDevice       = <span class='num'>0</span>;
+    }
+
+    status = <span class='fn'>D3DKMTWaitForVerticalBlankEvent</span>(&amp;vbe);
+    <span class='kw'>if</span> (<span class='num'>0</span> != status)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    {
+      D3DKMT_GETSCANLINE gsl = { <span class='num'>0</span> };
+
+      gsl.hAdapter = vbe.hAdapter;
+      gsl.VidPnSourceId = vbe.VidPnSourceId;
+
+      <span class='kw'>do</span>
+      {
+        status = <span class='fn'>D3DKMTGetScanLine</span>(&amp;gsl);
+      }
+      <span class='kw'>while</span> ((<span class='num'>0</span> != status) || gsl.InVerticalBlank);
+    }
+
+    <span class='kw'>return</span> TRUE;
+}
+</pre>
+</body>
+</html>

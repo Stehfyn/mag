@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>wingdix.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; wingdix.c</p>
+<h1>wingdix.c</h1>
+<pre class="source-code"><span class='pp'>#include "wingdix.h"</span>
+
+<span class='pp'>#pragma comment (lib, "opengl32")</span>
+
+ATOM <span class='fn'>wgl_RegisterClass</span>(<span class='kw'>void</span>);
+BOOL <span class='fn'>wgl_SelectPixelFormat</span>(HDC hDC);
+<span class='kw'>void</span> <span class='fn'>wgl_Load</span>(<span class='kw'>void</span>);
+<span class='kw'>void</span> <span class='fn'>wgl_GetProc</span>(HMODULE hModule, <span class='kw'>const</span> <span class='kw'>char</span>* pszProc, PROC* pProc);
+
+BOOL <span class='kw'>CALLBACK</span> <span class='fn'>gdi_GetDisplayInfo</span>(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
+
+ATOM <span class='fn'>wgl_RegisterClass</span>(<span class='kw'>void</span>)
+{
+    WNDCLASS wc = { <span class='num'>0</span> };
+
+    wc.hInstance     = <span class='fn'>GetModuleHandle</span>(NULL);
+    wc.lpfnWndProc   = DefWindowProc;
+    wc.lpszClassName = <span class='fn'>TEXT</span>(<span class='str'>"wglDummyWindow"</span>);
+
+    <span class='kw'>return</span> <span class='fn'>RegisterClass</span>(&amp;wc);
+}
+
+BOOL <span class='fn'>wgl_SelectPixelFormat</span>(HDC hDC)
+{
+    PIXELFORMATDESCRIPTOR pfd = { <span class='kw'>sizeof</span>(pfd) };
+
+    pfd.nVersion = <span class='num'>1</span>;
+    pfd.dwFlags = PFD_SUPPORT_OPENGL;
+    pfd.cAlphaBits = <span class='num'>8</span>;
+    pfd.cDepthBits = <span class='num'>24</span>;
+    pfd.cColorBits = <span class='num'>32</span>;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+
+    <span class='kw'>return</span> <span class='fn'>SetPixelFormat</span>(hDC, <span class='fn'>ChoosePixelFormat</span>(hDC, &amp;pfd), &amp;pfd);
+}
+
+<span class='kw'>void</span> <span class='fn'>wgl_Load</span>(<span class='kw'>void</span>)
+{
+    HMODULE __opengl32;
+
+    <span class='kw'>if</span> (!(__opengl32 = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>"opengl32.dll"</span>))))
+    {
+        <span class='kw'>return</span>;
+    }
+
+<span class='pp'>#define pproc(proc) (# proc), ((PROC*)&amp;proc)</span>
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglGetExtensionsStringARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglChoosePixelFormatARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglCreateContextAttribsARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglGetSwapIntervalEXT));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglSwapIntervalEXT));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglCreatePbufferARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglGetPbufferDCARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglDestroyPbufferARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglQueryPbufferARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglBindTexImageARB));
+    <span class='fn'>wgl_GetProc</span>(__opengl32, <span class='fn'>pproc</span>(wglReleaseTexImageARB));
+<span class='pp'>#undef pproc</span>
+}
+
+<span class='kw'>void</span> <span class='fn'>wgl_GetProc</span>(HMODULE hModule, <span class='kw'>const</span> <span class='kw'>char</span>* pszProc, PROC* pProc)
+{
+    <span class='kw'>typedef</span> <span class='fn'>PROC</span>(<span class='kw'>__stdcall</span>* PFN_wglGetProcAddress)(LPCSTR);
+    <span class='kw'>static</span> PFN_wglGetProcAddress wglGetProcAddress2;
+
+    <span class='kw'>if</span> (!wglGetProcAddress2)
+    {
+      wglGetProcAddress2 = (PFN_wglGetProcAddress)<span class='fn'>GetProcAddress</span>(hModule, <span class='str'>"wglGetProcAddress"</span>);
+    }
+
+    <span class='kw'>if</span> (!wglGetProcAddress2)
+    {
+      (*pProc) = (PROC)<span class='fn'>GetProcAddress</span>(hModule, pszProc);
+    }
+    <span class='kw'>else</span>
+    {
+      (*pProc) = <span class='fn'>wglGetProcAddress2</span>(pszProc);
+
+      <span class='kw'>if</span> (!(*pProc))
+      {
+        (*pProc) = (PROC)<span class='fn'>GetProcAddress</span>(hModule, pszProc);
+      }
+    }
+}
+
+BOOL <span class='kw'>CALLBACK</span> <span class='fn'>gdi_GetDisplayInfo</span>(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hDC);
+
+    <span class='tp'>LPDISPLAYINFO</span>   lpdi   = (<span class='tp'>LPDISPLAYINFO</span>)lParam;
+    <span class='tp'>LPMONITORINFO2</span>  lpmi2  = (<span class='tp'>LPMONITORINFO2</span>)&amp;lpdi-&gt;monitors[lpdi-&gt;numMonitors];
+    LPMONITORINFOEX lpmiex = (LPMONITORINFOEX)&amp;lpmi2-&gt;monitorInfoEx;
+    LPDEVMODE       lpdm   = (LPDEVMODE)&amp;lpmi2-&gt;deviceMode;
+
+    lpmiex-&gt;cbSize = (DWORD) <span class='kw'>sizeof</span>(MONITORINFOEX);
+    lpdm-&gt;dmSize = (WORD) <span class='kw'>sizeof</span>(DEVMODE);
+
+    <span class='fn'>GetMonitorInfo</span>(hMonitor, (LPMONITORINFO)lpmiex);
+    <span class='fn'>UnionRect</span>(&amp;lpdi-&gt;rc, &amp;lpdi-&gt;rc, lprc);
+
+<span class='pp'>  #ifdef UNICODE</span>
+    <span class='fn'>memcpy</span>(lpmi2-&gt;deviceNameW, lpmiex-&gt;szDevice, <span class='kw'>sizeof</span>(lpmiex-&gt;szDevice));
+    lpmi2-&gt;deviceNameW[CCHDEVICENAME] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    <span class='fn'>WideCharToMultiByte</span>(CP_UTF8, <span class='num'>0</span>, (LPCWCH)lpmiex-&gt;szDevice, CCHDEVICENAME, (LPSTR)lpmi2-&gt;deviceName, CCHDEVICENAME + <span class='num'>1</span>, <span class='num'>0</span>, NULL);
+    <span class='fn'>EnumDisplaySettings</span>(lpmi2-&gt;deviceNameW, ENUM_CURRENT_SETTINGS, &amp;lpmi2-&gt;deviceMode);
+<span class='pp'>  #else</span>
+    <span class='fn'>memcpy</span>(lpmi2-&gt;deviceName, lpmiex-&gt;szDevice, <span class='kw'>sizeof</span>(lpmiex-&gt;szDevice));
+    lpmi2-&gt;deviceName[CCHDEVICENAME] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    <span class='fn'>MultiByteToWideChar</span>(CP_UTF8, <span class='num'>0</span>, (LPCCH)lpmiex-&gt;szDevice, CCHDEVICENAME, (LPWSTR)lpmi2-&gt;deviceNameW, CCHDEVICENAME + <span class='num'>1</span>);
+    <span class='fn'>EnumDisplaySettings</span>(lpmi2-&gt;deviceName, ENUM_CURRENT_SETTINGS, &amp;lpmi2-&gt;deviceMode);
+<span class='pp'>  #endif</span>
+
+    <span class='kw'>return</span> (MAX_ENUM_MONITORS &gt; lpdi-&gt;numMonitors++);
+}
+
+<span class='kw'>void</span> <span class='fn'>wglInit</span>(<span class='kw'>void</span>)
+{
+    HWND hWnd = <span class='fn'>CreateWindow</span>(
+      (LPTSTR)<span class='fn'>wgl_RegisterClass</span>(),
+      <span class='fn'>TEXT</span>(<span class='str'>"wglDummyWindow"</span>),
+      WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+      CW_USEDEFAULT,
+      CW_USEDEFAULT,
+      CW_USEDEFAULT,
+      CW_USEDEFAULT,
+      NULL,
+      NULL,
+      <span class='fn'>GetModuleHandle</span>(NULL),
+      NULL);
+    HDC hDC = <span class='fn'>GetDC</span>(hWnd);
+
+    <span class='kw'>if</span> (!hWnd)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>wgl_SelectPixelFormat</span>(hDC))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>wglMakeCurrent</span>(hDC, <span class='fn'>wglCreateContext</span>(hDC)))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>wgl_Load</span>();
+}
+
+<span class='kw'>int</span> <span class='fn'>wglFindPixelFormat</span>(HDC hDC, <span class='kw'>const</span> <span class='kw'>int</span>* piAttribIList, <span class='kw'>const</span> FLOAT* pfAttribFList)
+{
+    <span class='kw'>int</span> format = <span class='num'>0</span>;
+    <span class='kw'>int</span> pf = <span class='fn'>GetPixelFormat</span>(hDC);
+
+    <span class='kw'>while</span> (<span class='num'>0</span> &lt;= pf--)
+    {
+      UINT num_formats;
+
+      <span class='kw'>if</span> (<span class='fn'>wglChoosePixelFormatARB</span>(hDC, piAttribIList, pfAttribFList, <span class='num'>1</span>, &amp;format, &amp;num_formats))
+      {
+        <span class='kw'>if</span> (num_formats &gt; <span class='num'>0</span>)
+        {
+          <span class='kw'>break</span>;
+        }
+      }
+    }
+
+    <span class='kw'>return</span> format;
+}
+
+BOOL <span class='fn'>gdiGetDisplayInfo</span>(<span class='tp'>LPDISPLAYINFO</span> lpdi)
+{
+    <span class='kw'>return</span> <span class='fn'>EnumDisplayMonitors</span>(NULL, NULL, gdi_GetDisplayInfo, (LPARAM)lpdi);
+}
+
+<span class='kw'>int</span> <span class='fn'>gdiCheckOcclusionStatus</span>(HWND hwnd)
+{
+    HDC hdc;
+    RECT rc, rcClient;
+    <span class='kw'>int</span> iType;
+
+    hdc = <span class='fn'>GetDC</span>(hwnd);
+    iType = <span class='fn'>GetClipBox</span>(hdc, &amp;rc);
+
+    <span class='fn'>ReleaseDC</span>(hwnd, hdc);
+
+    <span class='kw'>if</span> (iType == NULLREGION)
+        <span class='kw'>return</span> OBS_COMPLETELYCOVERED;
+    <span class='kw'>if</span> (iType == COMPLEXREGION)
+        <span class='kw'>return</span> OBS_PARTIALLYVISIBLE;
+
+    <span class='fn'>GetClientRect</span>(hwnd, &amp;rcClient);
+    <span class='kw'>if</span> (<span class='fn'>EqualRect</span>(&amp;rc, &amp;rcClient))
+        <span class='kw'>return</span> OBS_COMPLETELYVISIBLE;
+
+    <span class='kw'>return</span> OBS_PARTIALLYVISIBLE;
+}</pre>
+</body>
+</html>

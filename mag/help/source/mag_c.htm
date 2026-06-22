@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>mag.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; mag.c</p>
+<h1>mag.c</h1>
+<pre class="source-code"><span class='pp'>#include "mag.h"</span>
+<span class='pp'>#include "render.h"</span>
+<span class='pp'>#include "help.h"</span>
+
+<span class='pp'>#pragma comment(lib, "ntdll")</span>
+
+<span class='pp'>#define FORWARD_MSG(hwnd, message, fn)    \</span>
+    <span class='kw'>default</span>: <span class='kw'>return</span> (fn)((hwnd), (message), (wParam), (lParam))
+
+<span class='pp'>#define MOUSE_WHEEL_ZOOM_STEP_SCALE 0.25f</span>
+<span class='pp'>#define WM_MAG_TRAYICON (WM_APP + 1)</span>
+<span class='pp'>#define MAG_TRAY_ICON_ID 1</span>
+
+<span class='cm'>/* void Cls_OnEnterSizeMove(HWND hwnd) */</span>
+<span class='pp'>#define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \</span>
+        ((fn)((hwnd)), <span class='num'>0L</span>)
+
+<span class='cm'>/* void Cls_OnExitSizeMove(HWND hwnd */</span>
+<span class='pp'>#define HANDLE_WM_EXITSIZEMOVE(hwnd, wParam, lParam, fn) \</span>
+        ((fn)((hwnd)), <span class='num'>0L</span>)
+
+<span class='cm'>/* void Cls_OnExitSizeMove(HWND hwnd */</span>
+<span class='pp'>#define HANDLE_WM_ENTERMENULOOP(hwnd, wParam, lParam, fn) \</span>
+        ((fn)((hwnd), (BOOL)(wParam)), <span class='num'>0L</span>)
+
+<span class='cm'>/* void Cls_OnEnterSizeMove(HWND hwnd) */</span>
+<span class='pp'>#define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \</span>
+        ((fn)((hwnd), (BOOL)(wParam)), <span class='num'>0L</span>)
+
+<span class='cm'>/* void Cls_OnCaptureChanged(HWND hwnd, HWND hwndNewCapture) */</span>
+<span class='pp'>#define HANDLE_WM_CAPTURECHANGED(hwnd, wParam, lParam, fn) \</span>
+        ((fn)((hwnd), (HWND)(lParam)), <span class='num'>0L</span>)
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> SETTINGSOPTION
+{
+  UINT    id;
+  LPCTSTR pszName;
+  BOOL    fImplemented;
+} SETTINGSOPTION;
+
+<span class='kw'>void</span> <span class='fn'>mag_ShowPopupMenu</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y);
+<span class='kw'>void</span> <span class='fn'>mag_ShowHelpMenu</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y);
+<span class='kw'>void</span> <span class='fn'>mag_ShowSettingsDialog</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_SetViewMode</span>(HWND hWnd, <span class='tp'>MAGVIEWMODE</span> viewMode);
+<span class='kw'>void</span> <span class='fn'>mag_UpdateViewWindowStyle</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_UpdateLensWindowPosition</span>(HWND hWnd);
+BOOL <span class='fn'>mag_IsLensMode</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_AddTrayIcon</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_DeleteTrayIcon</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_AddSettingsOptions</span>(HWND hDlg, <span class='kw'>int</span> idCtl, <span class='kw'>const</span> SETTINGSOPTION* options, UINT count, UINT selectedId);
+BOOL <span class='fn'>mag_GetSelectedSettingsOption</span>(HWND hDlg, <span class='kw'>int</span> idCtl, <span class='kw'>const</span> SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
+<span class='kw'>void</span> <span class='fn'>mag_UpdateSettingsDialogState</span>(HWND hDlg);
+<span class='kw'>void</span> <span class='fn'>mag_GetCaptureRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, RECT* lprcCapture);
+INT_PTR <span class='kw'>CALLBACK</span> <span class='fn'>mag_SettingsDlgProc</span>(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+
+LRESULT <span class='fn'>mag_OnCreate</span>(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
+<span class='kw'>void</span> <span class='fn'>mag_OnDestroy</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_SetTaskbarIcon</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_OnActivate</span>(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized);
+<span class='kw'>void</span> <span class='fn'>mag_OnPaint</span>(HWND hWnd);
+UINT <span class='fn'>mag_OnEraseBkgnd</span>(HWND hWnd, HDC hDC);
+BOOL <span class='fn'>mag_OnNCCreate</span>(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
+UINT <span class='fn'>mag_OnNCHittest</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y);
+UINT <span class='fn'>mag_OnNCCalcSize</span>(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp);
+BOOL <span class='fn'>mag_OnNCActivate</span>(HWND hWnd, BOOL fActive, HWND hwndActDeact, BOOL fMinimized);
+<span class='kw'>void</span> <span class='fn'>mag_OnNCRButtonDown</span>(HWND hWnd, BOOL fDoubleClick, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT codeHitTest);
+LRESULT <span class='fn'>mag_OnTrayIcon</span>(HWND hWnd, WPARAM wParam, LPARAM lParam);
+<span class='kw'>void</span> <span class='fn'>mag_OnCommand</span>(HWND hWnd, <span class='kw'>int</span> id, HWND hwndCtl, UINT codeNotify);
+<span class='kw'>void</span> <span class='fn'>mag_OnKeyUp</span>(HWND hWnd, UINT vk, BOOL fDown, <span class='kw'>int</span> cRepeat, UINT flags);
+<span class='kw'>void</span> <span class='fn'>mag_OnTimer</span>(HWND hWnd, UINT_PTR idEvent);
+<span class='kw'>void</span> <span class='fn'>mag_OnRender</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_OnMouseWheel</span>(HWND hWnd, <span class='kw'>int</span> xPos, <span class='kw'>int</span> yPos, <span class='kw'>int</span> zDelta, UINT fwKeys);
+<span class='kw'>void</span> <span class='fn'>mag_OnLButtonDown</span>(HWND hWnd, BOOL fDoubleClick, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags);
+<span class='kw'>void</span> <span class='fn'>mag_OnLButtonUp</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags);
+<span class='kw'>void</span> <span class='fn'>mag_OnMouseMove</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags);
+<span class='kw'>void</span> <span class='fn'>mag_OnNCMouseMove</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT codeHitTest);
+<span class='kw'>void</span> <span class='fn'>mag_NotifyMiniMapCursorActivity</span>(HWND hWnd, POINT ptScreen);
+<span class='kw'>void</span> <span class='fn'>mag_OnCaptureChanged</span>(HWND hWnd, HWND hwndNewCapture);
+<span class='kw'>void</span> <span class='fn'>mag_OnSize</span>(HWND hWnd, UINT state, <span class='kw'>int</span> cx, <span class='kw'>int</span> cy);
+<span class='kw'>void</span> <span class='fn'>mag_OnEnterMenuLoop</span>(HWND hWnd, BOOL fIsTrackPopupMenu);
+<span class='kw'>void</span> <span class='fn'>mag_OnExitMenuLoop</span>(HWND hWnd, BOOL fIsTrackPopupMenu);
+<span class='kw'>void</span> <span class='fn'>mag_OnEnterSizeMove</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_OnExitSizeMove</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>mag_OnWindowPosChanged</span>(HWND hWnd, <span class='kw'>const</span> WINDOWPOS* lpwndpos);
+
+LRESULT <span class='kw'>CALLBACK</span> <span class='fn'>mag_WndProc</span>(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+ATOM <span class='fn'>mag_RegisterClassEx</span>(HINSTANCE hInstance);
+
+<span class='kw'>static</span> <span class='kw'>const</span> SETTINGSOPTION g_graphicsApiOptions[] =
+{
+  { GRAPHICS_API_OPENGL, <span class='fn'>_T</span>(<span class='str'>"OpenGL"</span>), TRUE },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> SETTINGSOPTION g_captureApiOptions[] =
+{
+  { CAPTURE_API_GDI_BITBLT, <span class='fn'>_T</span>(<span class='str'>"GDI BitBlt"</span>), TRUE },
+  { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, <span class='fn'>_T</span>(<span class='str'>"DXGI Desktop Duplication"</span>), TRUE },
+  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, <span class='fn'>_T</span>(<span class='str'>"Windows Graphics Capture"</span>), TRUE },
+  { CAPTURE_API_DWM_THUMBNAIL, <span class='fn'>_T</span>(<span class='str'>"DWM Thumbnail"</span>), TRUE },
+  { CAPTURE_API_DWM_PRIVATE_VISUAL, <span class='fn'>_T</span>(<span class='str'>"DWM Private Visual"</span>), TRUE },
+};
+
+<span class='kw'>void</span> <span class='fn'>mag_GetCaptureRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, RECT* lprcCapture)
+{
+    *lprcCapture = lpsd-&gt;di.rc;
+
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(lprcCapture))
+    {
+      lprcCapture-&gt;left = <span class='fn'>GetSystemMetrics</span>(SM_XVIRTUALSCREEN);
+      lprcCapture-&gt;top = <span class='fn'>GetSystemMetrics</span>(SM_YVIRTUALSCREEN);
+      lprcCapture-&gt;right = lprcCapture-&gt;left + <span class='fn'>GetSystemMetrics</span>(SM_CXVIRTUALSCREEN);
+      lprcCapture-&gt;bottom = lprcCapture-&gt;top + <span class='fn'>GetSystemMetrics</span>(SM_CYVIRTUALSCREEN);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_ShowPopupMenu</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='kw'>const</span> <span class='tp'>MAGVIEWMODE</span> viewMode = lpsd ? lpsd-&gt;viewMode : MAG_VIEW_WINDOW;
+    UINT checkedPosition = <span class='num'>0</span>;
+    
+    HMENU hMenu = <span class='fn'>CreatePopupMenu</span>();
+    <span class='cm'>//HMENU hMenu = LoadPopupMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU1));</span>
+
+    <span class='kw'>switch</span> (viewMode)
+    {
+    <span class='kw'>case</span> MAG_VIEW_FOLLOW_MOUSE:
+      checkedPosition = <span class='num'>1</span>;
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_VIEW_LENS:
+      checkedPosition = <span class='num'>2</span>;
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_VIEW_WINDOW:
+    <span class='kw'>default</span>:
+      checkedPosition = <span class='num'>0</span>;
+      <span class='kw'>break</span>;
+    }
+
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_WINDOW_MODE, <span class='fn'>_T</span>(<span class='str'>"Window"</span>));
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, <span class='fn'>_T</span>(<span class='str'>"Follow Mouse"</span>));
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_LENS_MODE, <span class='fn'>_T</span>(<span class='str'>"Lens"</span>));
+    <span class='fn'>CheckMenuRadioItem</span>(hMenu, <span class='num'>0</span>, <span class='num'>2</span>, checkedPosition, MF_BYPOSITION);
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_SEPARATOR, <span class='num'>0</span>, NULL);
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_SETTINGS, <span class='fn'>_T</span>(<span class='str'>"Settings..."</span>));
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_SEPARATOR, <span class='num'>0</span>, NULL);
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_HELP, <span class='fn'>_T</span>(<span class='str'>"Help"</span>));
+    <span class='fn'>AppendMenu</span>(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_CLOSE, <span class='fn'>_T</span>(<span class='str'>"Exit"</span>));
+
+    <span class='fn'>TrackPopupMenuEx</span>(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
+
+    <span class='fn'>DestroyMenu</span>(hMenu);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_SetViewMode</span>(HWND hWnd, <span class='tp'>MAGVIEWMODE</span> viewMode)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd || viewMode &gt;= MAG_VIEW_COUNT)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    lpsd-&gt;viewMode = viewMode;
+    lpsd-&gt;fTrackCursor = (MAG_VIEW_FOLLOW_MOUSE == viewMode || MAG_VIEW_LENS == viewMode);
+    lpsd-&gt;fUseSourceOrigin = FALSE;
+    lpsd-&gt;fSourceOriginPinned = FALSE;
+    lpsd-&gt;fMiniMapDragging = FALSE;
+
+    <span class='fn'>mag_UpdateViewWindowStyle</span>(hWnd);
+
+    <span class='kw'>if</span> (MAG_VIEW_LENS == viewMode)
+    {
+      <span class='fn'>mag_UpdateLensWindowPosition</span>(hWnd);
+    }
+
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+    <span class='fn'>renderRender</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_UpdateViewWindowStyle</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    DWORD dwExStyle;
+
+    <span class='kw'>if</span> (!lpsd)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    dwExStyle = <span class='fn'>GetWindowExStyle</span>(hWnd);
+    dwExStyle |= WS_EX_LAYERED;
+    <span class='kw'>if</span> (MAG_VIEW_LENS == lpsd-&gt;viewMode)
+    {
+      dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+    }
+    <span class='kw'>else</span>
+    {
+      dwExStyle &amp;= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+    }
+
+    <span class='fn'>SetWindowLongPtr</span>(hWnd, GWL_EXSTYLE, dwExStyle);
+    <span class='fn'>SetWindowPos</span>(hWnd, HWND_TOPMOST, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_UpdateLensWindowPosition</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    POINT cursor;
+    POINT ptClientOrigin = { <span class='num'>0</span>, <span class='num'>0</span> };
+    RECT rcWindow;
+    RECT rcClient;
+    RECT rcMonitor;
+    LONG clientWidth;
+    LONG clientHeight;
+    LONG clientOffsetX;
+    LONG clientOffsetY;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+    LONG clientCursorX;
+    LONG clientCursorY;
+    LONG x;
+    LONG y;
+    FLOAT m;
+    HMONITOR hMonitor;
+    MONITORINFO mi = { <span class='kw'>sizeof</span>(mi) };
+
+    <span class='kw'>if</span> (!lpsd || MAG_VIEW_LENS != lpsd-&gt;viewMode)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>GetCursorPos</span>(&amp;cursor) ||
+        !<span class='fn'>GetWindowRect</span>(hWnd, &amp;rcWindow) ||
+        !<span class='fn'>GetClientRect</span>(hWnd, &amp;rcClient) ||
+        !<span class='fn'>ClientToScreen</span>(hWnd, &amp;ptClientOrigin))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    clientWidth = <span class='fn'>RECTWIDTH</span>(rcClient);
+    clientHeight = <span class='fn'>RECTHEIGHT</span>(rcClient);
+    <span class='kw'>if</span> (clientWidth &lt; <span class='num'>1</span> || clientHeight &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    clientOffsetX = ptClientOrigin.x - rcWindow.left;
+    clientOffsetY = ptClientOrigin.y - rcWindow.top;
+    hMonitor = <span class='fn'>MonitorFromPoint</span>(cursor, MONITOR_DEFAULTTONEAREST);
+    <span class='kw'>if</span> (hMonitor &amp;&amp; <span class='fn'>GetMonitorInfo</span>(hMonitor, &amp;mi))
+    {
+      rcMonitor = mi.rcMonitor;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='fn'>mag_GetCaptureRect</span>(lpsd, &amp;rcMonitor);
+    }
+
+    m = (lpsd-&gt;fTexScaler &lt; <span class='num'>1.0f</span>) ? <span class='num'>1.0f</span> : lpsd-&gt;fTexScaler;
+    <span class='kw'>if</span> (m &lt;= <span class='num'>1.0001f</span>)
+    {
+      srcW = clientWidth;
+      srcH = clientHeight;
+    }
+    <span class='kw'>else</span>
+    {
+      srcW = <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(clientWidth / m));
+      srcH = <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(clientHeight / m));
+    }
+
+    srcX = <span class='fn'>render_clipSourceOrigin</span>(cursor.x - srcW / <span class='num'>2</span>, srcW, rcMonitor.left, rcMonitor.right);
+    srcY = <span class='fn'>render_clipSourceOrigin</span>(cursor.y - srcH / <span class='num'>2</span>, srcH, rcMonitor.top, rcMonitor.bottom);
+    clientCursorX = <span class='fn'>CLAMP</span>(<span class='fn'>MulDiv</span>(cursor.x - srcX, clientWidth, srcW), <span class='num'>0</span>, clientWidth);
+    clientCursorY = <span class='fn'>CLAMP</span>(<span class='fn'>MulDiv</span>(cursor.y - srcY, clientHeight, srcH), <span class='num'>0</span>, clientHeight);
+    x = cursor.x - clientCursorX - clientOffsetX;
+    y = cursor.y - clientCursorY - clientOffsetY;
+
+    <span class='kw'>if</span> (rcWindow.left != x || rcWindow.top != y)
+    {
+      <span class='fn'>SetWindowPos</span>(hWnd, HWND_TOPMOST, x, y, <span class='num'>0</span>, <span class='num'>0</span>, SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+BOOL <span class='fn'>mag_IsLensMode</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>return</span> lpsd &amp;&amp; MAG_VIEW_LENS == lpsd-&gt;viewMode;
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_AddTrayIcon</span>(HWND hWnd)
+{
+    HINSTANCE hInstance = <span class='fn'>GetModuleHandle</span>(NULL);
+    NOTIFYICONDATA nid = { <span class='kw'>sizeof</span>(nid) };
+
+    nid.hWnd = hWnd;
+    nid.uID = MAG_TRAY_ICON_ID;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = WM_MAG_TRAYICON;
+    nid.hIcon = (HICON)<span class='fn'>LoadImage</span>(
+      hInstance,
+      <span class='fn'>MAKEINTRESOURCE</span>(IDI_APPICON),
+      IMAGE_ICON,
+      <span class='fn'>GetSystemMetrics</span>(SM_CXSMICON),
+      <span class='fn'>GetSystemMetrics</span>(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+    <span class='fn'>lstrcpyn</span>(nid.szTip, <span class='fn'>_T</span>(<span class='str'>"mag"</span>), <span class='fn'>ARRAYSIZE</span>(nid.szTip));
+
+    <span class='fn'>Shell_NotifyIcon</span>(NIM_ADD, &amp;nid);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_DeleteTrayIcon</span>(HWND hWnd)
+{
+    NOTIFYICONDATA nid = { <span class='kw'>sizeof</span>(nid) };
+
+    nid.hWnd = hWnd;
+    nid.uID = MAG_TRAY_ICON_ID;
+    <span class='fn'>Shell_NotifyIcon</span>(NIM_DELETE, &amp;nid);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_ShowHelpMenu</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(x);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(y);
+
+    <span class='fn'>help_Show</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_ShowSettingsDialog</span>(HWND hWnd)
+{
+    <span class='fn'>DialogBoxParam</span>(
+      <span class='fn'>GetModuleHandle</span>(NULL),
+      <span class='fn'>MAKEINTRESOURCE</span>(IDD_SETTINGS),
+      hWnd,
+      mag_SettingsDlgProc,
+      (LPARAM)hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_AddSettingsOptions</span>(HWND hDlg, <span class='kw'>int</span> idCtl, <span class='kw'>const</span> SETTINGSOPTION* options, UINT count, UINT selectedId)
+{
+    HWND hCtl = <span class='fn'>GetDlgItem</span>(hDlg, idCtl);
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; count; ++i)
+    {
+      <span class='kw'>const</span> LRESULT item = <span class='fn'>SendMessage</span>(hCtl, CB_ADDSTRING, <span class='num'>0</span>, (LPARAM)options[i].pszName);
+
+      <span class='kw'>if</span> (CB_ERR != item &amp;&amp; CB_ERRSPACE != item)
+      {
+        <span class='fn'>SendMessage</span>(hCtl, CB_SETITEMDATA, (WPARAM)item, (LPARAM)i);
+
+        <span class='kw'>if</span> (options[i].id == selectedId)
+        {
+          <span class='fn'>SendMessage</span>(hCtl, CB_SETCURSEL, (WPARAM)item, <span class='num'>0</span>);
+        }
+      }
+    }
+
+    <span class='kw'>if</span> (CB_ERR == <span class='fn'>SendMessage</span>(hCtl, CB_GETCURSEL, <span class='num'>0</span>, <span class='num'>0</span>) &amp;&amp; <span class='num'>0</span> &lt; count)
+    {
+      <span class='fn'>SendMessage</span>(hCtl, CB_SETCURSEL, <span class='num'>0</span>, <span class='num'>0</span>);
+    }
+}
+
+BOOL <span class='fn'>mag_GetSelectedSettingsOption</span>(HWND hDlg, <span class='kw'>int</span> idCtl, <span class='kw'>const</span> SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented)
+{
+    <span class='kw'>const</span> LRESULT selectedItem = <span class='fn'>SendDlgItemMessage</span>(hDlg, idCtl, CB_GETCURSEL, <span class='num'>0</span>, <span class='num'>0</span>);
+    LRESULT optionIndex;
+
+    <span class='kw'>if</span> (CB_ERR == selectedItem)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    optionIndex = <span class='fn'>SendDlgItemMessage</span>(hDlg, idCtl, CB_GETITEMDATA, (WPARAM)selectedItem, <span class='num'>0</span>);
+    <span class='kw'>if</span> (CB_ERR == optionIndex || optionIndex &lt; <span class='num'>0</span> || (UINT)optionIndex &gt;= count)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    *selectedId = options[optionIndex].id;
+    *fImplemented = options[optionIndex].fImplemented;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_UpdateSettingsDialogState</span>(HWND hDlg)
+{
+    UINT selectedId;
+    BOOL fGraphicsImplemented = FALSE;
+    BOOL fCaptureImplemented = FALSE;
+    BOOL fValid;
+
+    fValid =
+      <span class='fn'>mag_GetSelectedSettingsOption</span>(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, <span class='fn'>ARRAYSIZE</span>(g_graphicsApiOptions), &amp;selectedId, &amp;fGraphicsImplemented) &amp;&amp;
+      <span class='fn'>mag_GetSelectedSettingsOption</span>(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, <span class='fn'>ARRAYSIZE</span>(g_captureApiOptions), &amp;selectedId, &amp;fCaptureImplemented);
+
+    <span class='fn'>EnableWindow</span>(<span class='fn'>GetDlgItem</span>(hDlg, IDOK), fValid &amp;&amp; fGraphicsImplemented &amp;&amp; fCaptureImplemented);
+
+    <span class='kw'>if</span> (!fValid)
+    {
+      <span class='fn'>SetDlgItemText</span>(hDlg, IDC_SETTINGS_STATUS, <span class='fn'>_T</span>(<span class='str'>"Select a graphics API and capture API."</span>));
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (!fGraphicsImplemented || !fCaptureImplemented)
+    {
+      <span class='fn'>SetDlgItemText</span>(hDlg, IDC_SETTINGS_STATUS, <span class='fn'>_T</span>(<span class='str'>"Planned APIs are listed but cannot be applied yet."</span>));
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='fn'>SetDlgItemText</span>(hDlg, IDC_SETTINGS_STATUS, <span class='fn'>_T</span>(<span class='str'>""</span>));
+    }
+}
+
+INT_PTR <span class='kw'>CALLBACK</span> <span class='fn'>mag_SettingsDlgProc</span>(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd;
+
+    <span class='kw'>switch</span> (message)
+    {
+    <span class='kw'>case</span> WM_INITDIALOG:
+    {
+      HWND hOwner = (HWND)lParam;
+      UINT graphicsApi;
+      UINT captureApi;
+
+      <span class='fn'>SetWindowLongPtr</span>(hDlg, DWLP_USER, (LONG_PTR)hOwner);
+      lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hOwner, GWLP_USERDATA);
+      graphicsApi = (lpsd &amp;&amp; lpsd-&gt;graphicsApi &lt; GRAPHICS_API_COUNT) ? lpsd-&gt;graphicsApi : GRAPHICS_API_OPENGL;
+      captureApi = (lpsd &amp;&amp; lpsd-&gt;captureApi &lt; CAPTURE_API_COUNT) ? lpsd-&gt;captureApi : CAPTURE_API_GDI_BITBLT;
+
+      <span class='fn'>mag_AddSettingsOptions</span>(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, <span class='fn'>ARRAYSIZE</span>(g_graphicsApiOptions), graphicsApi);
+      <span class='fn'>mag_AddSettingsOptions</span>(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, <span class='fn'>ARRAYSIZE</span>(g_captureApiOptions), captureApi);
+      <span class='fn'>SendDlgItemMessage</span>(
+        hDlg,
+        IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,
+        BM_SETCHECK,
+        (lpsd &amp;&amp; lpsd-&gt;fMouseRelativeZoom) ? BST_CHECKED : BST_UNCHECKED,
+        <span class='num'>0</span>);
+      <span class='fn'>mag_UpdateSettingsDialogState</span>(hDlg);
+
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>case</span> WM_COMMAND:
+    {
+      <span class='kw'>switch</span> (<span class='fn'>LOWORD</span>(wParam))
+      {
+      <span class='kw'>case</span> IDOK:
+      {
+        HWND hOwner = (HWND)<span class='fn'>GetWindowLongPtr</span>(hDlg, DWLP_USER);
+        UINT graphicsApi = GRAPHICS_API_OPENGL;
+        UINT captureApi = CAPTURE_API_GDI_BITBLT;
+        BOOL fGraphicsImplemented = FALSE;
+        BOOL fCaptureImplemented = FALSE;
+        BOOL fMouseRelativeZoom = BST_CHECKED == <span class='fn'>SendDlgItemMessage</span>(hDlg, IDC_SETTINGS_MOUSE_RELATIVE_ZOOM, BM_GETCHECK, <span class='num'>0</span>, <span class='num'>0</span>);
+
+        <span class='kw'>if</span> (!<span class='fn'>mag_GetSelectedSettingsOption</span>(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, <span class='fn'>ARRAYSIZE</span>(g_graphicsApiOptions), &amp;graphicsApi, &amp;fGraphicsImplemented) ||
+          !<span class='fn'>mag_GetSelectedSettingsOption</span>(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, <span class='fn'>ARRAYSIZE</span>(g_captureApiOptions), &amp;captureApi, &amp;fCaptureImplemented) ||
+          !fGraphicsImplemented ||
+          !fCaptureImplemented)
+        {
+          <span class='fn'>MessageBox</span>(hDlg, <span class='fn'>_T</span>(<span class='str'>"That backend is listed for planning but is not implemented yet."</span>), <span class='fn'>_T</span>(<span class='str'>"Settings"</span>), MB_OK | MB_ICONINFORMATION);
+          <span class='fn'>mag_UpdateSettingsDialogState</span>(hDlg);
+          <span class='kw'>return</span> TRUE;
+        }
+
+        lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hOwner, GWLP_USERDATA);
+        <span class='kw'>if</span> (lpsd)
+        {
+          <span class='kw'>if</span> (graphicsApi &lt; GRAPHICS_API_COUNT)
+          {
+            lpsd-&gt;graphicsApi = (<span class='tp'>GRAPHICSAPI</span>)graphicsApi;
+          }
+
+          <span class='kw'>if</span> (captureApi &lt; CAPTURE_API_COUNT)
+          {
+            lpsd-&gt;captureApi = (<span class='tp'>CAPTUREAPI</span>)captureApi;
+          }
+
+          lpsd-&gt;fMouseRelativeZoom = fMouseRelativeZoom;
+          <span class='kw'>if</span> (!lpsd-&gt;fMouseRelativeZoom &amp;&amp; !lpsd-&gt;fSourceOriginPinned)
+          {
+            lpsd-&gt;fUseSourceOrigin = FALSE;
+          }
+
+          <span class='fn'>renderRender</span>(hOwner);
+        }
+
+        <span class='fn'>EndDialog</span>(hDlg, IDOK);
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='kw'>case</span> IDC_SETTINGS_GRAPHICS_API:
+      <span class='kw'>case</span> IDC_SETTINGS_CAPTURE_API:
+      {
+        <span class='kw'>if</span> (CBN_SELCHANGE == <span class='fn'>HIWORD</span>(wParam))
+        {
+          <span class='fn'>mag_UpdateSettingsDialogState</span>(hDlg);
+          <span class='kw'>return</span> TRUE;
+        }
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>case</span> IDCANCEL:
+      {
+        <span class='fn'>EndDialog</span>(hDlg, IDCANCEL);
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='kw'>default</span>:
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>default</span>:
+      <span class='kw'>break</span>;
+    }
+
+    <span class='kw'>return</span> FALSE;
+}
+
+LRESULT <span class='fn'>mag_OnCreate</span>(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(lpCreateStruct);
+
+    <span class='fn'>SetCurrentProcessEfficiencyQoS</span>();
+    <span class='fn'>mag_SetTaskbarIcon</span>(hWnd);
+    <span class='fn'>mag_AddTrayIcon</span>(hWnd);
+
+    lpsd-&gt;graphicsApi = GRAPHICS_API_OPENGL;
+    lpsd-&gt;captureApi = CAPTURE_API_GDI_BITBLT;
+    lpsd-&gt;viewMode = MAG_VIEW_WINDOW;
+    lpsd-&gt;fMouseRelativeZoom = FALSE;
+
+    <span class='fn'>renderInit</span>(hWnd);
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+
+    <span class='cm'>//SetTimer(hWnd, 1, 13, NULL);</span>
+    <span class='fn'>SetWindowDisplayAffinity</span>(hWnd, WDA_EXCLUDEFROMCAPTURE);
+    <span class='fn'>DwmEnableWindowComposition</span>(hWnd, TRUE);
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_SetTaskbarIcon</span>(HWND hWnd)
+{
+    HINSTANCE hInstance = <span class='fn'>GetModuleHandle</span>(NULL);
+    HICON hIcon = (HICON)<span class='fn'>LoadImage</span>(
+      hInstance,
+      <span class='fn'>MAKEINTRESOURCE</span>(IDI_APPICON),
+      IMAGE_ICON,
+      <span class='fn'>GetSystemMetrics</span>(SM_CXICON),
+      <span class='fn'>GetSystemMetrics</span>(SM_CYICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+    HICON hIconSm = (HICON)<span class='fn'>LoadImage</span>(
+      hInstance,
+      <span class='fn'>MAKEINTRESOURCE</span>(IDI_APPICON),
+      IMAGE_ICON,
+      <span class='fn'>GetSystemMetrics</span>(SM_CXSMICON),
+      <span class='fn'>GetSystemMetrics</span>(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+
+    <span class='kw'>if</span> (hIcon)
+    {
+      <span class='fn'>SendMessage</span>(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+    }
+
+    <span class='kw'>if</span> (hIconSm)
+    {
+      <span class='fn'>SendMessage</span>(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnDestroy</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>mag_DeleteTrayIcon</span>(hWnd);
+    <span class='fn'>renderCleanup</span>(hWnd);
+    <span class='fn'>help_Cleanup</span>();
+    <span class='fn'>VirtualFree</span>(lpsd, <span class='num'>0</span>, MEM_RELEASE);
+    <span class='fn'>PostQuitMessage</span>(<span class='num'>0</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnActivate</span>(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(state);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWndActDeact);
+
+    <span class='kw'>if</span> (!fMinimized)
+    {
+      <span class='kw'>const</span> MARGINS margins = { <span class='num'>1</span>, <span class='num'>1</span>, <span class='num'>1</span>, <span class='num'>1</span> };
+      <span class='fn'>DwmExtendFrameIntoClientArea</span>(hWnd, &amp;margins);
+
+      <span class='fn'>SetWindowLongPtr</span>(hWnd, GWL_EXSTYLE, WS_EX_TOPMOST | <span class='fn'>GetWindowExStyle</span>(hWnd));
+      <span class='fn'>SetWindowPos</span>(hWnd, HWND_TOPMOST, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnPaint</span>(HWND hWnd)
+{
+    PAINTSTRUCT ps;
+    <span class='fn'>BeginPaint</span>(hWnd, &amp;ps);
+    <span class='fn'>EndPaint</span>(hWnd, &amp;ps);
+}
+
+UINT <span class='fn'>mag_OnEraseBkgnd</span>(HWND hWnd, HDC hDC)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hDC);
+
+    <span class='kw'>return</span> <span class='num'>1</span>;
+}
+
+BOOL <span class='fn'>mag_OnNCCreate</span>(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
+{
+    LONG_PTR offset;
+
+    <span class='fn'>SetLastError</span>(NO_ERROR);
+    
+    offset = <span class='fn'>SetWindowLongPtr</span>(hWnd, GWLP_USERDATA, (LONG_PTR)lpCreateStruct-&gt;lpCreateParams);
+    
+    <span class='kw'>if</span> ((<span class='num'>0</span> == offset) &amp;&amp; (NO_ERROR != <span class='fn'>GetLastError</span>()))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>FORWARD_WM_NCCREATE</span>(hWnd, lpCreateStruct, DefWindowProc);
+}
+
+UINT <span class='fn'>mag_OnNCCalcSize</span>(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
+{
+    <span class='kw'>if</span> (fCalcValidRects)
+    {
+      <span class='kw'>if</span> (<span class='fn'>IsMaximized</span>(hWnd))
+      {
+        MONITORINFO mi = { <span class='kw'>sizeof</span>(MONITORINFO) };
+
+        <span class='kw'>if</span>(<span class='fn'>GetMonitorInfo</span>(
+            <span class='fn'>MonitorFromWindow</span>(hWnd, MONITOR_DEFAULTTONEAREST), (LPMONITORINFO)&amp;mi))
+        {
+          lpcsp-&gt;rgrc[<span class='num'>0</span>] = mi.rcWork;
+
+          <span class='kw'>return</span> <span class='num'>0</span>;
+        }
+      }
+
+      <span class='fn'>mag_OnTimer</span>(hWnd, <span class='num'>0</span>);
+      
+      lpcsp-&gt;rgrc[<span class='num'>0</span>].bottom += <span class='num'>1</span>;
+
+      <span class='kw'>return</span> WVR_VALIDRECTS;
+    }
+
+    <span class='kw'>return</span> <span class='num'>0</span>;
+}
+
+UINT <span class='fn'>mag_OnNCHittest</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y)
+{
+    RECT        rc = { <span class='num'>0</span> };
+    <span class='kw'>const</span> POINT cursor = { (LONG)x, (LONG)y };
+    <span class='kw'>const</span> SIZE  border =
+    {
+      (LONG)(<span class='fn'>GetSystemMetrics</span>(SM_CXFRAME) + <span class='fn'>GetSystemMetrics</span>(SM_CXPADDEDBORDER)),
+      (LONG)(<span class='fn'>GetSystemMetrics</span>(SM_CYFRAME) + <span class='fn'>GetSystemMetrics</span>(SM_CXPADDEDBORDER))  <span class='cm'>// Padded border is symmetric for both x, y</span>
+    };
+
+    <span class='kw'>if</span> (<span class='fn'>mag_IsLensMode</span>(hWnd))
+    {
+      <span class='kw'>return</span> HTTRANSPARENT;
+    }
+
+    <span class='fn'>GetWindowRect</span>(hWnd, &amp;rc);
+
+    <span class='kw'>enum</span> region_mask
+    {
+      client = 0b0000,
+      left = 0b0001,
+      right = 0b0010,
+      top = 0b0100,
+      bottom = 0b1000,
+    };
+
+    CONST INT result =
+      left * (cursor.x &lt; (rc.left + border.cx)) |
+      right * (cursor.x &gt;= (rc.right - border.cx)) |
+      top * (cursor.y &lt; (rc.top + border.cy)) |
+      bottom * (cursor.y &gt;= (rc.bottom - border.cy));
+
+    <span class='kw'>switch</span> (result) {
+    <span class='kw'>case</span> left:           <span class='kw'>return</span> HTLEFT;
+    <span class='kw'>case</span> right:          <span class='kw'>return</span> HTRIGHT;
+    <span class='kw'>case</span> top:            <span class='kw'>return</span> HTTOP;
+    <span class='kw'>case</span> bottom:         <span class='kw'>return</span> HTBOTTOM;
+    <span class='kw'>case</span> top | left:     <span class='kw'>return</span> HTTOPLEFT;
+    <span class='kw'>case</span> top | right:    <span class='kw'>return</span> HTTOPRIGHT;
+    <span class='kw'>case</span> bottom | left:  <span class='kw'>return</span> HTBOTTOMLEFT;
+    <span class='kw'>case</span> bottom | right: <span class='kw'>return</span> HTBOTTOMRIGHT;
+    <span class='kw'>case</span> client:
+    {
+      POINT ptClient = cursor;
+
+      <span class='kw'>if</span> (<span class='fn'>ScreenToClient</span>(hWnd, &amp;ptClient) &amp;&amp; <span class='fn'>render_minimapHitTest</span>(hWnd, ptClient))
+      {
+        <span class='kw'>return</span> HTCLIENT;
+      }
+
+      <span class='kw'>return</span> HTCAPTION;
+    }
+    <span class='kw'>default</span>:             <span class='kw'>return</span> <span class='fn'>FORWARD_WM_NCHITTEST</span>(hWnd, x, y, DefWindowProc);
+    }
+}
+
+BOOL <span class='fn'>mag_OnNCActivate</span>(HWND hWnd, BOOL fActive, HWND hwndActDeact, BOOL fMinimized)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fActive);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hwndActDeact);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fMinimized);
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnNCRButtonDown</span>(HWND hWnd, BOOL fDoubleClick, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT codeHitTest)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fDoubleClick);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(codeHitTest);
+
+    <span class='fn'>mag_ShowPopupMenu</span>(hWnd, x, y);
+}
+
+LRESULT <span class='fn'>mag_OnTrayIcon</span>(HWND hWnd, WPARAM wParam, LPARAM lParam)
+{
+    POINT pt;
+
+    <span class='kw'>if</span> (MAG_TRAY_ICON_ID != (UINT)wParam)
+    {
+      <span class='kw'>return</span> <span class='num'>0</span>;
+    }
+
+    <span class='kw'>if</span> (WM_RBUTTONUP == lParam || WM_CONTEXTMENU == lParam)
+    {
+      <span class='kw'>if</span> (<span class='fn'>GetCursorPos</span>(&amp;pt))
+      {
+        <span class='fn'>SetForegroundWindow</span>(hWnd);
+        <span class='fn'>mag_ShowPopupMenu</span>(hWnd, pt.x, pt.y);
+        <span class='fn'>PostMessage</span>(hWnd, WM_NULL, <span class='num'>0</span>, <span class='num'>0</span>);
+      }
+    }
+
+    <span class='kw'>return</span> <span class='num'>0</span>;
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnCommand</span>(HWND hWnd, <span class='kw'>int</span> id, HWND hwndCtl, UINT codeNotify)
+{
+    <span class='kw'>switch</span>(id){
+    <span class='kw'>case</span> ID_CONTEXTMENU_WINDOW_MODE:
+    {
+      <span class='fn'>mag_SetViewMode</span>(hWnd, MAG_VIEW_WINDOW);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> ID_CONTEXTMENU_FOLLOW_MOUSE:
+    {
+      <span class='fn'>mag_SetViewMode</span>(hWnd, MAG_VIEW_FOLLOW_MOUSE);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> ID_CONTEXTMENU_LENS_MODE:
+    {
+      <span class='fn'>mag_SetViewMode</span>(hWnd, MAG_VIEW_LENS);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> ID_CONTEXTMENU_SETTINGS:
+    {
+      <span class='fn'>mag_ShowSettingsDialog</span>(hWnd);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> ID_CONTEXTMENU_HELP:
+    {
+      <span class='fn'>mag_ShowHelpMenu</span>(hWnd, <span class='num'>0</span>, <span class='num'>0</span>);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> ID_CONTEXTMENU_CLOSE:
+    {
+      <span class='fn'>DestroyWindow</span>(hWnd);
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>default</span>:
+      <span class='kw'>break</span>;
+    }
+
+    <span class='fn'>FORWARD_WM_COMMAND</span>(hWnd, id, hwndCtl, codeNotify, DefWindowProc);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnKeyUp</span>(HWND hWnd, UINT vk, BOOL fDown, <span class='kw'>int</span> cRepeat, UINT flags)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fDown);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(cRepeat);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(flags);
+
+    <span class='kw'>if</span> (!lpsd || MAG_VIEW_LENS == lpsd-&gt;viewMode)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>switch</span> (vk) {
+    <span class='kw'>case</span> VK_SPACE:
+    {
+      <span class='kw'>if</span> (MAG_VIEW_FOLLOW_MOUSE == lpsd-&gt;viewMode)
+      {
+        <span class='fn'>mag_SetViewMode</span>(hWnd, MAG_VIEW_WINDOW);
+      }
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>case</span> VK_ESCAPE:
+    {
+      <span class='kw'>if</span> (<span class='fn'>GetForegroundWindow</span>() == hWnd)
+      {
+        <span class='fn'>DestroyWindow</span>(hWnd);
+      }
+      <span class='kw'>break</span>;
+    }
+    <span class='kw'>default</span>:
+      <span class='kw'>break</span>;
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnTimer</span>(HWND hWnd, UINT_PTR idEvent)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(idEvent);
+
+    <span class='kw'>if</span> (lpsd &amp;&amp; !lpsd-&gt;fRenderMessageDriven)
+    {
+      <span class='fn'>mag_OnRender</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnRender</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd || !<span class='fn'>IsWindowEnabled</span>(hWnd))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>InMenu</span>() &amp;&amp; !lpsd-&gt;fInSizeMove)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (lpsd-&gt;fTrackCursor)
+    {
+      <span class='fn'>mag_UpdateViewWindowStyle</span>(hWnd);
+    }
+
+    <span class='kw'>if</span> (MAG_VIEW_LENS == lpsd-&gt;viewMode)
+    {
+      <span class='fn'>mag_UpdateLensWindowPosition</span>(hWnd);
+    }
+
+    <span class='fn'>SetWindowAlwaysOnTop</span>(hWnd, TRUE);
+
+    <span class='fn'>renderSubmit</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnMouseWheel</span>(HWND hWnd, <span class='kw'>int</span> xPos, <span class='kw'>int</span> yPos, <span class='kw'>int</span> zDelta, UINT fwKeys)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    POINT ptClient = { xPos, yPos };
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fwKeys);
+
+    <span class='kw'>if</span> (<span class='fn'>ScreenToClient</span>(hWnd, &amp;ptClient) &amp;&amp; <span class='fn'>PtInRect</span>(&amp;lpsd-&gt;rc, ptClient))
+    {
+      RECT rcSourceOld;
+      RECT rcCapture;
+      <span class='kw'>const</span> LONG clientWidth = lpsd-&gt;bi.biWidth;
+      <span class='kw'>const</span> LONG clientHeight = lpsd-&gt;bi.biHeight;
+      <span class='kw'>const</span> BOOL fMouseRelativeZoom = lpsd-&gt;fMouseRelativeZoom &amp;&amp; !lpsd-&gt;fTrackCursor;
+      <span class='kw'>const</span> BOOL fKeepSourceOrigin = !lpsd-&gt;fTrackCursor &amp;&amp; lpsd-&gt;fUseSourceOrigin;
+      <span class='kw'>const</span> BOOL fAnchorZoom = fMouseRelativeZoom || fKeepSourceOrigin;
+      <span class='kw'>const</span> FLOAT fScaleScale = <span class='fn'>powf</span>(-<span class='fn'>logf</span>(<span class='num'>0.001f</span> * (<span class='num'>1.0f</span> - lpsd-&gt;fScale) + .<span class='num'>575f</span>), <span class='num'>6</span>);
+      <span class='kw'>const</span> FLOAT fWheelSteps = (FLOAT)zDelta / (FLOAT)WHEEL_DELTA;
+      FLOAT fScaleNew;
+      FLOAT fTexScalerNew;
+      DOUBLE anchorX = <span class='num'>0.0</span>;
+      DOUBLE anchorY = <span class='num'>0.0</span>;
+
+      <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+
+      <span class='kw'>if</span> (clientWidth &lt; <span class='num'>1</span> || clientHeight &lt; <span class='num'>1</span>)
+      {
+        <span class='kw'>return</span>;
+      }
+
+      fScaleNew = <span class='fn'>CLAMP</span>(
+        lpsd-&gt;fScale + ((<span class='num'>0.0f</span> &lt; fScaleScale) ? fScaleScale : -<span class='num'>1.0f</span> + fScaleScale) * -fWheelSteps * MOUSE_WHEEL_ZOOM_STEP_SCALE,
+        <span class='num'>0.001f</span>,
+        <span class='num'>1.0f</span>);
+      fTexScalerNew = <span class='num'>1.0f</span> + (<span class='num'>15.0f</span> * (<span class='num'>1.0f</span> - fScaleNew));
+
+      <span class='kw'>if</span> (fAnchorZoom)
+      {
+        <span class='fn'>render_computeSourceRect</span>(hWnd, &amp;rcSourceOld);
+        <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcSourceOld))
+        {
+          <span class='kw'>return</span>;
+        }
+
+        <span class='kw'>if</span> (fMouseRelativeZoom)
+        {
+          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)ptClient.x * (DOUBLE)<span class='fn'>RECTWIDTH</span>(rcSourceOld) / (DOUBLE)clientWidth);
+          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)ptClient.y * (DOUBLE)<span class='fn'>RECTHEIGHT</span>(rcSourceOld) / (DOUBLE)clientHeight);
+        }
+        <span class='kw'>else</span>
+        {
+          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)<span class='fn'>RECTWIDTH</span>(rcSourceOld) / <span class='num'>2.0</span>);
+          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)<span class='fn'>RECTHEIGHT</span>(rcSourceOld) / <span class='num'>2.0</span>);
+        }
+      }
+
+      lpsd-&gt;fScale = fScaleNew;
+      lpsd-&gt;fTexScaler = fTexScalerNew;
+
+      <span class='kw'>if</span> (fAnchorZoom &amp;&amp; (lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span> || lpsd-&gt;fSourceOriginPinned))
+      {
+        <span class='kw'>const</span> LONG srcW = (lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span>) ? <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(clientWidth / lpsd-&gt;fTexScaler)) : clientWidth;
+        <span class='kw'>const</span> LONG srcH = (lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span>) ? <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(clientHeight / lpsd-&gt;fTexScaler)) : clientHeight;
+        LONG srcX;
+        LONG srcY;
+
+        <span class='fn'>mag_GetCaptureRect</span>(lpsd, &amp;rcCapture);
+
+        <span class='kw'>if</span> (fMouseRelativeZoom)
+        {
+          srcX = (LONG)(anchorX - ((DOUBLE)ptClient.x * (DOUBLE)srcW / (DOUBLE)clientWidth));
+          srcY = (LONG)(anchorY - ((DOUBLE)ptClient.y * (DOUBLE)srcH / (DOUBLE)clientHeight));
+        }
+        <span class='kw'>else</span>
+        {
+          srcX = (LONG)(anchorX - ((DOUBLE)srcW / <span class='num'>2.0</span>));
+          srcY = (LONG)(anchorY - ((DOUBLE)srcH / <span class='num'>2.0</span>));
+        }
+
+        lpsd-&gt;ptSourceOrigin.x = <span class='fn'>render_clipSourceOrigin</span>(srcX, srcW, rcCapture.left, rcCapture.right);
+        lpsd-&gt;ptSourceOrigin.y = <span class='fn'>render_clipSourceOrigin</span>(srcY, srcH, rcCapture.top, rcCapture.bottom);
+        lpsd-&gt;fUseSourceOrigin = TRUE;
+        <span class='kw'>if</span> (!fKeepSourceOrigin)
+        {
+          lpsd-&gt;fSourceOriginPinned = FALSE;
+        }
+      }
+      <span class='kw'>else</span>
+      {
+        lpsd-&gt;fUseSourceOrigin = FALSE;
+        lpsd-&gt;fSourceOriginPinned = FALSE;
+      }
+
+      <span class='fn'>renderRender</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnLButtonDown</span>(HWND hWnd, BOOL fDoubleClick, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags)
+{
+    POINT ptClient = { x, y };
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fDoubleClick);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(keyFlags);
+
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+
+    <span class='kw'>if</span> (<span class='fn'>render_minimapBeginDrag</span>(hWnd, ptClient))
+    {
+      <span class='fn'>SetCapture</span>(hWnd);
+      <span class='fn'>renderRender</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnLButtonUp</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(x);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(y);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(keyFlags);
+
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+
+    <span class='kw'>if</span> (lpsd &amp;&amp; lpsd-&gt;fMiniMapDragging)
+    {
+      <span class='fn'>render_minimapEndDrag</span>(hWnd);
+      <span class='kw'>if</span> (<span class='fn'>GetCapture</span>() == hWnd)
+      {
+        <span class='fn'>ReleaseCapture</span>();
+      }
+      <span class='fn'>renderRender</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnMouseMove</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT keyFlags)
+{
+    POINT ptClient = { x, y };
+    POINT ptScreen = ptClient;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(keyFlags);
+
+    <span class='kw'>if</span> (<span class='fn'>ClientToScreen</span>(hWnd, &amp;ptScreen))
+    {
+      <span class='fn'>mag_NotifyMiniMapCursorActivity</span>(hWnd, ptScreen);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>render_minimapDrag</span>(hWnd, ptClient))
+    {
+      <span class='fn'>renderRender</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnNCMouseMove</span>(HWND hWnd, <span class='kw'>int</span> x, <span class='kw'>int</span> y, UINT codeHitTest)
+{
+    POINT ptScreen = { x, y };
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(codeHitTest);
+
+    <span class='fn'>mag_NotifyMiniMapCursorActivity</span>(hWnd, ptScreen);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_NotifyMiniMapCursorActivity</span>(HWND hWnd, POINT ptScreen)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!lpsd-&gt;fMiniMapHaveLastCursor ||
+        lpsd-&gt;ptMiniMapLastCursor.x != ptScreen.x ||
+        lpsd-&gt;ptMiniMapLastCursor.y != ptScreen.y)
+    {
+      lpsd-&gt;fMiniMapHaveLastCursor = TRUE;
+      lpsd-&gt;ptMiniMapLastCursor = ptScreen;
+      <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnCaptureChanged</span>(HWND hWnd, HWND hwndNewCapture)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hwndNewCapture);
+
+    <span class='fn'>render_minimapEndDrag</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnSize</span>(HWND hWnd, UINT state, <span class='kw'>int</span> cx, <span class='kw'>int</span> cy)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(state);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(cx);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(cy);
+
+    <span class='fn'>renderResizeCapture</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnEnterMenuLoop</span>(HWND hWnd, BOOL fIsTrackPopupMenu)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fIsTrackPopupMenu);
+
+    <span class='fn'>SetTimer</span>(hWnd, <span class='num'>0x69</span>, USER_TIMER_MINIMUM, <span class='num'>0</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnExitMenuLoop</span>(HWND hWnd,BOOL fIsShortcutMenu)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(fIsShortcutMenu);
+
+    <span class='fn'>KillTimer</span>(hWnd, <span class='num'>0x69</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnEnterSizeMove</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd)
+    {
+      lpsd-&gt;fMiniMapHoldVisible = TRUE;
+      lpsd-&gt;fInSizeMove = TRUE;
+    }
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+    <span class='fn'>SetTimer</span>(hWnd, <span class='num'>0x69</span>, USER_TIMER_MINIMUM, <span class='num'>0</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnExitSizeMove</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd)
+    {
+      lpsd-&gt;fMiniMapHoldVisible = FALSE;
+      lpsd-&gt;fInSizeMove = FALSE;
+    }
+    <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+    <span class='fn'>KillTimer</span>(hWnd, <span class='num'>0x69</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>mag_OnWindowPosChanged</span>(HWND hWnd, <span class='kw'>const</span> WINDOWPOS* lpwndpos)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='kw'>const</span> BOOL fMoved = !(lpwndpos-&gt;flags &amp; SWP_NOMOVE);
+    <span class='kw'>const</span> BOOL fSized = !(lpwndpos-&gt;flags &amp; SWP_NOSIZE);
+    <span class='kw'>const</span> BOOL fActualMove = fMoved &amp;&amp; !fSized;
+    RECT rcSourceOld;
+    RECT rcCapture;
+    BOOL fPreservePinnedCenter = FALSE;
+    DOUBLE anchorX = <span class='num'>0.0</span>;
+    DOUBLE anchorY = <span class='num'>0.0</span>;
+
+    <span class='kw'>if</span> (lpsd &amp;&amp;
+        fSized &amp;&amp;
+        !fActualMove &amp;&amp;
+        lpsd-&gt;fSourceOriginPinned &amp;&amp;
+        lpsd-&gt;fUseSourceOrigin &amp;&amp;
+        lpsd-&gt;bi.biWidth &gt; <span class='num'>0</span> &amp;&amp;
+        lpsd-&gt;bi.biHeight &gt; <span class='num'>0</span>)
+    {
+      <span class='fn'>render_computeSourceRect</span>(hWnd, &amp;rcSourceOld);
+      <span class='kw'>if</span> (!<span class='fn'>IsRectEmpty</span>(&amp;rcSourceOld))
+      {
+        anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)<span class='fn'>RECTWIDTH</span>(rcSourceOld) / <span class='num'>2.0</span>);
+        anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)<span class='fn'>RECTHEIGHT</span>(rcSourceOld) / <span class='num'>2.0</span>);
+        fPreservePinnedCenter = TRUE;
+      }
+    }
+
+    <span class='fn'>DefWindowProc</span>(hWnd, WM_WINDOWPOSCHANGED, <span class='num'>0</span>, (LPARAM)lpwndpos);
+    
+    <span class='kw'>if</span> (lpsd &amp;&amp;
+        lpsd-&gt;hDC &amp;&amp;
+        lpsd-&gt;hCaptureDC &amp;&amp;
+        (fMoved || fSized))
+    {
+      <span class='fn'>render_minimapNotifyActivity</span>(hWnd);
+
+      <span class='kw'>if</span> (fActualMove)
+      {
+        lpsd-&gt;fUseSourceOrigin = FALSE;
+        lpsd-&gt;fSourceOriginPinned = FALSE;
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (fPreservePinnedCenter &amp;&amp;
+               lpsd-&gt;bi.biWidth &gt; <span class='num'>0</span> &amp;&amp;
+               lpsd-&gt;bi.biHeight &gt; <span class='num'>0</span>)
+      {
+        <span class='kw'>const</span> LONG srcW = (lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span>) ? <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(lpsd-&gt;bi.biWidth / lpsd-&gt;fTexScaler)) : lpsd-&gt;bi.biWidth;
+        <span class='kw'>const</span> LONG srcH = (lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span>) ? <span class='fn'>max</span>(<span class='num'>1</span>, (LONG)(lpsd-&gt;bi.biHeight / lpsd-&gt;fTexScaler)) : lpsd-&gt;bi.biHeight;
+        <span class='kw'>const</span> LONG srcX = (LONG)(anchorX - ((DOUBLE)srcW / <span class='num'>2.0</span>));
+        <span class='kw'>const</span> LONG srcY = (LONG)(anchorY - ((DOUBLE)srcH / <span class='num'>2.0</span>));
+
+        <span class='fn'>mag_GetCaptureRect</span>(lpsd, &amp;rcCapture);
+        lpsd-&gt;ptSourceOrigin.x = <span class='fn'>render_clipSourceOrigin</span>(srcX, srcW, rcCapture.left, rcCapture.right);
+        lpsd-&gt;ptSourceOrigin.y = <span class='fn'>render_clipSourceOrigin</span>(srcY, srcH, rcCapture.top, rcCapture.bottom);
+        lpsd-&gt;fUseSourceOrigin = TRUE;
+        lpsd-&gt;fSourceOriginPinned = TRUE;
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (!lpsd-&gt;fSourceOriginPinned)
+      {
+        lpsd-&gt;fUseSourceOrigin = FALSE;
+      }
+      <span class='fn'>renderRender</span>(hWnd);
+    }
+}
+
+LRESULT <span class='kw'>CALLBACK</span> <span class='fn'>mag_WndProc</span>(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    <span class='kw'>switch</span> (message) {
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_CREATE,            mag_OnCreate);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_DESTROY,           mag_OnDestroy);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_SIZE,              mag_OnSize);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_ACTIVATE,          mag_OnActivate);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_PAINT,             mag_OnPaint);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_ERASEBKGND,        mag_OnEraseBkgnd);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_NCCREATE,          mag_OnNCCreate);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_NCCALCSIZE,        mag_OnNCCalcSize);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_NCHITTEST,         mag_OnNCHittest);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_NCACTIVATE,        mag_OnNCActivate);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_NCRBUTTONDOWN,     mag_OnNCRButtonDown);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_COMMAND,           mag_OnCommand);
+    <span class='kw'>case</span> WM_KEYUP:
+    {
+      <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+      <span class='kw'>if</span> (lpsd &amp;&amp; MAG_VIEW_LENS == lpsd-&gt;viewMode)
+      {
+        <span class='kw'>return</span> <span class='fn'>DefWindowProc</span>(hWnd, message, wParam, lParam);
+      }
+
+      <span class='fn'>mag_OnKeyUp</span>(hWnd, (UINT)wParam, FALSE, <span class='fn'>LOWORD</span>(lParam), <span class='fn'>HIWORD</span>(lParam));
+      <span class='kw'>return</span> <span class='num'>0</span>;
+    }
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_TIMER,             mag_OnTimer);
+    <span class='kw'>case</span> WM_MAG_RENDER:
+      <span class='fn'>mag_OnRender</span>(hWnd);
+      <span class='kw'>return</span> <span class='num'>0</span>;
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_LBUTTONUP,         mag_OnLButtonUp);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_MOUSEMOVE,         mag_OnMouseMove);
+    <span class='kw'>case</span> WM_NCMOUSEMOVE:
+      <span class='fn'>mag_OnNCMouseMove</span>(
+        hWnd,
+        (<span class='kw'>int</span>)(<span class='kw'>short</span>)<span class='fn'>LOWORD</span>(lParam),
+        (<span class='kw'>int</span>)(<span class='kw'>short</span>)<span class='fn'>HIWORD</span>(lParam),
+        (UINT)wParam);
+      <span class='kw'>return</span> <span class='num'>0</span>;
+    <span class='kw'>case</span> WM_MAG_TRAYICON:
+      <span class='kw'>return</span> <span class='fn'>mag_OnTrayIcon</span>(hWnd, wParam, lParam);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_ENTERSIZEMOVE,     mag_OnEnterSizeMove);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_EXITSIZEMOVE,      mag_OnExitSizeMove);
+    <span class='fn'>HANDLE_MSG</span>(hWnd,  WM_WINDOWPOSCHANGED,  mag_OnWindowPosChanged);
+    <span class='fn'>FORWARD_MSG</span>(hWnd, message,              DefWindowProc);
+    }
+}
+
+ATOM <span class='fn'>mag_RegisterClassEx</span>(HINSTANCE hInstance)
+{
+    WNDCLASSEX wcex = { <span class='kw'>sizeof</span>(wcex) };
+
+    wcex.style = CS_OWNDC | CS_SAVEBITS | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
+    wcex.lpfnWndProc = mag_WndProc;
+    wcex.cbClsExtra = <span class='num'>0</span>;
+    wcex.cbWndExtra = <span class='num'>0</span>;
+    wcex.hInstance = hInstance;
+    wcex.hIcon = (HICON)<span class='fn'>LoadImage</span>(
+      hInstance,
+      <span class='fn'>MAKEINTRESOURCE</span>(IDI_APPICON),
+      IMAGE_ICON,
+      <span class='fn'>GetSystemMetrics</span>(SM_CXICON),
+      <span class='fn'>GetSystemMetrics</span>(SM_CYICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+    wcex.hCursor = <span class='fn'>LoadCursor</span>(NULL, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + <span class='num'>1</span>);
+    wcex.hbrBackground = <span class='fn'>GetStockBrush</span>(BLACK_BRUSH);
+    <span class='cm'>//wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);</span>
+    wcex.lpszClassName = <span class='fn'>TEXT</span>(<span class='str'>"magWindowClass"</span>);
+    <span class='cm'>//wcex.lpszClassName  = szWindowClass;</span>
+    wcex.hIconSm = (HICON)<span class='fn'>LoadImage</span>(
+      hInstance,
+      <span class='fn'>MAKEINTRESOURCE</span>(IDI_APPICON),
+      IMAGE_ICON,
+      <span class='fn'>GetSystemMetrics</span>(SM_CXSMICON),
+      <span class='fn'>GetSystemMetrics</span>(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+
+    <span class='kw'>return</span> <span class='fn'>RegisterClassEx</span>(&amp;wcex);
+}
+
+HWND <span class='fn'>magInitInstance</span>(HINSTANCE hInstance, <span class='kw'>int</span> nCmdShow)
+{
+    ATOM atm;
+    HWND hWnd;
+
+    hWnd = <span class='fn'>CreateWindowEx</span>(
+      WS_EX_TRANSPARENT | 
+      <span class='cm'>//WS_EX_PALETTEWINDOW |</span>
+      WS_EX_APPWINDOW |
+      WS_EX_CONTEXTHELP |
+      WS_EX_DLGMODALFRAME,
+      (LPTSTR)(atm = <span class='fn'>mag_RegisterClassEx</span>(hInstance)),
+      <span class='fn'>TEXT</span>(<span class='str'>"magWindow"</span>),
+      <span class='cm'>//WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_BORDER,</span>
+      WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT,
+      <span class='cm'>//0,</span>
+      <span class='num'>0</span>,
+      CW_USEDEFAULT,
+      <span class='cm'>//0,</span>
+      <span class='num'>100</span>,
+      NULL,
+      NULL,
+      hInstance,
+      <span class='fn'>VirtualAlloc</span>(NULL, <span class='kw'>sizeof</span>(<span class='tp'>SHAREDWGLDATA</span>), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+
+    <span class='kw'>if</span> (!hWnd)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+
+    <span class='fn'>ShowWindow</span>(hWnd, nCmdShow);
+    <span class='fn'>UpdateWindow</span>(hWnd);
+    <span class='cm'>//SetWindowLongPtr(hWnd, GWL_EXSTYLE, (WS_EX_COMPOSITED|WS_EX_APPWINDOW) | GetWindowExStyle(hWnd));</span>
+    <span class='kw'>return</span> hWnd;
+}
+</pre>
+</body>
+</html>

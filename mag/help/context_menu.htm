@@ -14,7 +14,7 @@
 
 <p>
   Right-clicking anywhere on the magnifier window frame opens the context menu.
-  The menu provides quick access to the main MAG features.
+  The menu provides quick access to the view mode, settings, help, and exit commands.
 </p>
 
 <table>
@@ -23,18 +23,39 @@
     <th>Description</th>
   </tr>
   <tr>
+    <td class="key">Window</td>
+    <td>
+      Uses the magnifier window position as the capture anchor. At 1.0x scale, the
+      captured image lines up with the desktop area directly behind the window.
+    </td>
+  </tr>
+  <tr>
     <td class="key">Follow Mouse</td>
     <td>
-      Toggles automatic cursor tracking. When enabled, the captured area is centered
-      on the cursor while the magnifier window stays in place. A check mark appears
-      next to the item while tracking is active.<br><br>
-      While tracking, the window remains interactive. Press <strong>Space</strong> to
-      stop tracking without opening the menu.
+      Centers the captured area on the cursor while the magnifier window stays in
+      place. The capture is clipped to the current capture bounds and still fills the
+      window without stretching the texture. While tracking, the window remains
+      interactive. Press <strong>Space</strong> to return to <em>Window</em> mode.
+    </td>
+  </tr>
+  <tr>
+    <td class="key">Lens</td>
+    <td>
+      Moves the magnifier as a cursor-following lens. The lens is topmost,
+      non-activating, and click-through so input goes to the window underneath.
+      Overlay controls are disabled in this mode.
     </td>
   </tr>
   <tr>
     <td class="key">Settings</td>
-    <td>Opens the settings dialog for graphics and capture backend selection. Available capture backends include GDI BitBlt, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, and DWM Private Visual.</td>
+    <td>
+      Opens the settings dialog. The current graphics backend is <strong>OpenGL</strong>.
+      Capture backend choices are <strong>GDI BitBlt</strong>, <strong>DXGI Desktop
+      Duplication</strong>, <strong>Windows Graphics Capture</strong>,
+      <strong>DWM Thumbnail</strong>, and <strong>DWM Private Visual</strong>.
+      The dialog also contains the <strong>Mouse-relative wheel zoom</strong> option,
+      which is disabled by default.
+    </td>
   </tr>
   <tr>
     <td class="key">Help</td>
@@ -47,9 +68,37 @@
 </table>
 
 <div class="tip">
-  <strong>Tip:</strong> You can open the context menu while <em>Follow Mouse</em> is
-  active by right-clicking the window frame.
+  <strong>Tip:</strong> <em>Window</em>, <em>Follow Mouse</em>, and <em>Lens</em> are
+  mutually exclusive. Selecting one turns off the other two.
 </div>
+
+<h2>Capture Backends</h2>
+<table>
+  <tr>
+    <th>Backend</th>
+    <th>Notes</th>
+  </tr>
+  <tr>
+    <td class="key">GDI BitBlt</td>
+    <td>Baseline desktop capture path.</td>
+  </tr>
+  <tr>
+    <td class="key">DXGI Desktop Duplication</td>
+    <td>Direct3D desktop duplication path with multi-monitor capture uploaded into one OpenGL texture.</td>
+  </tr>
+  <tr>
+    <td class="key">Windows Graphics Capture</td>
+    <td>Windows Graphics Capture based monitor capture path.</td>
+  </tr>
+  <tr>
+    <td class="key">DWM Thumbnail</td>
+    <td>DWM thumbnail based capture path.</td>
+  </tr>
+  <tr>
+    <td class="key">DWM Private Visual</td>
+    <td>Private DWM visual capture path.</td>
+  </tr>
+</table>
 
 </body>
 </html>

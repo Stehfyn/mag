@@ -20,15 +20,23 @@
   </tr>
   <tr>
     <td class="key">Mouse Wheel</td>
-    <td>Zoom in or out. The zoom level adjusts with a non-linear curve for fine control at high magnification.</td>
+    <td>Zoom in or out in smaller, non-linear steps for fine control at high magnification.</td>
   </tr>
   <tr>
-    <td class="key">Left-click and drag</td>
+    <td class="key">Mouse Wheel with mouse-relative zoom enabled</td>
+    <td>Zoom around the cursor position instead of the current view center. This setting is off by default and only applies outside tracking modes.</td>
+  </tr>
+  <tr>
+    <td class="key">Drag the frame</td>
     <td>Move the magnifier window to a new position on screen.</td>
   </tr>
   <tr>
     <td class="key">Drag any edge or corner</td>
-    <td>Resize the magnifier window. The captured region scales with the window size.</td>
+    <td>Resize the magnifier window. Rendering continues on vblank while the modal resize loop is active.</td>
+  </tr>
+  <tr>
+    <td class="key">Left-click and drag minimap</td>
+    <td>Pan the visible source rectangle inside the captured desktop area. The minimap is available while zoomed in, while dragging or resizing, and in the pinned 1.0x state after panning.</td>
   </tr>
   <tr>
     <td class="key">Right-click</td>
@@ -44,7 +52,7 @@
   </tr>
   <tr>
     <td class="key">Space</td>
-    <td>Stop <em>Follow Mouse</em> mode. The capture returns to the magnifier window position. Only active while tracking is enabled.</td>
+    <td>Stop <em>Follow Mouse</em> mode and return to <em>Window</em> mode. Only active outside <em>Lens</em> mode.</td>
   </tr>
   <tr>
     <td class="key">Escape</td>
@@ -53,9 +61,9 @@
 </table>
 
 <div class="note">
-  <strong>Note:</strong> When <em>Follow Mouse</em> is active the magnifier window
-  remains interactive. You can still drag, resize, right-click, or use the mouse wheel
-  directly on the window.
+  <strong>Note:</strong> In <em>Follow Mouse</em> mode the window remains interactive.
+  Clicking the minimap pans the view without leaving follow mode. In <em>Lens</em>
+  mode, the window is click-through and the overlay UI is disabled.
 </div>
 
 <h2>Zoom Behaviour</h2>
@@ -63,7 +71,16 @@
   The zoom level ranges from minimum (the window shows an area close in size to itself)
   to maximum (each screen pixel fills a large portion of the window). The zoom step size
   scales automatically so that coarse changes are fast when zoomed out and fine changes
-  are precise when zoomed in.
+  are precise when zoomed in. At 1.0x scale, panning with the minimap pins the source
+  view until the actual window is moved.
+</p>
+
+<h2>Minimap Overlay</h2>
+<p>
+  The minimap shows the capture area, monitor boundaries, the current visible source
+  rectangle, and the window rectangle. It fades like video playback controls after
+  mouse activity stops, but remains visible while dragging or resizing when a zoomed or
+  pinned view needs it.
 </p>
 
 </body>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>main.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; main.c</p>
+<h1>main.c</h1>
+<pre class="source-code"><span class='pp'>#include "mag.h"</span>
+<span class='pp'>#include "render.h"</span>
+
+<span class='pp'>#define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAINVBLANKTHREAD
+{
+  HWND   hWnd;
+  HANDLE hStopEvent;
+  HANDLE hThread;
+} MAINVBLANKTHREAD, *LPMAINVBLANKTHREAD;
+
+DWORD <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(LPVOID lpParameter);
+BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREAD lpThread);
+<span class='kw'>void</span> <span class='fn'>main_StopVBlankThread</span>(LPMAINVBLANKTHREAD lpThread);
+
+BOOL <span class='fn'>main_PumpMessages</span>(HWND hWnd, <span class='kw'>int</span>* lpExitCode)
+{
+    MSG msg;
+
+    <span class='kw'>while</span> (<span class='fn'>PeekMessage</span>(&amp;msg, NULL, <span class='num'>0</span>, <span class='num'>0</span>, PM_REMOVE))
+    {
+      <span class='kw'>if</span> (WM_QUIT == msg.message)
+      {
+        <span class='kw'>if</span> (lpExitCode)
+        {
+          *lpExitCode = (<span class='kw'>int</span>)msg.wParam;
+        }
+
+        <span class='kw'>return</span> FALSE;
+      }
+
+      <span class='fn'>TranslateMessage</span>(&amp;msg);
+      <span class='fn'>DispatchMessage</span>(&amp;msg);
+    }
+
+    <span class='kw'>return</span> <span class='fn'>IsWindow</span>(hWnd);
+}
+
+DWORD <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(LPVOID lpParameter)
+{
+    LPMAINVBLANKTHREAD lpThread = (LPMAINVBLANKTHREAD)lpParameter;
+
+    <span class='kw'>while</span> (WAIT_OBJECT_0 != <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, <span class='num'>0</span>))
+    {
+      <span class='kw'>if</span> (!<span class='fn'>IsWindow</span>(lpThread-&gt;hWnd))
+      {
+        <span class='kw'>break</span>;
+      }
+
+      <span class='kw'>if</span> (!<span class='fn'>D3DKMTWaitForVerticalBlank</span>(lpThread-&gt;hWnd))
+      {
+        <span class='kw'>if</span> (WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, MAIN_RENDER_INTERVAL_MS))
+        {
+          <span class='kw'>break</span>;
+        }
+      }
+
+      <span class='kw'>if</span> (WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, <span class='num'>0</span>) || !<span class='fn'>IsWindow</span>(lpThread-&gt;hWnd))
+      {
+        <span class='kw'>break</span>;
+      }
+
+      <span class='fn'>SendMessage</span>(lpThread-&gt;hWnd, WM_MAG_RENDER, <span class='num'>0</span>, <span class='num'>0</span>);
+    }
+
+    <span class='kw'>return</span> <span class='num'>0</span>;
+}
+
+BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREAD lpThread)
+{
+    <span class='fn'>ZeroMemory</span>(lpThread, <span class='kw'>sizeof</span>(*lpThread));
+    lpThread-&gt;hWnd = hWnd;
+    lpThread-&gt;hStopEvent = <span class='fn'>CreateEvent</span>(NULL, TRUE, FALSE, NULL);
+
+    <span class='kw'>if</span> (!lpThread-&gt;hStopEvent)
+    {
+      <span class='fn'>main_StopVBlankThread</span>(lpThread);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpThread-&gt;hThread = <span class='fn'>CreateThread</span>(NULL, <span class='num'>0</span>, main_VBlankThreadProc, lpThread, <span class='num'>0</span>, NULL);
+    <span class='kw'>if</span> (!lpThread-&gt;hThread)
+    {
+      <span class='fn'>main_StopVBlankThread</span>(lpThread);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>main_StopVBlankThread</span>(LPMAINVBLANKTHREAD lpThread)
+{
+    <span class='kw'>if</span> (lpThread-&gt;hStopEvent)
+    {
+      <span class='fn'>SetEvent</span>(lpThread-&gt;hStopEvent);
+    }
+
+    <span class='kw'>if</span> (lpThread-&gt;hThread)
+    {
+      <span class='kw'>for</span> (;;)
+      {
+        DWORD dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>1</span>, &amp;lpThread-&gt;hThread, FALSE, INFINITE, QS_ALLINPUT);
+
+        <span class='kw'>if</span> (WAIT_OBJECT_0 == dwWait)
+        {
+          <span class='kw'>break</span>;
+        }
+
+        <span class='kw'>if</span> (WAIT_OBJECT_0 + <span class='num'>1</span> == dwWait)
+        {
+          MSG msg;
+
+          <span class='kw'>while</span> (<span class='fn'>PeekMessage</span>(&amp;msg, NULL, <span class='num'>0</span>, <span class='num'>0</span>, PM_REMOVE))
+          {
+            <span class='kw'>if</span> (WM_QUIT == msg.message)
+            {
+              <span class='fn'>PostQuitMessage</span>((<span class='kw'>int</span>)msg.wParam);
+            }
+            <span class='kw'>else</span>
+            {
+              <span class='fn'>TranslateMessage</span>(&amp;msg);
+              <span class='fn'>DispatchMessage</span>(&amp;msg);
+            }
+          }
+        }
+        <span class='kw'>else</span>
+        {
+          <span class='kw'>break</span>;
+        }
+      }
+
+      <span class='fn'>CloseHandle</span>(lpThread-&gt;hThread);
+    }
+
+    <span class='kw'>if</span> (lpThread-&gt;hStopEvent)
+    {
+      <span class='fn'>CloseHandle</span>(lpThread-&gt;hStopEvent);
+    }
+
+    <span class='fn'>ZeroMemory</span>(lpThread, <span class='kw'>sizeof</span>(*lpThread));
+}
+
+<span class='kw'>int</span> 
+<span class='kw'>WINAPI</span> 
+<span class='fn'>_tWinMain</span>(
+  _In_ HINSTANCE hInstance,
+  _In_opt_ HINSTANCE hPrevInstance,
+  _In_ LPTSTR lpCmdLine,
+  _In_ <span class='kw'>int</span> nShowCmd)
+{
+    HWND hWnd;
+    <span class='kw'>int</span> exitCode = <span class='num'>0</span>;
+    MAINVBLANKTHREAD vblankThread;
+    BOOL fMessageDrivenRender = FALSE;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hPrevInstance);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(lpCmdLine);
+
+    hWnd = <span class='fn'>magInitInstance</span>(hInstance, nShowCmd);
+    <span class='kw'>if</span> (!hWnd)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>main_StartVBlankThread</span>(hWnd, &amp;vblankThread))
+    {
+      fMessageDrivenRender = TRUE;
+      <span class='fn'>renderSetMessageDriven</span>(hWnd, TRUE);
+    }
+
+    <span class='kw'>while</span> (<span class='fn'>main_PumpMessages</span>(hWnd, &amp;exitCode))
+    {
+      DWORD dwWait;
+
+      dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>0</span>, NULL, FALSE, fMessageDrivenRender ? INFINITE : MAIN_RENDER_INTERVAL_MS, QS_ALLINPUT);
+
+      <span class='kw'>if</span> (WAIT_FAILED == dwWait)
+      {
+        <span class='kw'>break</span>;
+      }
+
+      <span class='kw'>if</span> (!fMessageDrivenRender &amp;&amp; WAIT_TIMEOUT == dwWait)
+      {
+        <span class='kw'>if</span> (<span class='fn'>IsWindow</span>(hWnd))
+        {
+          <span class='fn'>mag_OnTimer</span>(hWnd, <span class='num'>0</span>);
+        }
+        <span class='kw'>else</span>
+        {
+          <span class='kw'>break</span>;
+        }
+      }
+    }
+
+    <span class='fn'>main_StopVBlankThread</span>(&amp;vblankThread);
+    <span class='kw'>return</span> exitCode;
+}
+</pre>
+</body>
+</html>

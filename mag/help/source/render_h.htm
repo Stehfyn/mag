@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>render.h - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; render.h</p>
+<h1>render.h</h1>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include "framework.h"</span>
+
+<span class='pp'>#include &lt;d3d11.h&gt;</span>
+<span class='pp'>#include &lt;dxgi1_2.h&gt;</span>
+<span class='pp'>#include &lt;gl/GL.h&gt;</span>
+
+<span class='pp'>#define CHANNELS (4)</span>
+<span class='pp'>#define BITS_PER_PIXEL (CHANNELS &lt;&lt; 3) // 8 bits = 2^3 </span>
+<span class='pp'>#define SURFACE_BYTES(rc) (CHANNELS * RECTWIDTH((rc)) * RECTHEIGHT((rc)))</span>
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>GRAPHICSAPI</span>
+{
+  GRAPHICS_API_OPENGL = <span class='num'>0</span>,
+  GRAPHICS_API_COUNT
+} <span class='tp'>GRAPHICSAPI</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>CAPTUREAPI</span>
+{
+  CAPTURE_API_GDI_BITBLT = <span class='num'>0</span>,
+  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
+  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
+  CAPTURE_API_DWM_THUMBNAIL,
+  CAPTURE_API_DWM_PRIVATE_VISUAL,
+  CAPTURE_API_COUNT
+} <span class='tp'>CAPTUREAPI</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGVIEWMODE</span>
+{
+  MAG_VIEW_WINDOW = <span class='num'>0</span>,
+  MAG_VIEW_FOLLOW_MOUSE,
+  MAG_VIEW_LENS,
+  MAG_VIEW_COUNT
+} <span class='tp'>MAGVIEWMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DXGIOUTPUTCAPTURE</span>
+{
+  ID3D11Device*             d3dDevice;
+  ID3D11DeviceContext*      d3dContext;
+  IDXGIOutputDuplication*   dxgiDuplication;
+  ID3D11Texture2D*          dxgiFrameTexture;
+  ID3D11Texture2D*          dxgiStagingTexture;
+  HMONITOR                  hMonitor;
+  RECT                      rcOutput;
+  UINT                      dxgiStagingWidth;
+  UINT                      dxgiStagingHeight;
+  BOOL                      fHasFrame;
+} <span class='tp'>DXGIOUTPUTCAPTURE</span>, *<span class='tp'>LPDXGIOUTPUTCAPTURE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>WGCMONITORCAPTURE</span>
+{
+  ID3D11Device*             d3dDevice;
+  ID3D11DeviceContext*      d3dContext;
+  IUnknown*                 wgcDevice;
+  IUnknown*                 wgcItem;
+  IUnknown*                 wgcFramePool;
+  IUnknown*                 wgcSession;
+  ID3D11Texture2D*          wgcFrameTexture;
+  ID3D11Texture2D*          wgcStagingTexture;
+  HMONITOR                  hMonitor;
+  RECT                      rcOutput;
+  UINT                      wgcFrameWidth;
+  UINT                      wgcFrameHeight;
+  UINT                      wgcStagingWidth;
+  UINT                      wgcStagingHeight;
+  BOOL                      fHasFrame;
+} <span class='tp'>WGCMONITORCAPTURE</span>, *<span class='tp'>LPWGCMONITORCAPTURE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMTHUMBNAILCAPTURE</span>
+{
+  HTHUMBNAIL hThumbnail;
+  HWND       hwndSource;
+} <span class='tp'>DWMTHUMBNAILCAPTURE</span>, *<span class='tp'>LPDWMTHUMBNAILCAPTURE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMPRIVATEVISUALCAPTURE</span>
+{
+  HWND         hwndHost;
+  HMODULE      hDComp;
+  HMODULE      hDwmApi;
+  HMODULE      hUser32;
+  FARPROC      pDCompositionCreateDevice;
+  FARPROC      pDCompositionCreateDevice3;
+  FARPROC      pCreateSharedVisual;
+  FARPROC      pUpdateSharedVisual;
+  FARPROC      pSetWindowCompositionAttribute;
+  ID3D11Device* d3dDevice;
+  IDXGIDevice* dxgiDevice;
+  IUnknown*    dcompDevice;
+  IUnknown*    dcompTarget;
+  IUnknown*    dcompVisual;
+  HTHUMBNAIL   hThumbnail;
+  BOOL         fDesktopDevice;
+  BOOL         fUseMultiWindow;
+  BOOL         fInitialized;
+} <span class='tp'>DWMPRIVATEVISUALCAPTURE</span>, *<span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>SHAREDWGLDATA</span>
+{
+  BOOL             fTrackCursor;
+  BOOL             fWinRtInitialized;
+  BOOL             fUseSourceOrigin;
+  BOOL             fMouseRelativeZoom;
+  BOOL             fMiniMapDragging;
+  BOOL             fMiniMapHoldVisible;
+  BOOL             fMiniMapHaveLastCursor;
+  BOOL             fSourceOriginPinned;
+  BOOL             fInSizeMove;
+  BOOL             fRenderMessageDriven;
+  <span class='tp'>MAGVIEWMODE</span>      viewMode;
+  <span class='tp'>GRAPHICSAPI</span>      graphicsApi;
+  <span class='tp'>CAPTUREAPI</span>       captureApi;
+  POINT            pt;
+  POINT            ptSourceOrigin;
+  POINT            ptMiniMapDragOffset;
+  POINT            ptMiniMapLastCursor;
+  DWORD            dwMiniMapLastActivity;
+  RECT             rc;
+  <span class='tp'>DISPLAYINFO</span>      di;
+  BITMAPINFOHEADER bi;
+  HDC              hDC;
+  HGLRC            hRC;
+  HPBUFFERARB      pb;
+  FLOAT            fScale;
+  HDC              hCaptureDC;
+  HDC              hDesktopDC;
+  HBITMAP          hBitmapBg;
+  HBITMAP          hBitmapOld;
+  <span class='tp'>DXGIOUTPUTCAPTURE</span> dxgiOutputs[MAX_ENUM_MONITORS];
+  <span class='tp'>WGCMONITORCAPTURE</span> wgcMonitors[MAX_ENUM_MONITORS];
+  <span class='tp'>DWMTHUMBNAILCAPTURE</span> dwmThumbnail;
+  <span class='tp'>DWMPRIVATEVISUALCAPTURE</span> dwmPrivate;
+  <span class='tp'>GLclampf</span>         cfClearColor[CHANNELS];
+  FLOAT            fTexScaler;
+  <span class='tp'>GLuint</span>           glScreenTexture;
+  <span class='tp'>GLubyte</span>*         glScreenData;
+
+} <span class='tp'>SHAREDWGLDATA</span>, *<span class='tp'>LPSHAREDWGLDATA</span>;
+
+<span class='kw'>void</span> <span class='fn'>renderInit</span>(HWND hWnd);
+
+<span class='kw'>void</span> <span class='fn'>renderCleanup</span>(HWND hWnd);
+
+<span class='kw'>void</span> <span class='fn'>renderResizeCapture</span>(HWND hWnd);
+
+<span class='kw'>void</span> <span class='fn'>renderSetMessageDriven</span>(HWND hWnd, BOOL fMessageDriven);
+
+<span class='kw'>void</span> <span class='fn'>renderRender</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>renderSubmit</span>(HWND hWnd);
+
+LONG <span class='fn'>render_clipSourceOrigin</span>(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
+
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRect</span>(HWND hWnd, RECT* lprcSource);
+
+BOOL <span class='fn'>render_minimapHitTest</span>(HWND hWnd, POINT ptClient);
+<span class='kw'>void</span> <span class='fn'>render_minimapNotifyActivity</span>(HWND hWnd);
+BOOL <span class='fn'>render_minimapBeginDrag</span>(HWND hWnd, POINT ptClient);
+BOOL <span class='fn'>render_minimapDrag</span>(HWND hWnd, POINT ptClient);
+<span class='kw'>void</span> <span class='fn'>render_minimapEndDrag</span>(HWND hWnd);
+</pre>
+</body>
+</html>

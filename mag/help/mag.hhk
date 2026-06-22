@@ -6,6 +6,10 @@
 </HEAD><BODY>
 <UL>
   <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Capture API">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Close">
     <param name="Local" value="context_menu.htm">
   </OBJECT>
@@ -16,6 +20,18 @@
   <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Controls">
     <param name="Local" value="controls.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="DWM Private Visual">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="DWM Thumbnail">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="DXGI Desktop Duplication">
+    <param name="Local" value="context_menu.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Escape key">
@@ -30,11 +46,31 @@
     <param name="Local" value="context_menu.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="GDI BitBlt">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Graphics API">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Keyboard Shortcuts">
     <param name="Local" value="controls.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Lens">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Minimap">
+    <param name="Local" value="controls.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Mouse Controls">
+    <param name="Local" value="controls.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Mouse-relative zoom">
     <param name="Local" value="controls.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
@@ -50,11 +86,23 @@
     <param name="Local" value="controls.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Settings">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Space key">
     <param name="Local" value="controls.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">
     <param name="Name" value="Tracking">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Windows Graphics Capture">
+    <param name="Local" value="context_menu.htm">
+  </OBJECT>
+  <LI><OBJECT type="text/sitemap">
+    <param name="Name" value="Window mode">
     <param name="Local" value="context_menu.htm">
   </OBJECT>
   <LI><OBJECT type="text/sitemap">

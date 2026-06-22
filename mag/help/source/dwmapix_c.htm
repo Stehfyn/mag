@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>dwmapix.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dwmapix.c</p>
+<h1>dwmapix.c</h1>
+<pre class="source-code"><span class='pp'>#include "dwmapix.h"</span>
+
+<span class='pp'>#pragma comment (lib, "dwmapi")</span>
+
+BOOL <span class='fn'>DwmEnableWindowComposition</span>(HWND hWnd, BOOL fEnable)
+{
+    DWM_BLURBEHIND bb = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (fEnable)
+    {
+      bb.dwFlags  = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+      bb.hRgnBlur = <span class='fn'>CreateRectRgn</span>(<span class='num'>0</span>, <span class='num'>0</span>, -<span class='num'>1</span>, -<span class='num'>1</span>);
+    }
+    <span class='kw'>else</span>
+    {
+      bb.dwFlags = DWM_BB_ENABLE;
+    }
+
+    bb.fEnable = fEnable;
+
+    <span class='kw'>return</span> S_OK == <span class='fn'>DwmEnableBlurBehindWindow</span>(hWnd, &amp;bb);
+}</pre>
+</body>
+</html>

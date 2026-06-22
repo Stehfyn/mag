@@ -1,0 +1,2704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>render.c - Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; render.c</p>
+<h1>render.c</h1>
+<pre class="source-code"><span class='pp'>#include "render.h"</span>
+
+<span class='pp'>#include &lt;roapi.h&gt;</span>
+<span class='pp'>#include &lt;windows.graphics.capture.h&gt;</span>
+<span class='pp'>#include &lt;windows.graphics.directx.direct3d11.interop.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, "d3d11")</span>
+<span class='pp'>#pragma comment(lib, "dxgi")</span>
+<span class='pp'>#pragma comment(lib, "dxguid")</span>
+<span class='pp'>#pragma comment(lib, "runtimeobject")</span>
+
+<span class='pp'>#define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)</span>
+<span class='pp'>#define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)</span>
+
+<span class='kw'>typedef</span> __x_ABI_CWindows_CFoundation_CIClosable WGCCLOSABLE;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CSizeInt32 WGCSIZE;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureItem WGCITEM;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession WGCSESSION;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession3 WGCSESSION3;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame WGCFRAME;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool WGCFRAMEPOOL;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePoolStatics2 WGCFRAMEPOOLSTATICS2;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CDirectX_CDirect3D11_CIDirect3DDevice WGCD3DDEVICE;
+<span class='kw'>typedef</span> __x_ABI_CWindows_CGraphics_CDirectX_CDirect3D11_CIDirect3DSurface WGCSURFACE;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> IGraphicsCaptureItemInterop IGraphicsCaptureItemInterop;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> IGraphicsCaptureItemInteropVtbl
+{
+  BEGIN_INTERFACE
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(IGraphicsCaptureItemInterop* This, REFIID riid, <span class='kw'>void</span>** ppvObject);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(IGraphicsCaptureItemInterop* This);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* Release)(IGraphicsCaptureItemInterop* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateForWindow)(IGraphicsCaptureItemInterop* This, HWND window, REFIID riid, <span class='kw'>void</span>** result);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateForMonitor)(IGraphicsCaptureItemInterop* This, HMONITOR monitor, REFIID riid, <span class='kw'>void</span>** result);
+  END_INTERFACE
+} IGraphicsCaptureItemInteropVtbl;
+
+<span class='kw'>struct</span> IGraphicsCaptureItemInterop
+{
+  CONST_VTBL <span class='kw'>struct</span> IGraphicsCaptureItemInteropVtbl* lpVtbl;
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_IGraphicsCaptureItemInterop =
+  { <span class='num'>0x3628E81B</span>, <span class='num'>0x3CAC</span>, <span class='num'>0x4C60</span>, { <span class='num'>0xB7</span>, <span class='num'>0xF4</span>, <span class='num'>0x23</span>, <span class='num'>0xCE</span>, <span class='num'>0x0E</span>, <span class='num'>0x0C</span>, <span class='num'>0x33</span>, <span class='num'>0x56</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_WGC_IClosable =
+  { <span class='num'>0x30D5A829</span>, <span class='num'>0x7FA4</span>, <span class='num'>0x4026</span>, { <span class='num'>0x83</span>, <span class='num'>0xBB</span>, <span class='num'>0xD7</span>, <span class='num'>0x5B</span>, <span class='num'>0xAE</span>, <span class='num'>0x4E</span>, <span class='num'>0xA9</span>, <span class='num'>0x9E</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_WGC_IDirect3DDevice =
+  { <span class='num'>0xA37624AB</span>, <span class='num'>0x8D5F</span>, <span class='num'>0x4650</span>, { <span class='num'>0x9D</span>, <span class='num'>0x3E</span>, <span class='num'>0x9E</span>, <span class='num'>0xAE</span>, <span class='num'>0x3D</span>, <span class='num'>0x9B</span>, <span class='num'>0xC6</span>, <span class='num'>0x70</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_WGC_IGraphicsCaptureItem =
+  { <span class='num'>0x79C3F95B</span>, <span class='num'>0x31F7</span>, <span class='num'>0x4EC2</span>, { <span class='num'>0xA4</span>, <span class='num'>0x64</span>, <span class='num'>0x63</span>, <span class='num'>0x2E</span>, <span class='num'>0xF5</span>, <span class='num'>0xD3</span>, <span class='num'>0x07</span>, <span class='num'>0x60</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_WGC_IGraphicsCaptureSession3 =
+  { <span class='num'>0xF2CDD966</span>, <span class='num'>0x22AE</span>, <span class='num'>0x5EA1</span>, { <span class='num'>0x95</span>, <span class='num'>0x96</span>, <span class='num'>0x3A</span>, <span class='num'>0x28</span>, <span class='num'>0x93</span>, <span class='num'>0x44</span>, <span class='num'>0xC3</span>, <span class='num'>0xBE</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_WGC_IDirect3D11CaptureFramePoolStatics2 =
+  { <span class='num'>0x589B103F</span>, <span class='num'>0x6BBC</span>, <span class='num'>0x5DF5</span>, { <span class='num'>0xA9</span>, <span class='num'>0x91</span>, <span class='num'>0x02</span>, <span class='num'>0xE2</span>, <span class='num'>0x8B</span>, <span class='num'>0x3B</span>, <span class='num'>0x66</span>, <span class='num'>0xD5</span> } };
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> IDirect3DDxgiInterfaceAccess IDirect3DDxgiInterfaceAccess;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> IDirect3DDxgiInterfaceAccessVtbl
+{
+  BEGIN_INTERFACE
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(IDirect3DDxgiInterfaceAccess* This, REFIID riid, <span class='kw'>void</span>** ppvObject);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(IDirect3DDxgiInterfaceAccess* This);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* Release)(IDirect3DDxgiInterfaceAccess* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* GetInterface)(IDirect3DDxgiInterfaceAccess* This, REFIID iid, <span class='kw'>void</span>** p);
+  END_INTERFACE
+} IDirect3DDxgiInterfaceAccessVtbl;
+
+<span class='kw'>struct</span> IDirect3DDxgiInterfaceAccess
+{
+  CONST_VTBL <span class='kw'>struct</span> IDirect3DDxgiInterfaceAccessVtbl* lpVtbl;
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_IDirect3DDxgiInterfaceAccess =
+  { <span class='num'>0xA9B3D012</span>, <span class='num'>0x3DF2</span>, <span class='num'>0x4EE3</span>, { <span class='num'>0xB8</span>, <span class='num'>0xD1</span>, <span class='num'>0x86</span>, <span class='num'>0x95</span>, <span class='num'>0xF4</span>, <span class='num'>0x57</span>, <span class='num'>0xD3</span>, <span class='num'>0xC1</span> } };
+
+<span class='pp'>#define DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL 163</span>
+<span class='pp'>#define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164</span>
+<span class='pp'>#define DWM_PRIVATE_MULTIWINDOW_BUILD 20000</span>
+<span class='pp'>#define MINIMAP_MARGIN 12</span>
+<span class='pp'>#define MINIMAP_MAX_WIDTH 220</span>
+<span class='pp'>#define MINIMAP_MAX_HEIGHT 140</span>
+<span class='pp'>#define MINIMAP_MIN_WIDTH 48</span>
+<span class='pp'>#define MINIMAP_MIN_HEIGHT 36</span>
+<span class='pp'>#define MINIMAP_VISIBLE_MS 1200U</span>
+<span class='pp'>#define MINIMAP_FADE_MS 450U</span>
+<span class='pp'>#define MINIMAP_MIN_ALPHA 0.01f</span>
+
+<span class='pp'>#ifndef WS_EX_NOREDIRECTIONBITMAP</span>
+<span class='pp'>#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L</span>
+<span class='pp'>#endif</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IDCompositionDevice =
+  { <span class='num'>0xC37EA93A</span>, <span class='num'>0xE7AA</span>, <span class='num'>0x450D</span>, { <span class='num'>0xB1</span>, <span class='num'>0x6F</span>, <span class='num'>0x97</span>, <span class='num'>0x46</span>, <span class='num'>0xCB</span>, <span class='num'>0x04</span>, <span class='num'>0x07</span>, <span class='num'>0xF3</span> } };
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IDCompositionDesktopDevice =
+  { <span class='num'>0x5F4633FE</span>, <span class='num'>0x1E08</span>, <span class='num'>0x4CB8</span>, { <span class='num'>0x8C</span>, <span class='num'>0x75</span>, <span class='num'>0xCE</span>, <span class='num'>0x24</span>, <span class='num'>0x33</span>, <span class='num'>0x3F</span>, <span class='num'>0x56</span>, <span class='num'>0x02</span> } };
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionDevice MAG_IDCompositionDevice;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionDesktopDevice MAG_IDCompositionDesktopDevice;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionTarget MAG_IDCompositionTarget;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionDeviceVtbl
+{
+  BEGIN_INTERFACE
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionDevice* This, REFIID riid, <span class='kw'>void</span>** ppvObject);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionDevice* This);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* Release)(MAG_IDCompositionDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* Commit)(MAG_IDCompositionDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* WaitForCommitCompletion)(MAG_IDCompositionDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* GetFrameStatistics)(MAG_IDCompositionDevice* This, <span class='kw'>void</span>* statistics);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTargetForHwnd)(MAG_IDCompositionDevice* This, HWND hwnd, BOOL topmost, MAG_IDCompositionTarget** target);
+  END_INTERFACE
+} MAG_IDCompositionDeviceVtbl;
+
+<span class='kw'>struct</span> MAG_IDCompositionDevice
+{
+  CONST_VTBL <span class='kw'>struct</span> MAG_IDCompositionDeviceVtbl* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionDesktopDeviceVtbl
+{
+  BEGIN_INTERFACE
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionDesktopDevice* This, REFIID riid, <span class='kw'>void</span>** ppvObject);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionDesktopDevice* This);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* Release)(MAG_IDCompositionDesktopDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* Commit)(MAG_IDCompositionDesktopDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* WaitForCommitCompletion)(MAG_IDCompositionDesktopDevice* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* GetFrameStatistics)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>* statistics);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateVisual)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** visual);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurfaceFactory)(MAG_IDCompositionDesktopDevice* This, IUnknown* renderingDevice, <span class='kw'>void</span>** surfaceFactory);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurface)(MAG_IDCompositionDesktopDevice* This, UINT width, UINT height, DXGI_FORMAT pixelFormat, DXGI_ALPHA_MODE alphaMode, <span class='kw'>void</span>** surface);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateVirtualSurface)(MAG_IDCompositionDesktopDevice* This, UINT initialWidth, UINT initialHeight, DXGI_FORMAT pixelFormat, DXGI_ALPHA_MODE alphaMode, <span class='kw'>void</span>** virtualSurface);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTranslateTransform)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** translateTransform);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateScaleTransform)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** scaleTransform);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateRotateTransform)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** rotateTransform);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateSkewTransform)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** skewTransform);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateMatrixTransform)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** matrixTransform);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTransformGroup)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** transforms, UINT elements, <span class='kw'>void</span>** transformGroup);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTranslateTransform3D)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** translateTransform3D);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateScaleTransform3D)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** scaleTransform3D);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateRotateTransform3D)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** rotateTransform3D);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateMatrixTransform3D)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** matrixTransform3D);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTransform3DGroup)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** transforms3D, UINT elements, <span class='kw'>void</span>** transform3DGroup);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateEffectGroup)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** effectGroup);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateRectangleClip)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** clip);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateAnimation)(MAG_IDCompositionDesktopDevice* This, <span class='kw'>void</span>** animation);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* CreateTargetForHwnd)(MAG_IDCompositionDesktopDevice* This, HWND hwnd, BOOL topmost, MAG_IDCompositionTarget** target);
+  END_INTERFACE
+} MAG_IDCompositionDesktopDeviceVtbl;
+
+<span class='kw'>struct</span> MAG_IDCompositionDesktopDevice
+{
+  CONST_VTBL <span class='kw'>struct</span> MAG_IDCompositionDesktopDeviceVtbl* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_IDCompositionTargetVtbl
+{
+  BEGIN_INTERFACE
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionTarget* This, REFIID riid, <span class='kw'>void</span>** ppvObject);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionTarget* This);
+  <span class='fn'>ULONG</span> (STDMETHODCALLTYPE* Release)(MAG_IDCompositionTarget* This);
+  <span class='fn'>HRESULT</span> (STDMETHODCALLTYPE* SetRoot)(MAG_IDCompositionTarget* This, IUnknown* visual);
+  END_INTERFACE
+} MAG_IDCompositionTargetVtbl;
+
+<span class='kw'>struct</span> MAG_IDCompositionTarget
+{
+  CONST_VTBL <span class='kw'>struct</span> MAG_IDCompositionTargetVtbl* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='fn'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DCOMPOSITIONCREATEDEVICE)(IDXGIDevice* dxgiDevice, REFIID iid, <span class='kw'>void</span>** dcompositionDevice);
+<span class='kw'>typedef</span> <span class='fn'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DCOMPOSITIONCREATEDEVICE3)(IUnknown* renderingDevice, REFIID iid, <span class='kw'>void</span>** dcompositionDevice);
+<span class='kw'>typedef</span> <span class='fn'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPCREATESHAREDDESKTOPVISUAL)(HWND hwndDestination, VOID* pDCompDevice, VOID** ppVisual, PHTHUMBNAIL phThumbnailId);
+<span class='kw'>typedef</span> <span class='fn'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize);
+<span class='kw'>typedef</span> <span class='fn'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize, DWORD dwFlags);
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> MAG_WINDOWCOMPOSITIONATTRIB
+{
+  MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW = <span class='num'>0x0D</span>
+} MAG_WINDOWCOMPOSITIONATTRIB;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_WINDOWCOMPOSITIONATTRIBDATA
+{
+  MAG_WINDOWCOMPOSITIONATTRIB Attrib;
+  PVOID pvData;
+  DWORD cbData;
+} MAG_WINDOWCOMPOSITIONATTRIBDATA, *LPMAG_WINDOWCOMPOSITIONATTRIBDATA;
+
+<span class='kw'>typedef</span> <span class='fn'>BOOL</span> (<span class='kw'>WINAPI</span>* PFN_SETWINDOWCOMPOSITIONATTRIBUTE)(HWND hwnd, LPMAG_WINDOWCOMPOSITIONATTRIBDATA pwcad);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_RTL_OSVERSIONINFOW
+{
+  ULONG dwOSVersionInfoSize;
+  ULONG dwMajorVersion;
+  ULONG dwMinorVersion;
+  ULONG dwBuildNumber;
+  ULONG dwPlatformId;
+  WCHAR szCSDVersion[<span class='num'>128</span>];
+} MAG_RTL_OSVERSIONINFOW, *LPMAG_RTL_OSVERSIONINFOW;
+
+<span class='kw'>typedef</span> <span class='fn'>LONG</span> (<span class='kw'>WINAPI</span>* PFN_RTLGETVERSION)(LPMAG_RTL_OSVERSIONINFOW lpVersionInformation);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MINIMAPLAYOUT
+{
+  RECT rcCapture;
+  RECT rcMap;
+} MINIMAPLAYOUT, *LPMINIMAPLAYOUT;
+
+<span class='pp'>#define IDirect3DDxgiInterfaceAccess_GetInterface(This, iid, p) ((This)-&gt;lpVtbl-&gt;GetInterface((This), (iid), (p)))</span>
+
+LONG <span class='fn'>render_clipSourceOrigin</span>(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
+<span class='kw'>void</span> <span class='fn'>render_wglInit</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglInitPBuffer</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglCreateResources</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_gdiCreateResources</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglResizeSurface</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_gdiResizeSurface</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglRender</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglDrawMiniMap</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wglClientVertex</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, FLOAT x, FLOAT y);
+<span class='kw'>void</span> <span class='fn'>render_wglFillClientRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
+<span class='kw'>void</span> <span class='fn'>render_wglStrokeClientRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
+<span class='kw'>void</span> <span class='fn'>render_gdiCaptureScreen</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_updateSurfaceInfo</span>(HWND hWnd);
+BOOL <span class='fn'>render_gdiCreateCaptureBitmap</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_gdiDeleteCaptureBitmap</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_dxgiDeleteResources</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_dxgiDeleteOutputResources</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput);
+<span class='tp'>LPDXGIOUTPUTCAPTURE</span> <span class='fn'>render_dxgiFindOutputCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, HMONITOR hMonitor);
+<span class='tp'>LPDXGIOUTPUTCAPTURE</span> <span class='fn'>render_dxgiFindFreeOutputCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd);
+BOOL <span class='fn'>render_dxgiCreateDuplicationForMonitor</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPDXGIOUTPUTCAPTURE</span>* lplpOutput);
+BOOL <span class='fn'>render_dxgiEnsureDuplication</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPDXGIOUTPUTCAPTURE</span>* lplpOutput);
+BOOL <span class='fn'>render_dxgiEnsureStagingTexture</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput, UINT width, UINT height);
+BOOL <span class='fn'>render_dxgiUpdateFrame</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput);
+<span class='kw'>void</span> <span class='fn'>render_dxgiCopyMappedPixelsToRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, <span class='kw'>const</span> RECT* lprcDst);
+BOOL <span class='fn'>render_mapSourceRectToDestination</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcPart, RECT* lprcDst);
+BOOL <span class='fn'>render_sourceRectIsClipped</span>(<span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcClippedSource);
+BOOL <span class='fn'>render_minimapGetCaptureRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, RECT* lprcCapture);
+FLOAT <span class='fn'>render_minimapGetOpacity</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd);
+BOOL <span class='fn'>render_minimapHasVisibleState</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd);
+BOOL <span class='fn'>render_minimapComputeLayout</span>(HWND hWnd, MINIMAPLAYOUT* lpLayout);
+<span class='kw'>void</span> <span class='fn'>render_minimapMapSourceRectToClient</span>(<span class='kw'>const</span> MINIMAPLAYOUT* lpLayout, <span class='kw'>const</span> RECT* lprcSource, RECT* lprcClient);
+POINT <span class='fn'>render_minimapClientPointToSource</span>(<span class='kw'>const</span> MINIMAPLAYOUT* lpLayout, POINT ptClient);
+BOOL <span class='fn'>render_minimapSetSourceFromPoint</span>(HWND hWnd, POINT ptClient);
+BOOL <span class='fn'>render_dxgiCaptureIntersection</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcIntersection);
+<span class='kw'>void</span> <span class='fn'>render_dxgiCaptureScreen</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wgcCloseObject</span>(IUnknown* object);
+HRESULT <span class='fn'>render_wgcGetActivationFactory</span>(PCWSTR pszRuntimeClass, REFIID riid, <span class='kw'>void</span>** ppv);
+BOOL <span class='fn'>render_wgcEnsureWinRt</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_wgcDeleteMonitorResources</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture);
+<span class='kw'>void</span> <span class='fn'>render_wgcDeleteResources</span>(HWND hWnd);
+<span class='tp'>LPWGCMONITORCAPTURE</span> <span class='fn'>render_wgcFindMonitorCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, HMONITOR hMonitor);
+<span class='tp'>LPWGCMONITORCAPTURE</span> <span class='fn'>render_wgcFindFreeMonitorCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd);
+BOOL <span class='fn'>render_wgcCreateItemForMonitor</span>(HMONITOR hMonitor, WGCITEM** lplpItem);
+BOOL <span class='fn'>render_wgcCreateCaptureForMonitor</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPWGCMONITORCAPTURE</span>* lplpCapture);
+BOOL <span class='fn'>render_wgcEnsureCapture</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPWGCMONITORCAPTURE</span>* lplpCapture);
+BOOL <span class='fn'>render_wgcEnsureStagingTexture</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture, UINT width, UINT height);
+BOOL <span class='fn'>render_wgcUpdateFrame</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture);
+BOOL <span class='fn'>render_wgcCaptureIntersection</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcIntersection);
+<span class='kw'>void</span> <span class='fn'>render_wgcCaptureScreen</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRects</span>(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource);
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRect</span>(HWND hWnd, RECT* lprcSource);
+<span class='kw'>void</span> <span class='fn'>render_dwmThumbnailDeleteResources</span>(HWND hWnd);
+BOOL <span class='fn'>render_dwmThumbnailEnsureResources</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_dwmThumbnailCaptureScreen</span>(HWND hWnd);
+BOOL <span class='fn'>render_dwmPrivateIsMultiWindowBuild</span>(<span class='kw'>void</span>);
+LRESULT <span class='kw'>CALLBACK</span> <span class='fn'>render_dwmPrivateHostWndProc</span>(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+BOOL <span class='fn'>render_dwmPrivateRegisterHostClass</span>(<span class='kw'>void</span>);
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateSetExcludedFromLivePreview</span>(HWND hWnd, BOOL fExcluded);
+BOOL <span class='fn'>render_dwmPrivateUpdateHostWindow</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateDeleteResources</span>(HWND hWnd);
+BOOL <span class='fn'>render_dwmPrivateEnsureResources</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateCaptureScreen</span>(HWND hWnd);
+
+LONG <span class='fn'>render_clipSourceOrigin</span>(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
+{
+    <span class='kw'>const</span> LONG maxOrigin = clipMax - sourceExtent;
+
+    <span class='kw'>if</span> (maxOrigin &lt; clipMin)
+    {
+      <span class='kw'>return</span> clipMin;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>CLAMP</span>(origin, clipMin, maxOrigin);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_updateSurfaceInfo</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    RECT rc = { <span class='num'>0</span> };
+    LONG width;
+    LONG height;
+
+    <span class='fn'>GetClientRect</span>(hWnd, &amp;rc);
+    width = <span class='fn'>RECTWIDTH</span>(rc);
+    height = <span class='fn'>RECTHEIGHT</span>(rc);
+
+    <span class='kw'>if</span> (width &lt; <span class='num'>1</span>) width = <span class='num'>1</span>;
+    <span class='kw'>if</span> (height &lt; <span class='num'>1</span>) height = <span class='num'>1</span>;
+
+    lpsd-&gt;rc = rc;
+    lpsd-&gt;bi.biSize = <span class='kw'>sizeof</span>(lpsd-&gt;bi);
+    lpsd-&gt;bi.biWidth = width;
+    lpsd-&gt;bi.biHeight = height;
+    lpsd-&gt;bi.biPlanes = <span class='num'>1</span>;
+    lpsd-&gt;bi.biBitCount = BITS_PER_PIXEL;
+    lpsd-&gt;bi.biCompression = BI_RGB;
+    lpsd-&gt;bi.biSizeImage = width * height * CHANNELS;
+}
+
+BOOL <span class='fn'>render_gdiCreateCaptureBitmap</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    BITMAPINFO bmi = { <span class='num'>0</span> };
+    VOID* bits = NULL;
+
+    <span class='kw'>if</span> (!lpsd-&gt;hDesktopDC || !lpsd-&gt;hCaptureDC)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    bmi.bmiHeader = lpsd-&gt;bi;
+    lpsd-&gt;hBitmapBg = <span class='fn'>CreateDIBSection</span>(lpsd-&gt;hDesktopDC, &amp;bmi, DIB_RGB_COLORS, &amp;bits, NULL, <span class='num'>0</span>);
+
+    <span class='kw'>if</span> (!lpsd-&gt;hBitmapBg || !bits)
+    {
+      <span class='kw'>if</span> (lpsd-&gt;hBitmapBg)
+      {
+        <span class='fn'>DeleteBitmap</span>(lpsd-&gt;hBitmapBg);
+        lpsd-&gt;hBitmapBg = NULL;
+      }
+
+      lpsd-&gt;glScreenData = NULL;
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpsd-&gt;hBitmapOld = <span class='fn'>SelectBitmap</span>(lpsd-&gt;hCaptureDC, lpsd-&gt;hBitmapBg);
+    <span class='kw'>if</span> (!lpsd-&gt;hBitmapOld)
+    {
+      <span class='fn'>DeleteBitmap</span>(lpsd-&gt;hBitmapBg);
+      lpsd-&gt;hBitmapBg = NULL;
+      lpsd-&gt;glScreenData = NULL;
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpsd-&gt;glScreenData = (<span class='tp'>GLubyte</span>*)bits;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_gdiDeleteCaptureBitmap</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd-&gt;hCaptureDC &amp;&amp; lpsd-&gt;hBitmapOld)
+    {
+      <span class='fn'>SelectBitmap</span>(lpsd-&gt;hCaptureDC, lpsd-&gt;hBitmapOld);
+      lpsd-&gt;hBitmapOld = NULL;
+    }
+
+    <span class='kw'>if</span> (lpsd-&gt;hBitmapBg)
+    {
+      <span class='fn'>DeleteBitmap</span>(lpsd-&gt;hBitmapBg);
+      lpsd-&gt;hBitmapBg = NULL;
+    }
+
+    lpsd-&gt;glScreenData = NULL;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dxgiDeleteOutputResources</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput)
+{
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;dxgiStagingTexture);
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;dxgiFrameTexture);
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;dxgiDuplication);
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;d3dContext);
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;d3dDevice);
+    <span class='fn'>ZeroMemory</span>(lpOutput, <span class='kw'>sizeof</span>(*lpOutput));
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dxgiDeleteResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;dxgiOutputs); ++i)
+    {
+      <span class='fn'>render_dxgiDeleteOutputResources</span>(&amp;lpsd-&gt;dxgiOutputs[i]);
+    }
+}
+
+<span class='tp'>LPDXGIOUTPUTCAPTURE</span> <span class='fn'>render_dxgiFindOutputCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, HMONITOR hMonitor)
+{
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;dxgiOutputs); ++i)
+    {
+      <span class='kw'>if</span> (lpsd-&gt;dxgiOutputs[i].hMonitor == hMonitor)
+      {
+        <span class='kw'>return</span> &amp;lpsd-&gt;dxgiOutputs[i];
+      }
+    }
+
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='tp'>LPDXGIOUTPUTCAPTURE</span> <span class='fn'>render_dxgiFindFreeOutputCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd)
+{
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;dxgiOutputs); ++i)
+    {
+      <span class='kw'>if</span> (!lpsd-&gt;dxgiOutputs[i].hMonitor)
+      {
+        <span class='kw'>return</span> &amp;lpsd-&gt;dxgiOutputs[i];
+      }
+    }
+
+    <span class='kw'>return</span> NULL;
+}
+
+BOOL <span class='fn'>render_dxgiCreateDuplicationForMonitor</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPDXGIOUTPUTCAPTURE</span>* lplpOutput)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput = <span class='fn'>render_dxgiFindFreeOutputCapture</span>(lpsd);
+    IDXGIFactory1* factory = NULL;
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* output = NULL;
+    IDXGIOutput1* output1 = NULL;
+    HRESULT hr;
+    UINT adapterIndex;
+    BOOL fResult = FALSE;
+
+    <span class='kw'>if</span> (!lpOutput)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>CreateDXGIFactory1</span>(&amp;IID_IDXGIFactory1, (<span class='kw'>void</span>**)&amp;factory);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (adapterIndex = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory1_EnumAdapters1</span>(factory, adapterIndex, &amp;adapter)); ++adapterIndex)
+    {
+      UINT outputIndex;
+
+      <span class='kw'>for</span> (outputIndex = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIAdapter1_EnumOutputs</span>(adapter, outputIndex, &amp;output)); ++outputIndex)
+      {
+        DXGI_OUTPUT_DESC outputDesc;
+
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput_GetDesc</span>(output, &amp;outputDesc)) &amp;&amp; outputDesc.Monitor == hMonitor)
+        {
+          D3D11_TEXTURE2D_DESC frameDesc = { <span class='num'>0</span> };
+          D3D_FEATURE_LEVEL featureLevel;
+
+          hr = <span class='fn'>D3D11CreateDevice</span>(
+            (IDXGIAdapter*)adapter,
+            D3D_DRIVER_TYPE_UNKNOWN,
+            NULL,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            NULL,
+            <span class='num'>0</span>,
+            D3D11_SDK_VERSION,
+            &amp;lpOutput-&gt;d3dDevice,
+            &amp;featureLevel,
+            &amp;lpOutput-&gt;d3dContext);
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>IDXGIOutput_QueryInterface</span>(output, &amp;IID_IDXGIOutput1, (<span class='kw'>void</span>**)&amp;output1);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>IDXGIOutput1_DuplicateOutput</span>(output1, (IUnknown*)lpOutput-&gt;d3dDevice, &amp;lpOutput-&gt;dxgiDuplication);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            frameDesc.Width = <span class='fn'>RECTWIDTH</span>(outputDesc.DesktopCoordinates);
+            frameDesc.Height = <span class='fn'>RECTHEIGHT</span>(outputDesc.DesktopCoordinates);
+            frameDesc.MipLevels = <span class='num'>1</span>;
+            frameDesc.ArraySize = <span class='num'>1</span>;
+            frameDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            frameDesc.SampleDesc.Count = <span class='num'>1</span>;
+            frameDesc.Usage = D3D11_USAGE_DEFAULT;
+
+            hr = <span class='fn'>ID3D11Device_CreateTexture2D</span>(lpOutput-&gt;d3dDevice, &amp;frameDesc, NULL, &amp;lpOutput-&gt;dxgiFrameTexture);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            lpOutput-&gt;hMonitor = hMonitor;
+            lpOutput-&gt;rcOutput = outputDesc.DesktopCoordinates;
+            *lplpOutput = lpOutput;
+            fResult = TRUE;
+          }
+
+          <span class='fn'>SAFERELEASE</span>(output1);
+          <span class='fn'>SAFERELEASE</span>(output);
+          <span class='fn'>SAFERELEASE</span>(adapter);
+          <span class='fn'>SAFERELEASE</span>(factory);
+
+          <span class='kw'>if</span> (!fResult)
+          {
+            <span class='fn'>render_dxgiDeleteOutputResources</span>(lpOutput);
+          }
+
+          <span class='kw'>return</span> fResult;
+        }
+
+        <span class='fn'>SAFERELEASE</span>(output);
+      }
+
+      <span class='fn'>SAFERELEASE</span>(adapter);
+    }
+
+    <span class='fn'>SAFERELEASE</span>(factory);
+    <span class='kw'>return</span> FALSE;
+}
+
+BOOL <span class='fn'>render_dxgiEnsureDuplication</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPDXGIOUTPUTCAPTURE</span>* lplpOutput)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput = <span class='fn'>render_dxgiFindOutputCapture</span>(lpsd, hMonitor);
+
+    <span class='kw'>if</span> (lpOutput &amp;&amp; lpOutput-&gt;dxgiDuplication)
+    {
+      *lplpOutput = lpOutput;
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>render_dxgiCreateDuplicationForMonitor</span>(hWnd, hMonitor, lplpOutput);
+}
+
+BOOL <span class='fn'>render_dxgiEnsureStagingTexture</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput, UINT width, UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (lpOutput-&gt;dxgiStagingTexture &amp;&amp;
+        lpOutput-&gt;dxgiStagingWidth == width &amp;&amp;
+        lpOutput-&gt;dxgiStagingHeight == height)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>SAFERELEASE</span>(lpOutput-&gt;dxgiStagingTexture);
+    lpOutput-&gt;dxgiStagingWidth = <span class='num'>0</span>;
+    lpOutput-&gt;dxgiStagingHeight = <span class='num'>0</span>;
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = <span class='num'>1</span>;
+    desc.ArraySize = <span class='num'>1</span>;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = <span class='num'>1</span>;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D11Device_CreateTexture2D</span>(lpOutput-&gt;d3dDevice, &amp;desc, NULL, &amp;lpOutput-&gt;dxgiStagingTexture)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpOutput-&gt;dxgiStagingWidth = width;
+    lpOutput-&gt;dxgiStagingHeight = height;
+    <span class='kw'>return</span> TRUE;
+}
+
+BOOL <span class='fn'>render_dxgiUpdateFrame</span>(<span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput)
+{
+    IDXGIResource* frameResource = NULL;
+    ID3D11Texture2D* frameTexture = NULL;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo = { <span class='num'>0</span> };
+    HRESULT hr = <span class='fn'>IDXGIOutputDuplication_AcquireNextFrame</span>(lpOutput-&gt;dxgiDuplication, <span class='num'>0</span>, &amp;frameInfo, &amp;frameResource);
+
+    <span class='kw'>if</span> (DXGI_ERROR_WAIT_TIMEOUT == hr)
+    {
+      <span class='kw'>return</span> lpOutput-&gt;fHasFrame;
+    }
+
+    <span class='kw'>if</span> (DXGI_ERROR_ACCESS_LOST == hr)
+    {
+      <span class='fn'>render_dxgiDeleteOutputResources</span>(lpOutput);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>IDXGIResource_QueryInterface</span>(frameResource, &amp;IID_ID3D11Texture2D, (<span class='kw'>void</span>**)&amp;frameTexture);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='fn'>ID3D11DeviceContext_CopyResource</span>(lpOutput-&gt;d3dContext, (ID3D11Resource*)lpOutput-&gt;dxgiFrameTexture, (ID3D11Resource*)frameTexture);
+      lpOutput-&gt;fHasFrame = TRUE;
+    }
+
+    <span class='fn'>SAFERELEASE</span>(frameTexture);
+    <span class='fn'>SAFERELEASE</span>(frameResource);
+    <span class='fn'>IDXGIOutputDuplication_ReleaseFrame</span>(lpOutput-&gt;dxgiDuplication);
+
+    <span class='kw'>return</span> lpOutput-&gt;fHasFrame;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dxgiCopyMappedPixelsToRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, <span class='kw'>const</span> RECT* lprcDst)
+{
+    <span class='kw'>const</span> UINT dstWidth = (UINT)<span class='fn'>RECTWIDTH</span>((*lprcDst));
+    <span class='kw'>const</span> UINT dstHeight = (UINT)<span class='fn'>RECTHEIGHT</span>((*lprcDst));
+    <span class='kw'>const</span> UINT screenWidth = (UINT)lpsd-&gt;bi.biWidth;
+    <span class='kw'>const</span> UINT screenHeight = (UINT)lpsd-&gt;bi.biHeight;
+    <span class='kw'>const</span> UINT screenPitch = screenWidth * CHANNELS;
+    UINT y;
+
+    <span class='kw'>if</span> (!dstWidth || !dstHeight || !srcWidth || !srcHeight)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; dstHeight; ++y)
+    {
+      <span class='kw'>const</span> UINT srcY = <span class='fn'>min</span>((UINT)(((ULONGLONG)y * srcHeight) / dstHeight), srcHeight - <span class='num'>1</span>);
+      <span class='kw'>const</span> UINT dstY = (UINT)lprcDst-&gt;top + y;
+      BYTE* dstRow = ((BYTE*)lpsd-&gt;glScreenData) + ((screenHeight - <span class='num'>1</span> - dstY) * screenPitch) + ((UINT)lprcDst-&gt;left * CHANNELS);
+      <span class='kw'>const</span> BYTE* srcRow = src + (srcY * srcPitch);
+
+      <span class='kw'>if</span> (srcWidth == dstWidth)
+      {
+        <span class='fn'>CopyMemory</span>(dstRow, srcRow, dstWidth * CHANNELS);
+      }
+      <span class='kw'>else</span>
+      {
+        UINT x;
+
+        <span class='kw'>for</span> (x = <span class='num'>0</span>; x &lt; dstWidth; ++x)
+        {
+          <span class='kw'>const</span> UINT srcX = <span class='fn'>min</span>((UINT)(((ULONGLONG)x * srcWidth) / dstWidth), srcWidth - <span class='num'>1</span>);
+          <span class='fn'>CopyMemory</span>(dstRow + (x * CHANNELS), srcRow + (srcX * CHANNELS), CHANNELS);
+        }
+      }
+    }
+}
+
+BOOL <span class='fn'>render_mapSourceRectToDestination</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcPart, RECT* lprcDst)
+{
+    <span class='kw'>const</span> LONG sourceWidth = <span class='fn'>RECTWIDTH</span>((*lprcSource));
+    <span class='kw'>const</span> LONG sourceHeight = <span class='fn'>RECTHEIGHT</span>((*lprcSource));
+
+    <span class='kw'>if</span> (sourceWidth &lt; <span class='num'>1</span> || sourceHeight &lt; <span class='num'>1</span> || <span class='fn'>IsRectEmpty</span>(lprcPart))
+    {
+      <span class='fn'>SetRectEmpty</span>(lprcDst);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lprcDst-&gt;left = <span class='fn'>MulDiv</span>(lprcPart-&gt;left - lprcSource-&gt;left, lpsd-&gt;bi.biWidth, sourceWidth);
+    lprcDst-&gt;top = <span class='fn'>MulDiv</span>(lprcPart-&gt;top - lprcSource-&gt;top, lpsd-&gt;bi.biHeight, sourceHeight);
+    lprcDst-&gt;right = <span class='fn'>MulDiv</span>(lprcPart-&gt;right - lprcSource-&gt;left, lpsd-&gt;bi.biWidth, sourceWidth);
+    lprcDst-&gt;bottom = <span class='fn'>MulDiv</span>(lprcPart-&gt;bottom - lprcSource-&gt;top, lpsd-&gt;bi.biHeight, sourceHeight);
+
+    lprcDst-&gt;left = <span class='fn'>CLAMP</span>(lprcDst-&gt;left, <span class='num'>0</span>, lpsd-&gt;bi.biWidth);
+    lprcDst-&gt;top = <span class='fn'>CLAMP</span>(lprcDst-&gt;top, <span class='num'>0</span>, lpsd-&gt;bi.biHeight);
+    lprcDst-&gt;right = <span class='fn'>CLAMP</span>(lprcDst-&gt;right, <span class='num'>0</span>, lpsd-&gt;bi.biWidth);
+    lprcDst-&gt;bottom = <span class='fn'>CLAMP</span>(lprcDst-&gt;bottom, <span class='num'>0</span>, lpsd-&gt;bi.biHeight);
+
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(lprcDst))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> TRUE;
+}
+
+BOOL <span class='fn'>render_sourceRectIsClipped</span>(<span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcClippedSource)
+{
+    <span class='kw'>return</span> lprcSource-&gt;left != lprcClippedSource-&gt;left ||
+           lprcSource-&gt;top != lprcClippedSource-&gt;top ||
+           lprcSource-&gt;right != lprcClippedSource-&gt;right ||
+           lprcSource-&gt;bottom != lprcClippedSource-&gt;bottom;
+}
+
+BOOL <span class='fn'>render_minimapGetCaptureRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, RECT* lprcCapture)
+{
+    *lprcCapture = lpsd-&gt;di.rc;
+
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(lprcCapture))
+    {
+      lprcCapture-&gt;left = <span class='fn'>GetSystemMetrics</span>(SM_XVIRTUALSCREEN);
+      lprcCapture-&gt;top = <span class='fn'>GetSystemMetrics</span>(SM_YVIRTUALSCREEN);
+      lprcCapture-&gt;right = lprcCapture-&gt;left + <span class='fn'>GetSystemMetrics</span>(SM_CXVIRTUALSCREEN);
+      lprcCapture-&gt;bottom = lprcCapture-&gt;top + <span class='fn'>GetSystemMetrics</span>(SM_CYVIRTUALSCREEN);
+    }
+
+    <span class='kw'>return</span> <span class='fn'>RECTWIDTH</span>((*lprcCapture)) &gt; <span class='num'>0</span> &amp;&amp; <span class='fn'>RECTHEIGHT</span>((*lprcCapture)) &gt; <span class='num'>0</span>;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_minimapNotifyActivity</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd)
+    {
+      lpsd-&gt;dwMiniMapLastActivity = <span class='fn'>GetTickCount</span>();
+    }
+}
+
+BOOL <span class='fn'>render_minimapHasVisibleState</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd)
+{
+    <span class='kw'>if</span> (MAG_VIEW_LENS == lpsd-&gt;viewMode)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> lpsd-&gt;fTexScaler &gt; <span class='num'>1.0001f</span> ||
+           (!lpsd-&gt;fTrackCursor &amp;&amp; lpsd-&gt;fUseSourceOrigin &amp;&amp; lpsd-&gt;fSourceOriginPinned);
+}
+
+FLOAT <span class='fn'>render_minimapGetOpacity</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd)
+{
+    <span class='kw'>const</span> DWORD now = <span class='fn'>GetTickCount</span>();
+    <span class='kw'>const</span> DWORD elapsed = now - lpsd-&gt;dwMiniMapLastActivity;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_minimapHasVisibleState</span>(lpsd))
+    {
+      <span class='kw'>return</span> <span class='num'>0.0f</span>;
+    }
+
+    <span class='kw'>if</span> (lpsd-&gt;fMiniMapDragging || lpsd-&gt;fMiniMapHoldVisible)
+    {
+      <span class='kw'>return</span> <span class='num'>1.0f</span>;
+    }
+
+    <span class='kw'>if</span> (!lpsd-&gt;dwMiniMapLastActivity)
+    {
+      <span class='kw'>return</span> <span class='num'>1.0f</span>;
+    }
+
+    <span class='kw'>if</span> (elapsed &lt;= MINIMAP_VISIBLE_MS)
+    {
+      <span class='kw'>return</span> <span class='num'>1.0f</span>;
+    }
+
+    <span class='kw'>if</span> (elapsed &gt;= MINIMAP_VISIBLE_MS + MINIMAP_FADE_MS)
+    {
+      <span class='kw'>return</span> <span class='num'>0.0f</span>;
+    }
+
+    <span class='kw'>return</span> <span class='num'>1.0f</span> - ((FLOAT)(elapsed - MINIMAP_VISIBLE_MS) / (FLOAT)MINIMAP_FADE_MS);
+}
+
+BOOL <span class='fn'>render_minimapComputeLayout</span>(HWND hWnd, MINIMAPLAYOUT* lpLayout)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='kw'>const</span> LONG clientWidth = lpsd-&gt;bi.biWidth;
+    <span class='kw'>const</span> LONG clientHeight = lpsd-&gt;bi.biHeight;
+    <span class='kw'>const</span> LONG maxWidth = <span class='fn'>min</span>(MINIMAP_MAX_WIDTH, clientWidth - (MINIMAP_MARGIN * <span class='num'>2</span>));
+    <span class='kw'>const</span> LONG maxHeight = <span class='fn'>min</span>(MINIMAP_MAX_HEIGHT, clientHeight - (MINIMAP_MARGIN * <span class='num'>2</span>));
+    <span class='kw'>const</span> LONG captureWidth = <span class='fn'>render_minimapGetCaptureRect</span>(lpsd, &amp;lpLayout-&gt;rcCapture) ? <span class='fn'>RECTWIDTH</span>(lpLayout-&gt;rcCapture) : <span class='num'>0</span>;
+    <span class='kw'>const</span> LONG captureHeight = <span class='fn'>RECTHEIGHT</span>(lpLayout-&gt;rcCapture);
+    LONG mapWidth;
+    LONG mapHeight;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_minimapHasVisibleState</span>(lpsd) ||
+        maxWidth &lt; MINIMAP_MIN_WIDTH ||
+        maxHeight &lt; MINIMAP_MIN_HEIGHT ||
+        captureWidth &lt; <span class='num'>1</span> ||
+        captureHeight &lt; <span class='num'>1</span>)
+    {
+      <span class='fn'>SetRectEmpty</span>(&amp;lpLayout-&gt;rcMap);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>MulDiv</span>(maxWidth, captureHeight, captureWidth) &lt;= maxHeight)
+    {
+      mapWidth = maxWidth;
+      mapHeight = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='fn'>MulDiv</span>(maxWidth, captureHeight, captureWidth));
+    }
+    <span class='kw'>else</span>
+    {
+      mapHeight = maxHeight;
+      mapWidth = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='fn'>MulDiv</span>(maxHeight, captureWidth, captureHeight));
+    }
+
+    <span class='fn'>SetRect</span>(
+      &amp;lpLayout-&gt;rcMap,
+      MINIMAP_MARGIN,
+      MINIMAP_MARGIN,
+      MINIMAP_MARGIN + mapWidth,
+      MINIMAP_MARGIN + mapHeight);
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_minimapMapSourceRectToClient</span>(<span class='kw'>const</span> MINIMAPLAYOUT* lpLayout, <span class='kw'>const</span> RECT* lprcSource, RECT* lprcClient)
+{
+    <span class='kw'>const</span> LONG captureWidth = <span class='fn'>RECTWIDTH</span>(lpLayout-&gt;rcCapture);
+    <span class='kw'>const</span> LONG captureHeight = <span class='fn'>RECTHEIGHT</span>(lpLayout-&gt;rcCapture);
+    <span class='kw'>const</span> LONG mapWidth = <span class='fn'>RECTWIDTH</span>(lpLayout-&gt;rcMap);
+    <span class='kw'>const</span> LONG mapHeight = <span class='fn'>RECTHEIGHT</span>(lpLayout-&gt;rcMap);
+
+    lprcClient-&gt;left = lpLayout-&gt;rcMap.left + <span class='fn'>MulDiv</span>(lprcSource-&gt;left - lpLayout-&gt;rcCapture.left, mapWidth, captureWidth);
+    lprcClient-&gt;top = lpLayout-&gt;rcMap.top + <span class='fn'>MulDiv</span>(lprcSource-&gt;top - lpLayout-&gt;rcCapture.top, mapHeight, captureHeight);
+    lprcClient-&gt;right = lpLayout-&gt;rcMap.left + <span class='fn'>MulDiv</span>(lprcSource-&gt;right - lpLayout-&gt;rcCapture.left, mapWidth, captureWidth);
+    lprcClient-&gt;bottom = lpLayout-&gt;rcMap.top + <span class='fn'>MulDiv</span>(lprcSource-&gt;bottom - lpLayout-&gt;rcCapture.top, mapHeight, captureHeight);
+}
+
+POINT <span class='fn'>render_minimapClientPointToSource</span>(<span class='kw'>const</span> MINIMAPLAYOUT* lpLayout, POINT ptClient)
+{
+    POINT ptSource;
+    <span class='kw'>const</span> LONG captureWidth = <span class='fn'>RECTWIDTH</span>(lpLayout-&gt;rcCapture);
+    <span class='kw'>const</span> LONG captureHeight = <span class='fn'>RECTHEIGHT</span>(lpLayout-&gt;rcCapture);
+    <span class='kw'>const</span> LONG mapWidth = <span class='fn'>RECTWIDTH</span>(lpLayout-&gt;rcMap);
+    <span class='kw'>const</span> LONG mapHeight = <span class='fn'>RECTHEIGHT</span>(lpLayout-&gt;rcMap);
+
+    ptClient.x = <span class='fn'>CLAMP</span>(ptClient.x, lpLayout-&gt;rcMap.left, lpLayout-&gt;rcMap.right);
+    ptClient.y = <span class='fn'>CLAMP</span>(ptClient.y, lpLayout-&gt;rcMap.top, lpLayout-&gt;rcMap.bottom);
+    ptSource.x = lpLayout-&gt;rcCapture.left + <span class='fn'>MulDiv</span>(ptClient.x - lpLayout-&gt;rcMap.left, captureWidth, mapWidth);
+    ptSource.y = lpLayout-&gt;rcCapture.top + <span class='fn'>MulDiv</span>(ptClient.y - lpLayout-&gt;rcMap.top, captureHeight, mapHeight);
+    ptSource.x = <span class='fn'>CLAMP</span>(ptSource.x, lpLayout-&gt;rcCapture.left, lpLayout-&gt;rcCapture.right);
+    ptSource.y = <span class='fn'>CLAMP</span>(ptSource.y, lpLayout-&gt;rcCapture.top, lpLayout-&gt;rcCapture.bottom);
+    <span class='kw'>return</span> ptSource;
+}
+
+BOOL <span class='fn'>render_minimapHitTest</span>(HWND hWnd, POINT ptClient)
+{
+    MINIMAPLAYOUT layout;
+
+    <span class='kw'>return</span> <span class='fn'>render_minimapComputeLayout</span>(hWnd, &amp;layout) &amp;&amp; <span class='fn'>PtInRect</span>(&amp;layout.rcMap, ptClient);
+}
+
+BOOL <span class='fn'>render_minimapSetSourceFromPoint</span>(HWND hWnd, POINT ptClient)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    POINT ptSource;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_minimapComputeLayout</span>(hWnd, &amp;layout))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+    srcW = <span class='fn'>RECTWIDTH</span>(rcSource);
+    srcH = <span class='fn'>RECTHEIGHT</span>(rcSource);
+    <span class='kw'>if</span> (srcW &lt; <span class='num'>1</span> || srcH &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    ptSource = <span class='fn'>render_minimapClientPointToSource</span>(&amp;layout, ptClient);
+    srcX = ptSource.x - lpsd-&gt;ptMiniMapDragOffset.x;
+    srcY = ptSource.y - lpsd-&gt;ptMiniMapDragOffset.y;
+    srcX = <span class='fn'>render_clipSourceOrigin</span>(srcX, srcW, layout.rcCapture.left, layout.rcCapture.right);
+    srcY = <span class='fn'>render_clipSourceOrigin</span>(srcY, srcH, layout.rcCapture.top, layout.rcCapture.bottom);
+
+    <span class='kw'>if</span> (lpsd-&gt;fTrackCursor)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    lpsd-&gt;fUseSourceOrigin = TRUE;
+    lpsd-&gt;fSourceOriginPinned = TRUE;
+    lpsd-&gt;ptSourceOrigin.x = srcX;
+    lpsd-&gt;ptSourceOrigin.y = srcY;
+    <span class='kw'>return</span> TRUE;
+}
+
+BOOL <span class='fn'>render_minimapBeginDrag</span>(HWND hWnd, POINT ptClient)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    POINT ptSource;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_minimapComputeLayout</span>(hWnd, &amp;layout) || !<span class='fn'>PtInRect</span>(&amp;layout.rcMap, ptClient))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcSource))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    ptSource = <span class='fn'>render_minimapClientPointToSource</span>(&amp;layout, ptClient);
+    <span class='kw'>if</span> (!<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource) &amp;&amp; <span class='fn'>PtInRect</span>(&amp;rcClippedSource, ptSource))
+    {
+      lpsd-&gt;ptMiniMapDragOffset.x = ptSource.x - rcSource.left;
+      lpsd-&gt;ptMiniMapDragOffset.y = ptSource.y - rcSource.top;
+    }
+    <span class='kw'>else</span>
+    {
+      lpsd-&gt;ptMiniMapDragOffset.x = <span class='fn'>RECTWIDTH</span>(rcSource) / <span class='num'>2</span>;
+      lpsd-&gt;ptMiniMapDragOffset.y = <span class='fn'>RECTHEIGHT</span>(rcSource) / <span class='num'>2</span>;
+    }
+
+    lpsd-&gt;fMiniMapDragging = TRUE;
+    <span class='kw'>return</span> <span class='fn'>render_minimapSetSourceFromPoint</span>(hWnd, ptClient);
+}
+
+BOOL <span class='fn'>render_minimapDrag</span>(HWND hWnd, POINT ptClient)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd-&gt;fMiniMapDragging)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>render_minimapSetSourceFromPoint</span>(hWnd, ptClient);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_minimapEndDrag</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    lpsd-&gt;fMiniMapDragging = FALSE;
+}
+
+BOOL <span class='fn'>render_dxgiCaptureIntersection</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcIntersection)
+{
+    <span class='kw'>const</span> UINT srcPartWidth = (UINT)<span class='fn'>RECTWIDTH</span>((*lprcIntersection));
+    <span class='kw'>const</span> UINT srcPartHeight = (UINT)<span class='fn'>RECTHEIGHT</span>((*lprcIntersection));
+    RECT rcDst;
+    D3D11_BOX box;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_dxgiUpdateFrame</span>(lpOutput) ||
+        !<span class='fn'>render_dxgiEnsureStagingTexture</span>(lpOutput, srcPartWidth, srcPartHeight))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    box.left = (UINT)(lprcIntersection-&gt;left - lpOutput-&gt;rcOutput.left);
+    box.top = (UINT)(lprcIntersection-&gt;top - lpOutput-&gt;rcOutput.top);
+    box.front = <span class='num'>0</span>;
+    box.right = box.left + srcPartWidth;
+    box.bottom = box.top + srcPartHeight;
+    box.back = <span class='num'>1</span>;
+
+    <span class='fn'>ID3D11DeviceContext_CopySubresourceRegion</span>(
+      lpOutput-&gt;d3dContext,
+      (ID3D11Resource*)lpOutput-&gt;dxgiStagingTexture,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      (ID3D11Resource*)lpOutput-&gt;dxgiFrameTexture,
+      <span class='num'>0</span>,
+      &amp;box);
+
+    hr = <span class='fn'>ID3D11DeviceContext_Map</span>(lpOutput-&gt;d3dContext, (ID3D11Resource*)lpOutput-&gt;dxgiStagingTexture, <span class='num'>0</span>, D3D11_MAP_READ, <span class='num'>0</span>, &amp;mapped);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>render_mapSourceRectToDestination</span>(lpsd, lprcSource, lprcIntersection, &amp;rcDst))
+    {
+      <span class='fn'>ID3D11DeviceContext_Unmap</span>(lpOutput-&gt;d3dContext, (ID3D11Resource*)lpOutput-&gt;dxgiStagingTexture, <span class='num'>0</span>);
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>render_dxgiCopyMappedPixelsToRect</span>(lpsd, (<span class='kw'>const</span> BYTE*)mapped.pData, srcPartWidth, srcPartHeight, mapped.RowPitch, &amp;rcDst);
+    <span class='fn'>ID3D11DeviceContext_Unmap</span>(lpOutput-&gt;d3dContext, (ID3D11Resource*)lpOutput-&gt;dxgiStagingTexture, <span class='num'>0</span>);
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wgcCloseObject</span>(IUnknown* object)
+{
+    WGCCLOSABLE* closable = NULL;
+
+    <span class='kw'>if</span> (object &amp;&amp;
+        <span class='fn'>SUCCEEDED</span>(<span class='fn'>IUnknown_QueryInterface</span>(object, &amp;IID_WGC_IClosable, (<span class='kw'>void</span>**)&amp;closable)))
+    {
+      <span class='fn'>__x_ABI_CWindows_CFoundation_CIClosable_Close</span>(closable);
+      <span class='fn'>SAFERELEASE</span>(closable);
+    }
+}
+
+HRESULT <span class='fn'>render_wgcGetActivationFactory</span>(PCWSTR pszRuntimeClass, REFIID riid, <span class='kw'>void</span>** ppv)
+{
+    HSTRING runtimeClass = NULL;
+    HRESULT hr;
+
+    *ppv = NULL;
+
+    hr = <span class='fn'>WindowsCreateString</span>(pszRuntimeClass, (UINT32)<span class='fn'>lstrlenW</span>(pszRuntimeClass), &amp;runtimeClass);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>RoGetActivationFactory</span>(runtimeClass, riid, ppv);
+      <span class='fn'>WindowsDeleteString</span>(runtimeClass);
+    }
+
+    <span class='kw'>return</span> hr;
+}
+
+BOOL <span class='fn'>render_wgcEnsureWinRt</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    HRESULT hr;
+
+    <span class='kw'>if</span> (lpsd-&gt;fWinRtInitialized)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    hr = <span class='fn'>RoInitialize</span>(RO_INIT_MULTITHREADED);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      lpsd-&gt;fWinRtInitialized = TRUE;
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>return</span> RPC_E_CHANGED_MODE == hr;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wgcDeleteMonitorResources</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture)
+{
+    <span class='fn'>render_wgcCloseObject</span>(lpCapture-&gt;wgcSession);
+    <span class='fn'>render_wgcCloseObject</span>(lpCapture-&gt;wgcFramePool);
+
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcStagingTexture);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcFrameTexture);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcSession);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcFramePool);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcItem);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcDevice);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;d3dContext);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;d3dDevice);
+    <span class='fn'>ZeroMemory</span>(lpCapture, <span class='kw'>sizeof</span>(*lpCapture));
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wgcDeleteResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;wgcMonitors); ++i)
+    {
+      <span class='fn'>render_wgcDeleteMonitorResources</span>(&amp;lpsd-&gt;wgcMonitors[i]);
+    }
+}
+
+<span class='tp'>LPWGCMONITORCAPTURE</span> <span class='fn'>render_wgcFindMonitorCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, HMONITOR hMonitor)
+{
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;wgcMonitors); ++i)
+    {
+      <span class='kw'>if</span> (lpsd-&gt;wgcMonitors[i].hMonitor == hMonitor)
+      {
+        <span class='kw'>return</span> &amp;lpsd-&gt;wgcMonitors[i];
+      }
+    }
+
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='tp'>LPWGCMONITORCAPTURE</span> <span class='fn'>render_wgcFindFreeMonitorCapture</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd)
+{
+    UINT i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(lpsd-&gt;wgcMonitors); ++i)
+    {
+      <span class='kw'>if</span> (!lpsd-&gt;wgcMonitors[i].hMonitor)
+      {
+        <span class='kw'>return</span> &amp;lpsd-&gt;wgcMonitors[i];
+      }
+    }
+
+    <span class='kw'>return</span> NULL;
+}
+
+BOOL <span class='fn'>render_wgcCreateItemForMonitor</span>(HMONITOR hMonitor, WGCITEM** lplpItem)
+{
+    IGraphicsCaptureItemInterop* interop = NULL;
+    HRESULT hr;
+
+    *lplpItem = NULL;
+
+    hr = <span class='fn'>render_wgcGetActivationFactory</span>(
+      RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem,
+      &amp;IID_IGraphicsCaptureItemInterop,
+      (<span class='kw'>void</span>**)&amp;interop);
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = interop-&gt;lpVtbl-&gt;<span class='fn'>CreateForMonitor</span>(
+        interop,
+        hMonitor,
+        &amp;IID_WGC_IGraphicsCaptureItem,
+        (<span class='kw'>void</span>**)lplpItem);
+    }
+
+    <span class='fn'>SAFERELEASE</span>(interop);
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; *lplpItem;
+}
+
+BOOL <span class='fn'>render_wgcCreateCaptureForMonitor</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPWGCMONITORCAPTURE</span>* lplpCapture)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture = <span class='fn'>render_wgcFindFreeMonitorCapture</span>(lpsd);
+    IDXGIFactory1* factory = NULL;
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* output = NULL;
+    IDXGIDevice* dxgiDevice = NULL;
+    IInspectable* inspectableDevice = NULL;
+    WGCITEM* item = NULL;
+    WGCFRAMEPOOLSTATICS2* framePoolStatics = NULL;
+    WGCSESSION3* session3 = NULL;
+    HRESULT hr;
+    UINT adapterIndex;
+    BOOL fResult = FALSE;
+
+    <span class='kw'>if</span> (!lpCapture || !<span class='fn'>render_wgcEnsureWinRt</span>(hWnd))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>CreateDXGIFactory1</span>(&amp;IID_IDXGIFactory1, (<span class='kw'>void</span>**)&amp;factory);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (adapterIndex = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory1_EnumAdapters1</span>(factory, adapterIndex, &amp;adapter)); ++adapterIndex)
+    {
+      UINT outputIndex;
+
+      <span class='kw'>for</span> (outputIndex = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIAdapter1_EnumOutputs</span>(adapter, outputIndex, &amp;output)); ++outputIndex)
+      {
+        DXGI_OUTPUT_DESC outputDesc;
+
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput_GetDesc</span>(output, &amp;outputDesc)) &amp;&amp; outputDesc.Monitor == hMonitor)
+        {
+          D3D11_TEXTURE2D_DESC frameDesc = { <span class='num'>0</span> };
+          D3D_FEATURE_LEVEL featureLevel;
+          WGCSIZE itemSize = { <span class='num'>0</span> };
+
+          hr = <span class='fn'>D3D11CreateDevice</span>(
+            (IDXGIAdapter*)adapter,
+            D3D_DRIVER_TYPE_UNKNOWN,
+            NULL,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            NULL,
+            <span class='num'>0</span>,
+            D3D11_SDK_VERSION,
+            &amp;lpCapture-&gt;d3dDevice,
+            &amp;featureLevel,
+            &amp;lpCapture-&gt;d3dContext);
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>ID3D11Device_QueryInterface</span>(lpCapture-&gt;d3dDevice, &amp;IID_IDXGIDevice, (<span class='kw'>void</span>**)&amp;dxgiDevice);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>CreateDirect3D11DeviceFromDXGIDevice</span>(dxgiDevice, &amp;inspectableDevice);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>IUnknown_QueryInterface</span>(
+              (IUnknown*)inspectableDevice,
+              &amp;IID_WGC_IDirect3DDevice,
+              (<span class='kw'>void</span>**)&amp;lpCapture-&gt;wgcDevice);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            <span class='kw'>if</span> (<span class='fn'>render_wgcCreateItemForMonitor</span>(hMonitor, &amp;item))
+            {
+              lpCapture-&gt;wgcItem = (IUnknown*)item;
+              item = NULL;
+              hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureItem_get_Size</span>((WGCITEM*)lpCapture-&gt;wgcItem, &amp;itemSize);
+            }
+            <span class='kw'>else</span>
+            {
+              hr = E_FAIL;
+            }
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; (itemSize.Width &lt; <span class='num'>1</span> || itemSize.Height &lt; <span class='num'>1</span>))
+          {
+            itemSize.Width = <span class='fn'>RECTWIDTH</span>(outputDesc.DesktopCoordinates);
+            itemSize.Height = <span class='fn'>RECTHEIGHT</span>(outputDesc.DesktopCoordinates);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>render_wgcGetActivationFactory</span>(
+              RuntimeClass_Windows_Graphics_Capture_Direct3D11CaptureFramePool,
+              &amp;IID_WGC_IDirect3D11CaptureFramePoolStatics2,
+              (<span class='kw'>void</span>**)&amp;framePoolStatics);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePoolStatics2_CreateFreeThreaded</span>(
+              framePoolStatics,
+              (WGCD3DDEVICE*)lpCapture-&gt;wgcDevice,
+              DirectXPixelFormat_B8G8R8A8UIntNormalized,
+              <span class='num'>2</span>,
+              itemSize,
+              (WGCFRAMEPOOL**)&amp;lpCapture-&gt;wgcFramePool);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool_CreateCaptureSession</span>(
+              (WGCFRAMEPOOL*)lpCapture-&gt;wgcFramePool,
+              (WGCITEM*)lpCapture-&gt;wgcItem,
+              (WGCSESSION**)&amp;lpCapture-&gt;wgcSession);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp;
+              <span class='fn'>SUCCEEDED</span>(<span class='fn'>IUnknown_QueryInterface</span>(
+                lpCapture-&gt;wgcSession,
+                &amp;IID_WGC_IGraphicsCaptureSession3,
+                (<span class='kw'>void</span>**)&amp;session3)))
+          {
+            <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession3_put_IsBorderRequired</span>(session3, FALSE);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIGraphicsCaptureSession_StartCapture</span>((WGCSESSION*)lpCapture-&gt;wgcSession);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            frameDesc.Width = (UINT)itemSize.Width;
+            frameDesc.Height = (UINT)itemSize.Height;
+            frameDesc.MipLevels = <span class='num'>1</span>;
+            frameDesc.ArraySize = <span class='num'>1</span>;
+            frameDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            frameDesc.SampleDesc.Count = <span class='num'>1</span>;
+            frameDesc.Usage = D3D11_USAGE_DEFAULT;
+
+            hr = <span class='fn'>ID3D11Device_CreateTexture2D</span>(lpCapture-&gt;d3dDevice, &amp;frameDesc, NULL, &amp;lpCapture-&gt;wgcFrameTexture);
+          }
+
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+          {
+            lpCapture-&gt;hMonitor = hMonitor;
+            lpCapture-&gt;rcOutput = outputDesc.DesktopCoordinates;
+            lpCapture-&gt;wgcFrameWidth = (UINT)itemSize.Width;
+            lpCapture-&gt;wgcFrameHeight = (UINT)itemSize.Height;
+            *lplpCapture = lpCapture;
+            fResult = TRUE;
+          }
+
+          <span class='fn'>SAFERELEASE</span>(session3);
+          <span class='fn'>SAFERELEASE</span>(framePoolStatics);
+          <span class='fn'>SAFERELEASE</span>(item);
+          <span class='fn'>SAFERELEASE</span>(inspectableDevice);
+          <span class='fn'>SAFERELEASE</span>(dxgiDevice);
+          <span class='fn'>SAFERELEASE</span>(output);
+          <span class='fn'>SAFERELEASE</span>(adapter);
+          <span class='fn'>SAFERELEASE</span>(factory);
+
+          <span class='kw'>if</span> (!fResult)
+          {
+            <span class='fn'>render_wgcDeleteMonitorResources</span>(lpCapture);
+          }
+
+          <span class='kw'>return</span> fResult;
+        }
+
+        <span class='fn'>SAFERELEASE</span>(output);
+      }
+
+      <span class='fn'>SAFERELEASE</span>(adapter);
+    }
+
+    <span class='fn'>SAFERELEASE</span>(factory);
+    <span class='kw'>return</span> FALSE;
+}
+
+BOOL <span class='fn'>render_wgcEnsureCapture</span>(HWND hWnd, HMONITOR hMonitor, <span class='tp'>LPWGCMONITORCAPTURE</span>* lplpCapture)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture = <span class='fn'>render_wgcFindMonitorCapture</span>(lpsd, hMonitor);
+
+    <span class='kw'>if</span> (lpCapture &amp;&amp; lpCapture-&gt;wgcFramePool &amp;&amp; lpCapture-&gt;wgcSession)
+    {
+      *lplpCapture = lpCapture;
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>render_wgcCreateCaptureForMonitor</span>(hWnd, hMonitor, lplpCapture);
+}
+
+BOOL <span class='fn'>render_wgcEnsureStagingTexture</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture, UINT width, UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (lpCapture-&gt;wgcStagingTexture &amp;&amp;
+        lpCapture-&gt;wgcStagingWidth == width &amp;&amp;
+        lpCapture-&gt;wgcStagingHeight == height)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;wgcStagingTexture);
+    lpCapture-&gt;wgcStagingWidth = <span class='num'>0</span>;
+    lpCapture-&gt;wgcStagingHeight = <span class='num'>0</span>;
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = <span class='num'>1</span>;
+    desc.ArraySize = <span class='num'>1</span>;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = <span class='num'>1</span>;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D11Device_CreateTexture2D</span>(lpCapture-&gt;d3dDevice, &amp;desc, NULL, &amp;lpCapture-&gt;wgcStagingTexture)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpCapture-&gt;wgcStagingWidth = width;
+    lpCapture-&gt;wgcStagingHeight = height;
+    <span class='kw'>return</span> TRUE;
+}
+
+BOOL <span class='fn'>render_wgcUpdateFrame</span>(<span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture)
+{
+    WGCFRAME* frame = NULL;
+    WGCFRAME* latestFrame = NULL;
+    WGCSURFACE* surface = NULL;
+    IDirect3DDxgiInterfaceAccess* access = NULL;
+    ID3D11Texture2D* frameTexture = NULL;
+    WGCSIZE contentSize = { <span class='num'>0</span> };
+    HRESULT hr;
+
+    <span class='kw'>while</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFramePool_TryGetNextFrame</span>(
+      (WGCFRAMEPOOL*)lpCapture-&gt;wgcFramePool,
+      &amp;frame)) &amp;&amp; frame)
+    {
+      <span class='fn'>SAFERELEASE</span>(latestFrame);
+      latestFrame = frame;
+      frame = NULL;
+    }
+
+    <span class='kw'>if</span> (!latestFrame)
+    {
+      <span class='kw'>return</span> lpCapture-&gt;fHasFrame;
+    }
+
+    hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame_get_ContentSize</span>(latestFrame, &amp;contentSize);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) ||
+        contentSize.Width &lt; <span class='num'>1</span> ||
+        contentSize.Height &lt; <span class='num'>1</span> ||
+        (UINT)contentSize.Width != lpCapture-&gt;wgcFrameWidth ||
+        (UINT)contentSize.Height != lpCapture-&gt;wgcFrameHeight)
+    {
+      <span class='fn'>SAFERELEASE</span>(latestFrame);
+      <span class='fn'>render_wgcDeleteMonitorResources</span>(lpCapture);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>__x_ABI_CWindows_CGraphics_CCapture_CIDirect3D11CaptureFrame_get_Surface</span>(latestFrame, &amp;surface);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IUnknown_QueryInterface</span>((IUnknown*)surface, &amp;IID_IDirect3DDxgiInterfaceAccess, (<span class='kw'>void</span>**)&amp;access);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDirect3DDxgiInterfaceAccess_GetInterface</span>(access, &amp;IID_ID3D11Texture2D, (<span class='kw'>void</span>**)&amp;frameTexture);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='fn'>ID3D11DeviceContext_CopyResource</span>(
+        lpCapture-&gt;d3dContext,
+        (ID3D11Resource*)lpCapture-&gt;wgcFrameTexture,
+        (ID3D11Resource*)frameTexture);
+      lpCapture-&gt;fHasFrame = TRUE;
+    }
+
+    <span class='fn'>SAFERELEASE</span>(frameTexture);
+    <span class='fn'>SAFERELEASE</span>(access);
+    <span class='fn'>SAFERELEASE</span>(surface);
+    <span class='fn'>SAFERELEASE</span>(latestFrame);
+
+    <span class='kw'>return</span> lpCapture-&gt;fHasFrame;
+}
+
+BOOL <span class='fn'>render_wgcCaptureIntersection</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture, <span class='kw'>const</span> RECT* lprcSource, <span class='kw'>const</span> RECT* lprcIntersection)
+{
+    RECT rcDst;
+    D3D11_BOX box;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_wgcUpdateFrame</span>(lpCapture))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    box.left = (UINT)<span class='fn'>MulDiv</span>(lprcIntersection-&gt;left - lpCapture-&gt;rcOutput.left, lpCapture-&gt;wgcFrameWidth, <span class='fn'>RECTWIDTH</span>(lpCapture-&gt;rcOutput));
+    box.top = (UINT)<span class='fn'>MulDiv</span>(lprcIntersection-&gt;top - lpCapture-&gt;rcOutput.top, lpCapture-&gt;wgcFrameHeight, <span class='fn'>RECTHEIGHT</span>(lpCapture-&gt;rcOutput));
+    box.front = <span class='num'>0</span>;
+    box.right = (UINT)<span class='fn'>MulDiv</span>(lprcIntersection-&gt;right - lpCapture-&gt;rcOutput.left, lpCapture-&gt;wgcFrameWidth, <span class='fn'>RECTWIDTH</span>(lpCapture-&gt;rcOutput));
+    box.bottom = (UINT)<span class='fn'>MulDiv</span>(lprcIntersection-&gt;bottom - lpCapture-&gt;rcOutput.top, lpCapture-&gt;wgcFrameHeight, <span class='fn'>RECTHEIGHT</span>(lpCapture-&gt;rcOutput));
+    box.back = <span class='num'>1</span>;
+
+    <span class='kw'>if</span> (box.right &lt;= box.left || box.bottom &lt;= box.top)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>render_wgcEnsureStagingTexture</span>(lpCapture, box.right - box.left, box.bottom - box.top))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>ID3D11DeviceContext_CopySubresourceRegion</span>(
+      lpCapture-&gt;d3dContext,
+      (ID3D11Resource*)lpCapture-&gt;wgcStagingTexture,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      (ID3D11Resource*)lpCapture-&gt;wgcFrameTexture,
+      <span class='num'>0</span>,
+      &amp;box);
+
+    hr = <span class='fn'>ID3D11DeviceContext_Map</span>(lpCapture-&gt;d3dContext, (ID3D11Resource*)lpCapture-&gt;wgcStagingTexture, <span class='num'>0</span>, D3D11_MAP_READ, <span class='num'>0</span>, &amp;mapped);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>render_mapSourceRectToDestination</span>(lpsd, lprcSource, lprcIntersection, &amp;rcDst))
+    {
+      <span class='fn'>ID3D11DeviceContext_Unmap</span>(lpCapture-&gt;d3dContext, (ID3D11Resource*)lpCapture-&gt;wgcStagingTexture, <span class='num'>0</span>);
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>render_dxgiCopyMappedPixelsToRect</span>(
+      lpsd,
+      (<span class='kw'>const</span> BYTE*)mapped.pData,
+      box.right - box.left,
+      box.bottom - box.top,
+      mapped.RowPitch,
+      &amp;rcDst);
+
+    <span class='fn'>ID3D11DeviceContext_Unmap</span>(lpCapture-&gt;d3dContext, (ID3D11Resource*)lpCapture-&gt;wgcStagingTexture, <span class='num'>0</span>);
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRects</span>(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='kw'>const</span> LONG cw = lpsd-&gt;bi.biWidth;
+    <span class='kw'>const</span> LONG ch = lpsd-&gt;bi.biHeight;
+    POINT tl = { <span class='num'>0</span>, <span class='num'>0</span> };
+    POINT center = { <span class='num'>0</span>, <span class='num'>0</span> };
+    RECT rcClip = lpsd-&gt;di.rc;
+    <span class='kw'>const</span> FLOAT m = (lpsd-&gt;fTexScaler &lt; <span class='num'>1.0f</span>) ? <span class='num'>1.0f</span> : lpsd-&gt;fTexScaler;
+    BOOL fCenterOnCursor;
+    BOOL fUseSourceOrigin;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+
+    <span class='kw'>if</span> (!<span class='fn'>ClientToScreen</span>(hWnd, &amp;tl))
+    {
+      <span class='fn'>SetRectEmpty</span>(lprcSource);
+      <span class='fn'>SetRectEmpty</span>(lprcClippedSource);
+      <span class='kw'>return</span>;
+    }
+
+    fCenterOnCursor = lpsd-&gt;fTrackCursor &amp;&amp; <span class='fn'>GetCursorPos</span>(&amp;center);
+    <span class='kw'>if</span> (!fCenterOnCursor)
+    {
+      center.x = tl.x + cw / <span class='num'>2</span>;
+      center.y = tl.y + ch / <span class='num'>2</span>;
+    }
+
+    <span class='kw'>if</span> (fCenterOnCursor)
+    {
+      <span class='kw'>const</span> HMONITOR hMonitor = <span class='fn'>MonitorFromPoint</span>(center, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO mi = { <span class='kw'>sizeof</span>(mi) };
+
+      <span class='kw'>if</span> (hMonitor &amp;&amp; <span class='fn'>GetMonitorInfo</span>(hMonitor, &amp;mi))
+      {
+        rcClip = mi.rcMonitor;
+      }
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcClip))
+    {
+      rcClip.left = <span class='fn'>GetSystemMetrics</span>(SM_XVIRTUALSCREEN);
+      rcClip.top = <span class='fn'>GetSystemMetrics</span>(SM_YVIRTUALSCREEN);
+      rcClip.right = rcClip.left + <span class='fn'>GetSystemMetrics</span>(SM_CXVIRTUALSCREEN);
+      rcClip.bottom = rcClip.top + <span class='fn'>GetSystemMetrics</span>(SM_CYVIRTUALSCREEN);
+    }
+
+    fUseSourceOrigin = !fCenterOnCursor &amp;&amp; lpsd-&gt;fUseSourceOrigin;
+
+    <span class='kw'>if</span> (m &lt;= <span class='num'>1.0001f</span>)
+    {
+      srcW = cw;
+      srcH = ch;
+      <span class='kw'>if</span> (fUseSourceOrigin)
+      {
+        srcX = lpsd-&gt;ptSourceOrigin.x;
+        srcY = lpsd-&gt;ptSourceOrigin.y;
+      }
+      <span class='kw'>else</span>
+      {
+        srcX = fCenterOnCursor ? center.x - srcW / <span class='num'>2</span> : tl.x;
+        srcY = fCenterOnCursor ? center.y - srcH / <span class='num'>2</span> : tl.y;
+      }
+      <span class='kw'>if</span> (fCenterOnCursor)
+      {
+        lpsd-&gt;pt = center;
+      }
+      <span class='kw'>else</span>
+      {
+        lpsd-&gt;pt.x = srcX;
+        lpsd-&gt;pt.y = srcY;
+      }
+      <span class='kw'>if</span> (!fCenterOnCursor &amp;&amp; !fUseSourceOrigin)
+      {
+        lpsd-&gt;fUseSourceOrigin = FALSE;
+        lpsd-&gt;fSourceOriginPinned = FALSE;
+      }
+    }
+    <span class='kw'>else</span>
+    {
+      srcW = (LONG)(cw / m);
+      srcH = (LONG)(ch / m);
+
+      <span class='kw'>if</span> (srcW &lt; <span class='num'>1</span>) srcW = <span class='num'>1</span>;
+      <span class='kw'>if</span> (srcH &lt; <span class='num'>1</span>) srcH = <span class='num'>1</span>;
+
+      <span class='kw'>if</span> (fUseSourceOrigin)
+      {
+        srcX = lpsd-&gt;ptSourceOrigin.x;
+        srcY = lpsd-&gt;ptSourceOrigin.y;
+      }
+      <span class='kw'>else</span>
+      {
+        srcX = center.x - srcW / <span class='num'>2</span>;
+        srcY = center.y - srcH / <span class='num'>2</span>;
+      }
+
+      lpsd-&gt;pt = center;
+    }
+
+    <span class='kw'>if</span> (fCenterOnCursor)
+    {
+      srcX = <span class='fn'>render_clipSourceOrigin</span>(srcX, srcW, rcClip.left, rcClip.right);
+      srcY = <span class='fn'>render_clipSourceOrigin</span>(srcY, srcH, rcClip.top, rcClip.bottom);
+    }
+
+    <span class='fn'>SetRect</span>(lprcSource, srcX, srcY, srcX + srcW, srcY + srcH);
+    <span class='kw'>if</span> (!<span class='fn'>IntersectRect</span>(lprcClippedSource, lprcSource, &amp;rcClip))
+    {
+      <span class='fn'>SetRectEmpty</span>(lprcClippedSource);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRect</span>(HWND hWnd, RECT* lprcSource)
+{
+    RECT rcClippedSource;
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, lprcSource, &amp;rcClippedSource);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dwmThumbnailDeleteResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd-&gt;dwmThumbnail.hThumbnail)
+    {
+      <span class='fn'>DwmUnregisterThumbnail</span>(lpsd-&gt;dwmThumbnail.hThumbnail);
+      lpsd-&gt;dwmThumbnail.hThumbnail = NULL;
+    }
+
+    lpsd-&gt;dwmThumbnail.hwndSource = NULL;
+}
+
+BOOL <span class='fn'>render_dwmThumbnailEnsureResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    HWND hwndSource = <span class='fn'>GetDesktopWindow</span>();
+
+    <span class='kw'>if</span> (lpsd-&gt;dwmThumbnail.hThumbnail &amp;&amp; lpsd-&gt;dwmThumbnail.hwndSource == hwndSource)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+
+    <span class='kw'>if</span> (!hwndSource ||
+        <span class='fn'>FAILED</span>(<span class='fn'>DwmRegisterThumbnail</span>(hWnd, hwndSource, &amp;lpsd-&gt;dwmThumbnail.hThumbnail)))
+    {
+      lpsd-&gt;dwmThumbnail.hThumbnail = NULL;
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpsd-&gt;dwmThumbnail.hwndSource = hwndSource;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dwmThumbnailCaptureScreen</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    DWM_THUMBNAIL_PROPERTIES props = { <span class='num'>0</span> };
+    RECT rcSource;
+    RECT rcClippedSource;
+    RECT rcVirtual = lpsd-&gt;di.rc;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_dwmThumbnailEnsureResources</span>(hWnd))
+    {
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource) || <span class='fn'>render_sourceRectIsClipped</span>(&amp;rcSource, &amp;rcClippedSource))
+    {
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcVirtual))
+    {
+      rcVirtual.left = <span class='fn'>GetSystemMetrics</span>(SM_XVIRTUALSCREEN);
+      rcVirtual.top = <span class='fn'>GetSystemMetrics</span>(SM_YVIRTUALSCREEN);
+    }
+
+    <span class='fn'>OffsetRect</span>(&amp;rcClippedSource, -rcVirtual.left, -rcVirtual.top);
+
+    props.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
+    <span class='fn'>SetRect</span>(&amp;props.rcDestination, <span class='num'>0</span>, <span class='num'>0</span>, lpsd-&gt;bi.biWidth, lpsd-&gt;bi.biHeight);
+    props.rcSource = rcClippedSource;
+    props.opacity = <span class='num'>255</span>;
+    props.fVisible = TRUE;
+    props.fSourceClientAreaOnly = FALSE;
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>DwmUpdateThumbnailProperties</span>(lpsd-&gt;dwmThumbnail.hThumbnail, &amp;props)))
+    {
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>DwmFlush</span>();
+}
+
+BOOL <span class='fn'>render_dwmPrivateIsMultiWindowBuild</span>(<span class='kw'>void</span>)
+{
+    HMODULE hNtdll = <span class='fn'>GetModuleHandle</span>(<span class='fn'>TEXT</span>(<span class='str'>"ntdll.dll"</span>));
+    PFN_RTLGETVERSION pRtlGetVersion = hNtdll ? (PFN_RTLGETVERSION)<span class='fn'>GetProcAddress</span>(hNtdll, <span class='str'>"RtlGetVersion"</span>) : NULL;
+    MAG_RTL_OSVERSIONINFOW version = { <span class='num'>0</span> };
+
+    version.dwOSVersionInfoSize = <span class='kw'>sizeof</span>(version);
+
+    <span class='kw'>if</span> (pRtlGetVersion &amp;&amp; <span class='fn'>pRtlGetVersion</span>(&amp;version) &gt;= <span class='num'>0</span>)
+    {
+      <span class='kw'>return</span> version.dwBuildNumber &gt;= DWM_PRIVATE_MULTIWINDOW_BUILD;
+    }
+
+<span class='pp'>#if defined(_WIN64)</span>
+    <span class='kw'>return</span> TRUE;
+<span class='pp'>#else</span>
+    <span class='kw'>return</span> FALSE;
+<span class='pp'>#endif</span>
+}
+
+LRESULT <span class='kw'>CALLBACK</span> <span class='fn'>render_dwmPrivateHostWndProc</span>(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    <span class='kw'>switch</span> (message)
+    {
+    <span class='kw'>case</span> WM_NCHITTEST:
+      <span class='kw'>return</span> HTTRANSPARENT;
+    <span class='kw'>case</span> WM_MOUSEACTIVATE:
+      <span class='kw'>return</span> MA_NOACTIVATE;
+    <span class='kw'>case</span> WM_ERASEBKGND:
+      <span class='kw'>return</span> <span class='num'>1</span>;
+    <span class='kw'>default</span>:
+      <span class='kw'>return</span> <span class='fn'>DefWindowProc</span>(hwnd, message, wParam, lParam);
+    }
+}
+
+BOOL <span class='fn'>render_dwmPrivateRegisterHostClass</span>(<span class='kw'>void</span>)
+{
+    <span class='kw'>static</span> BOOL fRegistered = FALSE;
+    WNDCLASS wc = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (fRegistered)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    wc.lpfnWndProc = render_dwmPrivateHostWndProc;
+    wc.hInstance = <span class='fn'>GetModuleHandle</span>(NULL);
+    wc.hbrBackground = <span class='fn'>GetStockBrush</span>(BLACK_BRUSH);
+    wc.lpszClassName = <span class='fn'>TEXT</span>(<span class='str'>"magDwmPrivateHostClass"</span>);
+
+    <span class='kw'>if</span> (!<span class='fn'>RegisterClass</span>(&amp;wc) &amp;&amp; ERROR_CLASS_ALREADY_EXISTS != <span class='fn'>GetLastError</span>())
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    fRegistered = TRUE;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateSetExcludedFromLivePreview</span>(HWND hWnd, BOOL fExcluded)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span> lpCapture;
+    PFN_SETWINDOWCOMPOSITIONATTRIBUTE pSetWindowCompositionAttribute;
+    MAG_WINDOWCOMPOSITIONATTRIBDATA data = { <span class='num'>0</span> };
+    BOOL fEnable = fExcluded;
+
+    <span class='kw'>if</span> (!lpsd || !lpsd-&gt;dwmPrivate.pSetWindowCompositionAttribute)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    lpCapture = &amp;lpsd-&gt;dwmPrivate;
+    pSetWindowCompositionAttribute = (PFN_SETWINDOWCOMPOSITIONATTRIBUTE)lpsd-&gt;dwmPrivate.pSetWindowCompositionAttribute;
+    data.Attrib = MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW;
+    data.pvData = &amp;fEnable;
+    data.cbData = <span class='kw'>sizeof</span>(fEnable);
+    <span class='fn'>pSetWindowCompositionAttribute</span>(lpCapture-&gt;hwndHost ? lpCapture-&gt;hwndHost : hWnd, &amp;data);
+}
+
+BOOL <span class='fn'>render_dwmPrivateUpdateHostWindow</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    POINT pt = { <span class='num'>0</span>, <span class='num'>0</span> };
+    RECT rc;
+
+    <span class='kw'>if</span> (!lpsd-&gt;dwmPrivate.hwndHost ||
+        !<span class='fn'>GetClientRect</span>(hWnd, &amp;rc) ||
+        !<span class='fn'>ClientToScreen</span>(hWnd, &amp;pt))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>SetWindowPos</span>(
+      lpsd-&gt;dwmPrivate.hwndHost,
+      HWND_TOPMOST,
+      pt.x,
+      pt.y,
+      <span class='fn'>RECTWIDTH</span>(rc),
+      <span class='fn'>RECTHEIGHT</span>(rc),
+      SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateDeleteResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span> lpCapture = &amp;lpsd-&gt;dwmPrivate;
+
+    <span class='kw'>if</span> (lpCapture-&gt;dcompTarget)
+    {
+      ((MAG_IDCompositionTarget*)lpCapture-&gt;dcompTarget)-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>((MAG_IDCompositionTarget*)lpCapture-&gt;dcompTarget, NULL);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;dcompDevice)
+    {
+      ((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice)-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;pSetWindowCompositionAttribute)
+    {
+      <span class='fn'>render_dwmPrivateSetExcludedFromLivePreview</span>(hWnd, FALSE);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;hThumbnail)
+    {
+      <span class='fn'>DwmUnregisterThumbnail</span>(lpCapture-&gt;hThumbnail);
+      lpCapture-&gt;hThumbnail = NULL;
+    }
+
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;dcompVisual);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;dcompTarget);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;dcompDevice);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;dxgiDevice);
+    <span class='fn'>SAFERELEASE</span>(lpCapture-&gt;d3dDevice);
+
+    <span class='kw'>if</span> (lpCapture-&gt;hwndHost)
+    {
+      <span class='fn'>DestroyWindow</span>(lpCapture-&gt;hwndHost);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;hUser32)
+    {
+      <span class='fn'>FreeLibrary</span>(lpCapture-&gt;hUser32);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;hDwmApi)
+    {
+      <span class='fn'>FreeLibrary</span>(lpCapture-&gt;hDwmApi);
+    }
+
+    <span class='kw'>if</span> (lpCapture-&gt;hDComp)
+    {
+      <span class='fn'>FreeLibrary</span>(lpCapture-&gt;hDComp);
+    }
+
+    <span class='fn'>ZeroMemory</span>(lpCapture, <span class='kw'>sizeof</span>(*lpCapture));
+}
+
+BOOL <span class='fn'>render_dwmPrivateEnsureResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span> lpCapture = &amp;lpsd-&gt;dwmPrivate;
+    PFN_DCOMPOSITIONCREATEDEVICE3 pDCompositionCreateDevice3;
+    PFN_DWMPCREATESHAREDDESKTOPVISUAL pCreateSharedVisual;
+    D3D_FEATURE_LEVEL featureLevel;
+    HRESULT hr;
+
+    <span class='kw'>if</span> (lpCapture-&gt;fInitialized &amp;&amp;
+        lpCapture-&gt;dcompDevice &amp;&amp;
+        lpCapture-&gt;dcompTarget &amp;&amp;
+        lpCapture-&gt;dcompVisual &amp;&amp;
+        lpCapture-&gt;hThumbnail)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+
+    lpCapture-&gt;hDComp = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>"dcomp.dll"</span>));
+    lpCapture-&gt;hDwmApi = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>"dwmapi.dll"</span>));
+    lpCapture-&gt;hUser32 = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>"user32.dll"</span>));
+
+    <span class='kw'>if</span> (!lpCapture-&gt;hDComp || !lpCapture-&gt;hDwmApi)
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpCapture-&gt;pDCompositionCreateDevice = <span class='fn'>GetProcAddress</span>(lpCapture-&gt;hDComp, <span class='str'>"DCompositionCreateDevice"</span>);
+    lpCapture-&gt;pDCompositionCreateDevice3 = <span class='fn'>GetProcAddress</span>(lpCapture-&gt;hDComp, <span class='str'>"DCompositionCreateDevice3"</span>);
+    lpCapture-&gt;pCreateSharedVisual = <span class='fn'>GetProcAddress</span>(lpCapture-&gt;hDwmApi, <span class='fn'>MAKEINTRESOURCEA</span>(DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL));
+    lpCapture-&gt;pUpdateSharedVisual = <span class='fn'>GetProcAddress</span>(lpCapture-&gt;hDwmApi, <span class='fn'>MAKEINTRESOURCEA</span>(DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL));
+
+    <span class='kw'>if</span> (lpCapture-&gt;hUser32)
+    {
+      lpCapture-&gt;pSetWindowCompositionAttribute = <span class='fn'>GetProcAddress</span>(lpCapture-&gt;hUser32, <span class='str'>"SetWindowCompositionAttribute"</span>);
+    }
+
+    <span class='kw'>if</span> (!lpCapture-&gt;pDCompositionCreateDevice3 ||
+        !lpCapture-&gt;pCreateSharedVisual ||
+        !lpCapture-&gt;pUpdateSharedVisual)
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>render_dwmPrivateRegisterHostClass</span>())
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpCapture-&gt;hwndHost = <span class='fn'>CreateWindowEx</span>(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+      <span class='fn'>TEXT</span>(<span class='str'>"magDwmPrivateHostClass"</span>),
+      <span class='fn'>TEXT</span>(<span class='str'>"magDwmPrivateHost"</span>),
+      WS_POPUP,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>1</span>,
+      <span class='num'>1</span>,
+      hWnd,
+      NULL,
+      <span class='fn'>GetModuleHandle</span>(NULL),
+      NULL);
+
+    <span class='kw'>if</span> (!lpCapture-&gt;hwndHost ||
+        !<span class='fn'>render_dwmPrivateUpdateHostWindow</span>(hWnd))
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>render_dwmPrivateSetExcludedFromLivePreview</span>(hWnd, TRUE);
+
+    hr = <span class='fn'>D3D11CreateDevice</span>(
+      NULL,
+      D3D_DRIVER_TYPE_HARDWARE,
+      NULL,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+      NULL,
+      <span class='num'>0</span>,
+      D3D11_SDK_VERSION,
+      &amp;lpCapture-&gt;d3dDevice,
+      &amp;featureLevel,
+      NULL);
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      hr = <span class='fn'>D3D11CreateDevice</span>(
+        NULL,
+        D3D_DRIVER_TYPE_WARP,
+        NULL,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        NULL,
+        <span class='num'>0</span>,
+        D3D11_SDK_VERSION,
+        &amp;lpCapture-&gt;d3dDevice,
+        &amp;featureLevel,
+        NULL);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>ID3D11Device_QueryInterface</span>(lpCapture-&gt;d3dDevice, &amp;IID_IDXGIDevice, (<span class='kw'>void</span>**)&amp;lpCapture-&gt;dxgiDevice);
+    }
+
+    pDCompositionCreateDevice3 = (PFN_DCOMPOSITIONCREATEDEVICE3)lpCapture-&gt;pDCompositionCreateDevice3;
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>pDCompositionCreateDevice3</span>((IUnknown*)lpCapture-&gt;dxgiDevice, &amp;IID_MAG_IDCompositionDesktopDevice, (<span class='kw'>void</span>**)&amp;lpCapture-&gt;dcompDevice);
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        lpCapture-&gt;fDesktopDevice = TRUE;
+      }
+    }
+
+    pCreateSharedVisual = (PFN_DWMPCREATESHAREDDESKTOPVISUAL)lpCapture-&gt;pCreateSharedVisual;
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>pCreateSharedVisual</span>(lpCapture-&gt;hwndHost, lpCapture-&gt;dcompDevice, (<span class='kw'>void</span>**)&amp;lpCapture-&gt;dcompVisual, &amp;lpCapture-&gt;hThumbnail);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = ((MAG_IDCompositionDesktopDevice*)lpCapture-&gt;dcompDevice)-&gt;lpVtbl-&gt;<span class='fn'>CreateTargetForHwnd</span>(
+        (MAG_IDCompositionDesktopDevice*)lpCapture-&gt;dcompDevice,
+        lpCapture-&gt;hwndHost,
+        FALSE,
+        (MAG_IDCompositionTarget**)&amp;lpCapture-&gt;dcompTarget);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = ((MAG_IDCompositionTarget*)lpCapture-&gt;dcompTarget)-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(
+        (MAG_IDCompositionTarget*)lpCapture-&gt;dcompTarget,
+        lpCapture-&gt;dcompVisual);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = ((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice)-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    lpCapture-&gt;fUseMultiWindow = <span class='fn'>render_dwmPrivateIsMultiWindowBuild</span>();
+    lpCapture-&gt;fInitialized = TRUE;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dwmPrivateCaptureScreen</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    <span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span> lpCapture = &amp;lpsd-&gt;dwmPrivate;
+    RECT rcSource;
+    RECT rcClippedSource;
+    SIZE destinationSize;
+    HWND exclude[<span class='num'>2</span>];
+    DWORD excludeCount = <span class='num'>0</span>;
+    HRESULT hr;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_dwmPrivateEnsureResources</span>(hWnd))
+    {
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>render_dwmPrivateUpdateHostWindow</span>(hWnd))
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+    <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource) || <span class='fn'>render_sourceRectIsClipped</span>(&amp;rcSource, &amp;rcClippedSource))
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    destinationSize.cx = lpsd-&gt;bi.biWidth;
+    destinationSize.cy = lpsd-&gt;bi.biHeight;
+    exclude[excludeCount++] = hWnd;
+    exclude[excludeCount++] = lpCapture-&gt;hwndHost;
+
+    <span class='kw'>if</span> (lpCapture-&gt;fUseMultiWindow)
+    {
+      PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL pUpdate =
+        (PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)lpCapture-&gt;pUpdateSharedVisual;
+
+      hr = <span class='fn'>pUpdate</span>(lpCapture-&gt;hThumbnail, NULL, <span class='num'>0</span>, exclude, excludeCount, &amp;rcSource, &amp;destinationSize, <span class='num'>1</span>);
+    }
+    <span class='kw'>else</span>
+    {
+      PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL pUpdate =
+        (PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)lpCapture-&gt;pUpdateSharedVisual;
+
+      hr = <span class='fn'>pUpdate</span>(lpCapture-&gt;hThumbnail, NULL, <span class='num'>0</span>, exclude, excludeCount, &amp;rcSource, &amp;destinationSize);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='fn'>render_wglRender</span>(hWnd);
+      <span class='kw'>return</span>;
+    }
+
+    ((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice)-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>((MAG_IDCompositionDevice*)lpCapture-&gt;dcompDevice);
+    <span class='fn'>DwmFlush</span>();
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglInit</span>(HWND hWnd)
+{
+    <span class='kw'>const</span> PIXELFORMATDESCRIPTOR pfd =
+    {
+      <span class='kw'>sizeof</span>(PIXELFORMATDESCRIPTOR),
+      <span class='num'>1</span>,
+      PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+      PFD_TYPE_RGBA,
+      <span class='num'>32</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>,
+      <span class='num'>8</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>,
+      <span class='num'>24</span>,
+      <span class='num'>8</span>,
+      <span class='num'>0</span>,
+      PFD_MAIN_PLANE,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>
+    };
+
+    <span class='kw'>const</span> <span class='kw'>int</span> iAttribs[] =
+    {
+      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+      WGL_COLOR_BITS_ARB, <span class='num'>32</span>,
+      WGL_DEPTH_BITS_ARB, <span class='num'>24</span>,
+      WGL_ALPHA_BITS_ARB, <span class='num'>8</span>,
+      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
+      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+      <span class='num'>0</span>
+    };
+
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>wglInit</span>();
+    lpsd-&gt;hDC = <span class='fn'>GetDC</span>(hWnd);
+    <span class='fn'>SetPixelFormat</span>(lpsd-&gt;hDC, <span class='fn'>wglFindPixelFormat</span>(lpsd-&gt;hDC, iAttribs, NULL), &amp;pfd);
+    lpsd-&gt;hRC = <span class='fn'>wglCreateContextAttribsARB</span>(lpsd-&gt;hDC, NULL, NULL);
+    <span class='fn'>wglMakeCurrent</span>(lpsd-&gt;hDC, lpsd-&gt;hRC);
+
+    <span class='fn'>render_updateSurfaceInfo</span>(hWnd);
+    <span class='fn'>render_gdiCreateResources</span>(hWnd);
+    <span class='fn'>render_wglCreateResources</span>(hWnd);
+    <span class='fn'>glMatrixMode</span>(GL_PROJECTION);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glOrtho</span>(-<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>);
+    <span class='fn'>glMatrixMode</span>(GL_MODELVIEW);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glDisable</span>(GL_BLEND);
+    <span class='fn'>glEnable</span>(GL_BLEND);
+    <span class='fn'>glBlendFunc</span>(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+
+    <span class='fn'>wglSwapIntervalEXT</span>(-<span class='num'>1</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglInitPBuffer</span>(HWND hWnd)
+{
+    <span class='cm'>// basic pixel format</span>
+    <span class='kw'>const</span> PIXELFORMATDESCRIPTOR pfd =
+    {
+      <span class='kw'>sizeof</span>(PIXELFORMATDESCRIPTOR),
+      <span class='num'>1</span>,
+      PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+      PFD_TYPE_RGBA,
+      <span class='num'>32</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>,
+      <span class='num'>8</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>,
+      <span class='num'>24</span>,
+      <span class='num'>8</span>,
+      <span class='num'>0</span>,
+      PFD_MAIN_PLANE,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>
+    };
+
+    <span class='kw'>const</span> <span class='kw'>int</span> iAttribs[] =
+    {
+      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+      WGL_COLOR_BITS_ARB, <span class='num'>32</span>,
+      WGL_DEPTH_BITS_ARB, <span class='num'>24</span>,
+      WGL_ALPHA_BITS_ARB, <span class='num'>8</span>,
+      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
+      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+      <span class='num'>0</span>
+    };
+
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    
+    <span class='fn'>wglInit</span>();
+    lpsd-&gt;hDC = <span class='fn'>GetDC</span>(<span class='num'>0</span>);
+
+    <span class='kw'>int</span> pf = <span class='fn'>ChoosePixelFormat</span>(lpsd-&gt;hDC, &amp;pfd);
+    <span class='fn'>WGLCHECK</span>(<span class='fn'>SetPixelFormat</span>(lpsd-&gt;hDC, pf, &amp;pfd));
+
+    <span class='cm'>// dummy GL context</span>
+    HGLRC rc = <span class='fn'>wglCreateContext</span>(lpsd-&gt;hDC);
+    <span class='fn'>WGLCHECK</span>(<span class='fn'>wglMakeCurrent</span>(lpsd-&gt;hDC, rc));
+
+    <span class='cm'>// choose pbuffer format</span>
+    <span class='kw'>int</span> iattribs[] = {
+        WGL_DRAW_TO_PBUFFER_ARB, GL_TRUE,
+        WGL_SUPPORT_OPENGL_ARB,  GL_TRUE,
+        WGL_BIND_TO_TEXTURE_RGBA_ARB, GL_TRUE,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        <span class='num'>0</span>
+    };
+
+    <span class='kw'>int</span> formats[<span class='num'>1</span>];
+    UINT count;
+    <span class='kw'>if</span> (!<span class='fn'>wglChoosePixelFormatARB</span>(lpsd-&gt;hDC, iattribs, NULL, <span class='num'>1</span>, formats, &amp;count))
+      <span class='fn'>__debugbreak</span>();
+
+    <span class='cm'>// create pbuffer</span>
+    <span class='kw'>int</span> pattribs[] = {
+        WGL_TEXTURE_FORMAT_ARB, WGL_TEXTURE_RGBA_ARB,
+        WGL_TEXTURE_TARGET_ARB, WGL_TEXTURE_2D_ARB,
+        <span class='num'>0</span>
+    };
+
+    lpsd-&gt;pb = <span class='fn'>wglCreatePbufferARB</span>(lpsd-&gt;hDC, formats[<span class='num'>0</span>], <span class='num'>256</span>, <span class='num'>256</span>, pattribs);
+    HDC pbdc = <span class='fn'>wglGetPbufferDCARB</span>(lpsd-&gt;pb);
+
+    <span class='cm'>// render context for pbuffer</span>
+    HGLRC pbrc = <span class='fn'>wglCreateContext</span>(pbdc);
+    <span class='fn'>wglMakeCurrent</span>(pbdc, pbrc);
+
+    <span class='fn'>render_updateSurfaceInfo</span>(hWnd);
+    <span class='fn'>render_gdiCreateResources</span>(hWnd);
+    <span class='fn'>render_wglCreateResources</span>(hWnd);
+    <span class='fn'>glMatrixMode</span>(GL_PROJECTION);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glOrtho</span>(-<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>);
+    <span class='fn'>glMatrixMode</span>(GL_MODELVIEW);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glDisable</span>(GL_BLEND);
+    <span class='fn'>glEnable</span>(GL_BLEND);
+    <span class='fn'>glBlendFunc</span>(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+
+    <span class='fn'>wglSwapIntervalEXT</span>(-<span class='num'>1</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglCreateResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    
+    <span class='fn'>glGenTextures</span>(<span class='num'>1</span>, &amp;lpsd-&gt;glScreenTexture);
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, lpsd-&gt;glScreenTexture);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, <span class='num'>1</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    <span class='fn'>glTexImage2D</span>(GL_TEXTURE_2D, <span class='num'>0</span>, GL_BGRA, lpsd-&gt;bi.biWidth, lpsd-&gt;bi.biHeight, <span class='num'>0</span>, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+
+    lpsd-&gt;fScale = <span class='num'>1.0f</span>;
+    lpsd-&gt;fTexScaler = <span class='num'>1.0f</span>;
+}
+
+<span class='kw'>void</span> <span class='fn'>render_gdiCreateResources</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    
+    <span class='fn'>gdiGetDisplayInfo</span>(&amp;lpsd-&gt;di);
+    lpsd-&gt;hDesktopDC = <span class='fn'>GetDC</span>(NULL); <span class='cm'>// whole virtual screen (handles negative/secondary monitor coords)</span>
+    lpsd-&gt;hCaptureDC = <span class='fn'>CreateCompatibleDC</span>(lpsd-&gt;hDesktopDC);
+    <span class='fn'>render_updateSurfaceInfo</span>(hWnd);
+    <span class='fn'>render_gdiCreateCaptureBitmap</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglResizeSurface</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd-&gt;hRC || !lpsd-&gt;glScreenTexture)
+    {
+      <span class='kw'>return</span>;
+    }
+    
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='num'>0</span>);
+    <span class='fn'>glDeleteTextures</span>(<span class='num'>1</span>, &amp;lpsd-&gt;glScreenTexture);
+
+    <span class='fn'>glGenTextures</span>(<span class='num'>1</span>, &amp;lpsd-&gt;glScreenTexture);
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, lpsd-&gt;glScreenTexture);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    <span class='fn'>glTexImage2D</span>(GL_TEXTURE_2D, <span class='num'>0</span>, GL_BGRA, lpsd-&gt;bi.biWidth, lpsd-&gt;bi.biHeight, <span class='num'>0</span>, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_gdiResizeSurface</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>render_updateSurfaceInfo</span>(hWnd);
+
+    <span class='kw'>if</span> (!lpsd-&gt;hCaptureDC)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>render_gdiDeleteCaptureBitmap</span>(hWnd);
+    <span class='fn'>render_gdiCreateCaptureBitmap</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglClientVertex</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, FLOAT x, FLOAT y)
+{
+    <span class='fn'>glVertex2f</span>(
+      -<span class='num'>1.0f</span> + (<span class='num'>2.0f</span> * x / (FLOAT)lpsd-&gt;bi.biWidth),
+      <span class='num'>1.0f</span> - (<span class='num'>2.0f</span> * y / (FLOAT)lpsd-&gt;bi.biHeight));
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglFillClientRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
+{
+    <span class='fn'>glColor4f</span>(r, g, b, a);
+    <span class='fn'>glBegin</span>(GL_QUADS);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;left, (FLOAT)lprc-&gt;top);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;right, (FLOAT)lprc-&gt;top);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;right, (FLOAT)lprc-&gt;bottom);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;left, (FLOAT)lprc-&gt;bottom);
+    <span class='fn'>glEnd</span>();
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglStrokeClientRect</span>(<span class='tp'>LPSHAREDWGLDATA</span> lpsd, <span class='kw'>const</span> RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
+{
+    <span class='fn'>glColor4f</span>(r, g, b, a);
+    <span class='fn'>glBegin</span>(GL_LINE_LOOP);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;left, (FLOAT)lprc-&gt;top);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;right, (FLOAT)lprc-&gt;top);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;right, (FLOAT)lprc-&gt;bottom);
+    <span class='fn'>render_wglClientVertex</span>(lpsd, (FLOAT)lprc-&gt;left, (FLOAT)lprc-&gt;bottom);
+    <span class='fn'>glEnd</span>();
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglDrawMiniMap</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    RECT rcWindow;
+    RECT rcClippedWindow;
+    RECT rcWindowClient;
+    RECT rcPanel;
+    RECT rcVisibleClient;
+    FLOAT opacity;
+    UINT i;
+
+    <span class='kw'>if</span> (!<span class='fn'>render_minimapComputeLayout</span>(hWnd, &amp;layout))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    opacity = <span class='fn'>render_minimapGetOpacity</span>(lpsd);
+    <span class='kw'>if</span> (opacity &lt;= MINIMAP_MIN_ALPHA)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+
+    rcPanel = layout.rcMap;
+    <span class='fn'>InflateRect</span>(&amp;rcPanel, <span class='num'>4</span>, <span class='num'>4</span>);
+
+    <span class='fn'>glDisable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glEnable</span>(GL_BLEND);
+    <span class='fn'>glBlendFunc</span>(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    <span class='fn'>glLineWidth</span>(<span class='num'>1.0f</span>);
+
+    <span class='fn'>render_wglFillClientRect</span>(lpsd, &amp;rcPanel, <span class='num'>0.02f</span>, <span class='num'>0.025f</span>, <span class='num'>0.03f</span>, <span class='num'>0.72f</span> * opacity);
+    <span class='fn'>render_wglFillClientRect</span>(lpsd, &amp;layout.rcMap, <span class='num'>0.11f</span>, <span class='num'>0.12f</span>, <span class='num'>0.13f</span>, <span class='num'>0.78f</span> * opacity);
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; lpsd-&gt;di.numMonitors; ++i)
+    {
+      RECT rcMonitor;
+
+      <span class='fn'>render_minimapMapSourceRectToClient</span>(&amp;layout, &amp;lpsd-&gt;di.monitors[i].monitorInfoEx.rcMonitor, &amp;rcMonitor);
+      <span class='fn'>render_wglFillClientRect</span>(lpsd, &amp;rcMonitor, <span class='num'>0.18f</span>, <span class='num'>0.19f</span>, <span class='num'>0.20f</span>, <span class='num'>0.58f</span> * opacity);
+    }
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; lpsd-&gt;di.numMonitors; ++i)
+    {
+      RECT rcMonitor;
+
+      <span class='fn'>render_minimapMapSourceRectToClient</span>(&amp;layout, &amp;lpsd-&gt;di.monitors[i].monitorInfoEx.rcMonitor, &amp;rcMonitor);
+      <span class='fn'>render_wglStrokeClientRect</span>(lpsd, &amp;rcMonitor, <span class='num'>0.55f</span>, <span class='num'>0.58f</span>, <span class='num'>0.62f</span>, <span class='num'>0.70f</span> * opacity);
+    }
+
+    <span class='fn'>render_wglStrokeClientRect</span>(lpsd, &amp;layout.rcMap, <span class='num'>0.78f</span>, <span class='num'>0.82f</span>, <span class='num'>0.88f</span>, <span class='num'>0.88f</span> * opacity);
+
+    <span class='kw'>if</span> (<span class='fn'>GetWindowRect</span>(hWnd, &amp;rcWindow) &amp;&amp;
+        <span class='fn'>IntersectRect</span>(&amp;rcClippedWindow, &amp;rcWindow, &amp;layout.rcCapture))
+    {
+      <span class='fn'>render_minimapMapSourceRectToClient</span>(&amp;layout, &amp;rcClippedWindow, &amp;rcWindowClient);
+      <span class='fn'>render_wglFillClientRect</span>(lpsd, &amp;rcWindowClient, <span class='num'>0.38f</span>, <span class='num'>0.40f</span>, <span class='num'>0.43f</span>, <span class='num'>0.10f</span> * opacity);
+      <span class='fn'>glLineWidth</span>(<span class='num'>1.5f</span>);
+      <span class='fn'>render_wglStrokeClientRect</span>(lpsd, &amp;rcWindowClient, <span class='num'>0.48f</span>, <span class='num'>0.50f</span>, <span class='num'>0.54f</span>, <span class='num'>0.92f</span> * opacity);
+      <span class='fn'>glLineWidth</span>(<span class='num'>1.0f</span>);
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource))
+    {
+      <span class='fn'>render_minimapMapSourceRectToClient</span>(&amp;layout, &amp;rcClippedSource, &amp;rcVisibleClient);
+      <span class='fn'>render_wglFillClientRect</span>(lpsd, &amp;rcVisibleClient, <span class='num'>0.86f</span>, <span class='num'>0.92f</span>, <span class='num'>1.0f</span>, <span class='num'>0.12f</span> * opacity);
+      <span class='fn'>glLineWidth</span>(<span class='num'>2.0f</span>);
+      <span class='fn'>render_wglStrokeClientRect</span>(lpsd, &amp;rcVisibleClient, <span class='num'>0.90f</span>, <span class='num'>0.96f</span>, <span class='num'>1.0f</span>, <span class='num'>0.96f</span> * opacity);
+      <span class='fn'>glLineWidth</span>(<span class='num'>1.0f</span>);
+    }
+
+    <span class='fn'>glDisable</span>(GL_BLEND);
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glColor4f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wglRender</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd-&gt;glScreenData || !lpsd-&gt;glScreenTexture)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>glViewport</span>(<span class='num'>0</span>, <span class='num'>0</span>, lpsd-&gt;bi.biWidth, lpsd-&gt;bi.biHeight);
+    <span class='fn'>glDisable</span>(GL_BLEND);
+    <span class='fn'>glDisable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glColorMask</span>(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    <span class='fn'>glClearColor</span>(<span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glClear</span>(GL_COLOR_BUFFER_BIT);
+
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, lpsd-&gt;glScreenTexture);
+    <span class='cm'>//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);</span>
+    <span class='fn'>glTexSubImage2D</span>(GL_TEXTURE_2D, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, lpsd-&gt;bi.biWidth, lpsd-&gt;bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd-&gt;glScreenData);
+
+    <span class='fn'>glColor4f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glColorMask</span>(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    <span class='fn'>glBegin</span>(GL_QUADS);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>0.0f</span>, <span class='num'>0.0f</span>);
+    <span class='fn'>glVertex2f</span>(-<span class='num'>1.0f</span>, -<span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>1.0f</span>, <span class='num'>0.0f</span>);
+    <span class='fn'>glVertex2f</span>(<span class='num'>1.0f</span>, -<span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glVertex2f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>0.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glVertex2f</span>(-<span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glEnd</span>();
+
+    <span class='fn'>render_wglDrawMiniMap</span>(hWnd);
+    <span class='fn'>glColorMask</span>(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    <span class='cm'>//glFlush();</span>
+    <span class='fn'>SwapBuffers</span>(lpsd-&gt;hDC);
+    <span class='fn'>glFinish</span>();
+}
+
+<span class='kw'>void</span> <span class='fn'>render_gdiCaptureScreen</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd-&gt;hBitmapBg &amp;&amp; lpsd-&gt;glScreenData)
+    {
+      <span class='kw'>const</span> LONG cw = lpsd-&gt;bi.biWidth;
+      <span class='kw'>const</span> LONG ch = lpsd-&gt;bi.biHeight;
+      RECT rcSource;
+      RECT rcClippedSource;
+      RECT rcDst;
+
+      <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+      <span class='fn'>PatBlt</span>(lpsd-&gt;hCaptureDC, <span class='num'>0</span>, <span class='num'>0</span>, cw, ch, BLACKNESS);
+
+      <span class='kw'>if</span> (!<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource) &amp;&amp;
+          <span class='fn'>render_mapSourceRectToDestination</span>(lpsd, &amp;rcSource, &amp;rcClippedSource, &amp;rcDst))
+      {
+        <span class='kw'>if</span> (<span class='fn'>RECTWIDTH</span>(rcDst) == <span class='fn'>RECTWIDTH</span>(rcClippedSource) &amp;&amp;
+            <span class='fn'>RECTHEIGHT</span>(rcDst) == <span class='fn'>RECTHEIGHT</span>(rcClippedSource))
+        {
+          <span class='fn'>BitBlt</span>(
+            lpsd-&gt;hCaptureDC,
+            rcDst.left,
+            rcDst.top,
+            <span class='fn'>RECTWIDTH</span>(rcDst),
+            <span class='fn'>RECTHEIGHT</span>(rcDst),
+            lpsd-&gt;hDesktopDC,
+            rcClippedSource.left,
+            rcClippedSource.top,
+            SRCCOPY | CAPTUREBLT);
+        }
+        <span class='kw'>else</span>
+        {
+          <span class='fn'>SetStretchBltMode</span>(lpsd-&gt;hCaptureDC, COLORONCOLOR);
+          <span class='fn'>StretchBlt</span>(
+            lpsd-&gt;hCaptureDC,
+            rcDst.left,
+            rcDst.top,
+            <span class='fn'>RECTWIDTH</span>(rcDst),
+            <span class='fn'>RECTHEIGHT</span>(rcDst),
+            lpsd-&gt;hDesktopDC,
+            rcClippedSource.left,
+            rcClippedSource.top,
+            <span class='fn'>RECTWIDTH</span>(rcClippedSource),
+            <span class='fn'>RECTHEIGHT</span>(rcClippedSource),
+            SRCCOPY | CAPTUREBLT);
+        }
+      }
+
+      <span class='fn'>GdiFlush</span>();
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>render_dxgiCaptureScreen</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd-&gt;glScreenData)
+    {
+      RECT rcSource;
+      RECT rcClippedSource;
+      UINT i;
+      BOOL fCapturedAny = FALSE;
+
+      <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+      <span class='fn'>ZeroMemory</span>(lpsd-&gt;glScreenData, lpsd-&gt;bi.biSizeImage);
+      <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource))
+      {
+        <span class='kw'>return</span>;
+      }
+
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; lpsd-&gt;di.numMonitors; ++i)
+      {
+        RECT rcMonitor = lpsd-&gt;di.monitors[i].monitorInfoEx.rcMonitor;
+        RECT rcIntersection;
+        POINT ptIntersection;
+        HMONITOR hMonitor;
+        <span class='tp'>LPDXGIOUTPUTCAPTURE</span> lpOutput = NULL;
+
+        <span class='kw'>if</span> (!<span class='fn'>IntersectRect</span>(&amp;rcIntersection, &amp;rcClippedSource, &amp;rcMonitor))
+        {
+          <span class='kw'>continue</span>;
+        }
+
+        ptIntersection.x = rcIntersection.left + <span class='fn'>RECTWIDTH</span>(rcIntersection) / <span class='num'>2</span>;
+        ptIntersection.y = rcIntersection.top + <span class='fn'>RECTHEIGHT</span>(rcIntersection) / <span class='num'>2</span>;
+        hMonitor = <span class='fn'>MonitorFromPoint</span>(ptIntersection, MONITOR_DEFAULTTONULL);
+
+        <span class='kw'>if</span> (!hMonitor ||
+            !<span class='fn'>render_dxgiEnsureDuplication</span>(hWnd, hMonitor, &amp;lpOutput) ||
+            !<span class='fn'>render_dxgiCaptureIntersection</span>(lpsd, lpOutput, &amp;rcSource, &amp;rcIntersection))
+        {
+          <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+          <span class='kw'>return</span>;
+        }
+
+        fCapturedAny = TRUE;
+      }
+
+      <span class='kw'>if</span> (!fCapturedAny)
+      {
+        <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      }
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>render_wgcCaptureScreen</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd-&gt;glScreenData)
+    {
+      RECT rcSource;
+      RECT rcClippedSource;
+      UINT i;
+      BOOL fCapturedAny = FALSE;
+
+      <span class='fn'>render_computeSourceRects</span>(hWnd, &amp;rcSource, &amp;rcClippedSource);
+      <span class='fn'>ZeroMemory</span>(lpsd-&gt;glScreenData, lpsd-&gt;bi.biSizeImage);
+      <span class='kw'>if</span> (<span class='fn'>IsRectEmpty</span>(&amp;rcClippedSource))
+      {
+        <span class='kw'>return</span>;
+      }
+
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; lpsd-&gt;di.numMonitors; ++i)
+      {
+        RECT rcMonitor = lpsd-&gt;di.monitors[i].monitorInfoEx.rcMonitor;
+        RECT rcIntersection;
+        POINT ptIntersection;
+        HMONITOR hMonitor;
+        <span class='tp'>LPWGCMONITORCAPTURE</span> lpCapture = NULL;
+
+        <span class='kw'>if</span> (!<span class='fn'>IntersectRect</span>(&amp;rcIntersection, &amp;rcClippedSource, &amp;rcMonitor))
+        {
+          <span class='kw'>continue</span>;
+        }
+
+        ptIntersection.x = rcIntersection.left + <span class='fn'>RECTWIDTH</span>(rcIntersection) / <span class='num'>2</span>;
+        ptIntersection.y = rcIntersection.top + <span class='fn'>RECTHEIGHT</span>(rcIntersection) / <span class='num'>2</span>;
+        hMonitor = <span class='fn'>MonitorFromPoint</span>(ptIntersection, MONITOR_DEFAULTTONULL);
+
+        <span class='kw'>if</span> (!hMonitor ||
+            !<span class='fn'>render_wgcEnsureCapture</span>(hWnd, hMonitor, &amp;lpCapture) ||
+            !<span class='fn'>render_wgcCaptureIntersection</span>(lpsd, lpCapture, &amp;rcSource, &amp;rcIntersection))
+        {
+          <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+          <span class='kw'>return</span>;
+        }
+
+        fCapturedAny = TRUE;
+      }
+
+      <span class='kw'>if</span> (!fCapturedAny)
+      {
+        <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      }
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>renderInit</span>(HWND hWnd)
+{
+    <span class='fn'>render_wglInit</span>(hWnd);
+    <span class='cm'>//render_wglInitPBuffer(hWnd);</span>
+}
+
+<span class='kw'>void</span> <span class='fn'>renderCleanup</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+    <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+    <span class='fn'>render_wgcDeleteResources</span>(hWnd);
+    <span class='fn'>render_dxgiDeleteResources</span>(hWnd);
+
+    <span class='kw'>if</span> (lpsd-&gt;fWinRtInitialized)
+    {
+      <span class='fn'>RoUninitialize</span>();
+      lpsd-&gt;fWinRtInitialized = FALSE;
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>renderResizeCapture</span>(HWND hWnd)
+{
+    <span class='fn'>render_gdiResizeSurface</span>(hWnd);
+    <span class='fn'>render_wglResizeSurface</span>(hWnd);
+}
+
+<span class='kw'>void</span> <span class='fn'>renderSetMessageDriven</span>(HWND hWnd, BOOL fMessageDriven)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (lpsd)
+    {
+      lpsd-&gt;fRenderMessageDriven = fMessageDriven;
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>renderRender</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (!lpsd-&gt;fRenderMessageDriven)
+    {
+      <span class='fn'>renderSubmit</span>(hWnd);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>renderSubmit</span>(HWND hWnd)
+{
+    <span class='tp'>LPSHAREDWGLDATA</span> lpsd = (<span class='tp'>LPSHAREDWGLDATA</span>)<span class='fn'>GetWindowLongPtr</span>(hWnd, GWLP_USERDATA);
+
+    <span class='kw'>if</span> (!lpsd)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>switch</span> (lpsd-&gt;captureApi)
+    {
+    <span class='kw'>case</span> CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE:
+      <span class='fn'>render_dxgiDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_wgcCaptureScreen</span>(hWnd);
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
+      <span class='fn'>render_wgcDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_dxgiCaptureScreen</span>(hWnd);
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> CAPTURE_API_DWM_THUMBNAIL:
+      <span class='fn'>render_wgcDeleteResources</span>(hWnd);
+      <span class='fn'>render_dxgiDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmThumbnailCaptureScreen</span>(hWnd);
+      <span class='kw'>return</span>;
+    <span class='kw'>case</span> CAPTURE_API_DWM_PRIVATE_VISUAL:
+      <span class='fn'>render_wgcDeleteResources</span>(hWnd);
+      <span class='fn'>render_dxgiDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmPrivateCaptureScreen</span>(hWnd);
+      <span class='kw'>return</span>;
+    <span class='kw'>case</span> CAPTURE_API_GDI_BITBLT:
+    <span class='kw'>default</span>:
+      <span class='fn'>render_wgcDeleteResources</span>(hWnd);
+      <span class='fn'>render_dxgiDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmThumbnailDeleteResources</span>(hWnd);
+      <span class='fn'>render_dwmPrivateDeleteResources</span>(hWnd);
+      <span class='fn'>render_gdiCaptureScreen</span>(hWnd);
+      <span class='kw'>break</span>;
+    }
+
+    <span class='fn'>render_wglRender</span>(hWnd);
+}
+</pre>
+</body>
+</html>
