@@ -2340,9 +2340,9 @@ void render_wglDrawMiniMap(HWND hWnd)
         IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
     {
       render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
-      render_wglFillClientRect(lpsd, &rcWindowClient, 0.72f, 0.74f, 0.76f, 0.08f * opacity);
+      render_wglFillClientRect(lpsd, &rcWindowClient, 0.38f, 0.40f, 0.43f, 0.10f * opacity);
       glLineWidth(1.5f);
-      render_wglStrokeClientRect(lpsd, &rcWindowClient, 0.78f, 0.80f, 0.84f, 0.92f * opacity);
+      render_wglStrokeClientRect(lpsd, &rcWindowClient, 0.48f, 0.50f, 0.54f, 0.92f * opacity);
       glLineWidth(1.0f);
     }
 
