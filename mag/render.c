@@ -3,13 +3,11 @@
 #include <roapi.h>
 #include <windows.graphics.capture.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
-#include <magnification.h>
 
 #pragma comment(lib, "d3d11")
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "runtimeobject")
-#pragma comment(lib, "Magnification")
 
 #define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
 #define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)
@@ -83,10 +81,18 @@ static const IID IID_IDirect3DDxgiInterfaceAccess =
 #define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164
 #define DWM_PRIVATE_MULTIWINDOW_BUILD 20000
 
+#ifndef WS_EX_NOREDIRECTIONBITMAP
+#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
+#endif
+
 static const IID IID_MAG_IDCompositionDevice =
   { 0xC37EA93A, 0xE7AA, 0x450D, { 0xB1, 0x6F, 0x97, 0x46, 0xCB, 0x04, 0x07, 0xF3 } };
 
+static const IID IID_MAG_IDCompositionDesktopDevice =
+  { 0x5F4633FE, 0x1E08, 0x4CB8, { 0x8C, 0x75, 0xCE, 0x24, 0x33, 0x3F, 0x56, 0x02 } };
+
 typedef struct MAG_IDCompositionDevice MAG_IDCompositionDevice;
+typedef struct MAG_IDCompositionDesktopDevice MAG_IDCompositionDesktopDevice;
 typedef struct MAG_IDCompositionTarget MAG_IDCompositionTarget;
 
 typedef struct MAG_IDCompositionDeviceVtbl
@@ -107,6 +113,42 @@ struct MAG_IDCompositionDevice
   CONST_VTBL struct MAG_IDCompositionDeviceVtbl* lpVtbl;
 };
 
+typedef struct MAG_IDCompositionDesktopDeviceVtbl
+{
+  BEGIN_INTERFACE
+  HRESULT (STDMETHODCALLTYPE* QueryInterface)(MAG_IDCompositionDesktopDevice* This, REFIID riid, void** ppvObject);
+  ULONG (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionDesktopDevice* This);
+  ULONG (STDMETHODCALLTYPE* Release)(MAG_IDCompositionDesktopDevice* This);
+  HRESULT (STDMETHODCALLTYPE* Commit)(MAG_IDCompositionDesktopDevice* This);
+  HRESULT (STDMETHODCALLTYPE* WaitForCommitCompletion)(MAG_IDCompositionDesktopDevice* This);
+  HRESULT (STDMETHODCALLTYPE* GetFrameStatistics)(MAG_IDCompositionDesktopDevice* This, void* statistics);
+  HRESULT (STDMETHODCALLTYPE* CreateVisual)(MAG_IDCompositionDesktopDevice* This, void** visual);
+  HRESULT (STDMETHODCALLTYPE* CreateSurfaceFactory)(MAG_IDCompositionDesktopDevice* This, IUnknown* renderingDevice, void** surfaceFactory);
+  HRESULT (STDMETHODCALLTYPE* CreateSurface)(MAG_IDCompositionDesktopDevice* This, UINT width, UINT height, DXGI_FORMAT pixelFormat, DXGI_ALPHA_MODE alphaMode, void** surface);
+  HRESULT (STDMETHODCALLTYPE* CreateVirtualSurface)(MAG_IDCompositionDesktopDevice* This, UINT initialWidth, UINT initialHeight, DXGI_FORMAT pixelFormat, DXGI_ALPHA_MODE alphaMode, void** virtualSurface);
+  HRESULT (STDMETHODCALLTYPE* CreateTranslateTransform)(MAG_IDCompositionDesktopDevice* This, void** translateTransform);
+  HRESULT (STDMETHODCALLTYPE* CreateScaleTransform)(MAG_IDCompositionDesktopDevice* This, void** scaleTransform);
+  HRESULT (STDMETHODCALLTYPE* CreateRotateTransform)(MAG_IDCompositionDesktopDevice* This, void** rotateTransform);
+  HRESULT (STDMETHODCALLTYPE* CreateSkewTransform)(MAG_IDCompositionDesktopDevice* This, void** skewTransform);
+  HRESULT (STDMETHODCALLTYPE* CreateMatrixTransform)(MAG_IDCompositionDesktopDevice* This, void** matrixTransform);
+  HRESULT (STDMETHODCALLTYPE* CreateTransformGroup)(MAG_IDCompositionDesktopDevice* This, void** transforms, UINT elements, void** transformGroup);
+  HRESULT (STDMETHODCALLTYPE* CreateTranslateTransform3D)(MAG_IDCompositionDesktopDevice* This, void** translateTransform3D);
+  HRESULT (STDMETHODCALLTYPE* CreateScaleTransform3D)(MAG_IDCompositionDesktopDevice* This, void** scaleTransform3D);
+  HRESULT (STDMETHODCALLTYPE* CreateRotateTransform3D)(MAG_IDCompositionDesktopDevice* This, void** rotateTransform3D);
+  HRESULT (STDMETHODCALLTYPE* CreateMatrixTransform3D)(MAG_IDCompositionDesktopDevice* This, void** matrixTransform3D);
+  HRESULT (STDMETHODCALLTYPE* CreateTransform3DGroup)(MAG_IDCompositionDesktopDevice* This, void** transforms3D, UINT elements, void** transform3DGroup);
+  HRESULT (STDMETHODCALLTYPE* CreateEffectGroup)(MAG_IDCompositionDesktopDevice* This, void** effectGroup);
+  HRESULT (STDMETHODCALLTYPE* CreateRectangleClip)(MAG_IDCompositionDesktopDevice* This, void** clip);
+  HRESULT (STDMETHODCALLTYPE* CreateAnimation)(MAG_IDCompositionDesktopDevice* This, void** animation);
+  HRESULT (STDMETHODCALLTYPE* CreateTargetForHwnd)(MAG_IDCompositionDesktopDevice* This, HWND hwnd, BOOL topmost, MAG_IDCompositionTarget** target);
+  END_INTERFACE
+} MAG_IDCompositionDesktopDeviceVtbl;
+
+struct MAG_IDCompositionDesktopDevice
+{
+  CONST_VTBL struct MAG_IDCompositionDesktopDeviceVtbl* lpVtbl;
+};
+
 typedef struct MAG_IDCompositionTargetVtbl
 {
   BEGIN_INTERFACE
@@ -123,6 +165,7 @@ struct MAG_IDCompositionTarget
 };
 
 typedef HRESULT (WINAPI* PFN_DCOMPOSITIONCREATEDEVICE)(IDXGIDevice* dxgiDevice, REFIID iid, void** dcompositionDevice);
+typedef HRESULT (WINAPI* PFN_DCOMPOSITIONCREATEDEVICE3)(IUnknown* renderingDevice, REFIID iid, void** dcompositionDevice);
 typedef HRESULT (WINAPI* PFN_DWMPCREATESHAREDDESKTOPVISUAL)(HWND hwndDestination, VOID* pDCompDevice, VOID** ppVisual, PHTHUMBNAIL phThumbnailId);
 typedef HRESULT (WINAPI* PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize);
 typedef HRESULT (WINAPI* PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)(HTHUMBNAIL hThumbnailId, HWND* phwndsInclude, DWORD chwndsInclude, HWND* phwndsExclude, DWORD chwndsExclude, RECT* prcSource, SIZE* pDestinationSize, DWORD dwFlags);
@@ -193,16 +236,14 @@ BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture);
 BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_wgcCaptureScreen(HWND hWnd);
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
-BOOL CALLBACK render_magImageScalingCallback(HWND hwnd, void* srcdata, MAGIMAGEHEADER srcheader, void* destdata, MAGIMAGEHEADER destheader, RECT unclipped, RECT clipped, HRGN dirty);
-void render_magDeleteResources(HWND hWnd);
-BOOL render_magEnsureResources(HWND hWnd);
-BOOL render_magSetTransform(HWND hwndMag, const RECT* lprcSource, LONG dstWidth, LONG dstHeight);
-void render_magCaptureScreen(HWND hWnd);
 void render_dwmThumbnailDeleteResources(HWND hWnd);
 BOOL render_dwmThumbnailEnsureResources(HWND hWnd);
 void render_dwmThumbnailCaptureScreen(HWND hWnd);
 BOOL render_dwmPrivateIsMultiWindowBuild(void);
+LRESULT CALLBACK render_dwmPrivateHostWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+BOOL render_dwmPrivateRegisterHostClass(void);
 void render_dwmPrivateSetExcludedFromLivePreview(HWND hWnd, BOOL fExcluded);
+BOOL render_dwmPrivateUpdateHostWindow(HWND hWnd);
 void render_dwmPrivateDeleteResources(HWND hWnd);
 BOOL render_dwmPrivateEnsureResources(HWND hWnd);
 void render_dwmPrivateCaptureScreen(HWND hWnd);
@@ -1178,206 +1219,6 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
     SetRect(lprcSource, srcX, srcY, srcX + srcW, srcY + srcH);
 }
 
-BOOL CALLBACK render_magImageScalingCallback(HWND hwnd, void* srcdata, MAGIMAGEHEADER srcheader, void* destdata, MAGIMAGEHEADER destheader, RECT unclipped, RECT clipped, HRGN dirty)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hwnd, GWLP_USERDATA);
-    RECT rcDst;
-    UINT y;
-
-    UNREFERENCED_PARAMETER(unclipped);
-    UNREFERENCED_PARAMETER(clipped);
-    UNREFERENCED_PARAMETER(dirty);
-
-    if (!lpsd || !srcdata || !lpsd->glScreenData || !srcheader.width || !srcheader.height || !srcheader.stride)
-    {
-      return FALSE;
-    }
-
-    SetRect(&rcDst, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
-    ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
-    render_dxgiCopyMappedPixelsToRect(
-      lpsd,
-      (const BYTE*)srcdata,
-      srcheader.width,
-      srcheader.height,
-      srcheader.stride,
-      &rcDst);
-
-    if (destdata && destheader.width && destheader.height && destheader.stride)
-    {
-      for (y = 0; y < destheader.height; ++y)
-      {
-        const UINT srcY = min((UINT)(((ULONGLONG)y * srcheader.height) / destheader.height), srcheader.height - 1);
-        const BYTE* srcRow = ((const BYTE*)srcdata) + (srcY * srcheader.stride);
-        BYTE* dstRow = ((BYTE*)destdata) + (y * destheader.stride);
-        UINT x;
-
-        for (x = 0; x < destheader.width; ++x)
-        {
-          const UINT srcX = min((UINT)(((ULONGLONG)x * srcheader.width) / destheader.width), srcheader.width - 1);
-          CopyMemory(dstRow + (x * CHANNELS), srcRow + (srcX * CHANNELS), CHANNELS);
-        }
-      }
-    }
-
-    lpsd->magCapture.fCallbackCaptured = TRUE;
-    return TRUE;
-}
-
-void render_magDeleteResources(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
-    if (lpsd->magCapture.hwndMag)
-    {
-      MagSetImageScalingCallback(lpsd->magCapture.hwndMag, NULL);
-      DestroyWindow(lpsd->magCapture.hwndMag);
-    }
-
-    if (lpsd->magCapture.hwndHost)
-    {
-      DestroyWindow(lpsd->magCapture.hwndHost);
-    }
-
-    ZeroMemory(&lpsd->magCapture, sizeof(lpsd->magCapture));
-
-    if (lpsd->fMagInitialized)
-    {
-      MagUninitialize();
-      lpsd->fMagInitialized = FALSE;
-    }
-}
-
-BOOL render_magEnsureResources(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    const UINT width = (UINT)lpsd->bi.biWidth;
-    const UINT height = (UINT)lpsd->bi.biHeight;
-    HWND excluded[3];
-    int excludedCount = 0;
-
-    if (lpsd->magCapture.hwndMag &&
-        lpsd->magCapture.width == width &&
-        lpsd->magCapture.height == height)
-    {
-      return TRUE;
-    }
-
-    render_magDeleteResources(hWnd);
-
-    if (!lpsd->fMagInitialized)
-    {
-      if (!MagInitialize())
-      {
-        return FALSE;
-      }
-
-      lpsd->fMagInitialized = TRUE;
-    }
-
-    lpsd->magCapture.hwndHost = CreateWindowEx(
-      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
-      TEXT("STATIC"),
-      TEXT("magCaptureHost"),
-      WS_POPUP,
-      GetSystemMetrics(SM_XVIRTUALSCREEN),
-      GetSystemMetrics(SM_YVIRTUALSCREEN),
-      (int)width,
-      (int)height,
-      NULL,
-      NULL,
-      GetModuleHandle(NULL),
-      NULL);
-
-    if (!lpsd->magCapture.hwndHost)
-    {
-      render_magDeleteResources(hWnd);
-      return FALSE;
-    }
-
-    SetLayeredWindowAttributes(lpsd->magCapture.hwndHost, 0, 1, LWA_ALPHA);
-
-    lpsd->magCapture.hwndMag = CreateWindow(
-      WC_MAGNIFIER,
-      TEXT("magCapture"),
-      WS_CHILD | WS_VISIBLE,
-      0,
-      0,
-      (int)width,
-      (int)height,
-      lpsd->magCapture.hwndHost,
-      NULL,
-      GetModuleHandle(NULL),
-      NULL);
-
-    if (!lpsd->magCapture.hwndMag)
-    {
-      render_magDeleteResources(hWnd);
-      return FALSE;
-    }
-
-    SetWindowLongPtr(lpsd->magCapture.hwndMag, GWLP_USERDATA, (LONG_PTR)lpsd);
-
-    excluded[excludedCount++] = hWnd;
-    excluded[excludedCount++] = lpsd->magCapture.hwndHost;
-    excluded[excludedCount++] = lpsd->magCapture.hwndMag;
-    MagSetWindowFilterList(lpsd->magCapture.hwndMag, MW_FILTERMODE_EXCLUDE, excludedCount, excluded);
-
-    if (!MagSetImageScalingCallback(lpsd->magCapture.hwndMag, render_magImageScalingCallback))
-    {
-      render_magDeleteResources(hWnd);
-      return FALSE;
-    }
-
-    ShowWindow(lpsd->magCapture.hwndHost, SW_SHOWNOACTIVATE);
-    lpsd->magCapture.width = width;
-    lpsd->magCapture.height = height;
-    lpsd->magCapture.fInitialized = TRUE;
-    return TRUE;
-}
-
-BOOL render_magSetTransform(HWND hwndMag, const RECT* lprcSource, LONG dstWidth, LONG dstHeight)
-{
-    MAGTRANSFORM transform = { 0 };
-    const LONG srcWidth = RECTWIDTH((*lprcSource));
-    const LONG srcHeight = RECTHEIGHT((*lprcSource));
-
-    if (srcWidth < 1 || srcHeight < 1)
-    {
-      return FALSE;
-    }
-
-    transform.v[0][0] = (FLOAT)dstWidth / (FLOAT)srcWidth;
-    transform.v[1][1] = (FLOAT)dstHeight / (FLOAT)srcHeight;
-    transform.v[2][2] = 1.0f;
-    return MagSetWindowTransform(hwndMag, &transform);
-}
-
-void render_magCaptureScreen(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    RECT rcSource;
-
-    render_computeSourceRect(hWnd, &rcSource);
-    if (IsRectEmpty(&rcSource) ||
-        !render_magEnsureResources(hWnd) ||
-        !render_magSetTransform(lpsd->magCapture.hwndMag, &rcSource, lpsd->bi.biWidth, lpsd->bi.biHeight))
-    {
-      render_gdiCaptureScreen(hWnd);
-      return;
-    }
-
-    lpsd->magCapture.fCallbackCaptured = FALSE;
-    MagSetWindowSource(lpsd->magCapture.hwndMag, rcSource);
-    InvalidateRect(lpsd->magCapture.hwndMag, NULL, TRUE);
-    UpdateWindow(lpsd->magCapture.hwndMag);
-
-    if (!lpsd->magCapture.fCallbackCaptured)
-    {
-      render_gdiCaptureScreen(hWnd);
-    }
-}
-
 void render_dwmThumbnailDeleteResources(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -1480,9 +1321,49 @@ BOOL render_dwmPrivateIsMultiWindowBuild(void)
 #endif
 }
 
+LRESULT CALLBACK render_dwmPrivateHostWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_NCHITTEST:
+      return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+      return MA_NOACTIVATE;
+    case WM_ERASEBKGND:
+      return 1;
+    default:
+      return DefWindowProc(hwnd, message, wParam, lParam);
+    }
+}
+
+BOOL render_dwmPrivateRegisterHostClass(void)
+{
+    static BOOL fRegistered = FALSE;
+    WNDCLASS wc = { 0 };
+
+    if (fRegistered)
+    {
+      return TRUE;
+    }
+
+    wc.lpfnWndProc = render_dwmPrivateHostWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hbrBackground = GetStockBrush(BLACK_BRUSH);
+    wc.lpszClassName = TEXT("magDwmPrivateHostClass");
+
+    if (!RegisterClass(&wc) && ERROR_CLASS_ALREADY_EXISTS != GetLastError())
+    {
+      return FALSE;
+    }
+
+    fRegistered = TRUE;
+    return TRUE;
+}
+
 void render_dwmPrivateSetExcludedFromLivePreview(HWND hWnd, BOOL fExcluded)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDWMPRIVATEVISUALCAPTURE lpCapture;
     PFN_SETWINDOWCOMPOSITIONATTRIBUTE pSetWindowCompositionAttribute;
     MAG_WINDOWCOMPOSITIONATTRIBDATA data = { 0 };
     BOOL fEnable = fExcluded;
@@ -1492,11 +1373,35 @@ void render_dwmPrivateSetExcludedFromLivePreview(HWND hWnd, BOOL fExcluded)
       return;
     }
 
+    lpCapture = &lpsd->dwmPrivate;
     pSetWindowCompositionAttribute = (PFN_SETWINDOWCOMPOSITIONATTRIBUTE)lpsd->dwmPrivate.pSetWindowCompositionAttribute;
     data.Attrib = MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW;
     data.pvData = &fEnable;
     data.cbData = sizeof(fEnable);
-    pSetWindowCompositionAttribute(hWnd, &data);
+    pSetWindowCompositionAttribute(lpCapture->hwndHost ? lpCapture->hwndHost : hWnd, &data);
+}
+
+BOOL render_dwmPrivateUpdateHostWindow(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    POINT pt = { 0, 0 };
+    RECT rc;
+
+    if (!lpsd->dwmPrivate.hwndHost ||
+        !GetClientRect(hWnd, &rc) ||
+        !ClientToScreen(hWnd, &pt))
+    {
+      return FALSE;
+    }
+
+    return SetWindowPos(
+      lpsd->dwmPrivate.hwndHost,
+      HWND_TOPMOST,
+      pt.x,
+      pt.y,
+      RECTWIDTH(rc),
+      RECTHEIGHT(rc),
+      SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void render_dwmPrivateDeleteResources(HWND hWnd)
@@ -1531,6 +1436,11 @@ void render_dwmPrivateDeleteResources(HWND hWnd)
     SAFERELEASE(lpCapture->dxgiDevice);
     SAFERELEASE(lpCapture->d3dDevice);
 
+    if (lpCapture->hwndHost)
+    {
+      DestroyWindow(lpCapture->hwndHost);
+    }
+
     if (lpCapture->hUser32)
     {
       FreeLibrary(lpCapture->hUser32);
@@ -1553,7 +1463,7 @@ BOOL render_dwmPrivateEnsureResources(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
-    PFN_DCOMPOSITIONCREATEDEVICE pDCompositionCreateDevice;
+    PFN_DCOMPOSITIONCREATEDEVICE3 pDCompositionCreateDevice3;
     PFN_DWMPCREATESHAREDDESKTOPVISUAL pCreateSharedVisual;
     D3D_FEATURE_LEVEL featureLevel;
     HRESULT hr;
@@ -1580,6 +1490,7 @@ BOOL render_dwmPrivateEnsureResources(HWND hWnd)
     }
 
     lpCapture->pDCompositionCreateDevice = GetProcAddress(lpCapture->hDComp, "DCompositionCreateDevice");
+    lpCapture->pDCompositionCreateDevice3 = GetProcAddress(lpCapture->hDComp, "DCompositionCreateDevice3");
     lpCapture->pCreateSharedVisual = GetProcAddress(lpCapture->hDwmApi, MAKEINTRESOURCEA(DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL));
     lpCapture->pUpdateSharedVisual = GetProcAddress(lpCapture->hDwmApi, MAKEINTRESOURCEA(DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL));
 
@@ -1588,9 +1499,36 @@ BOOL render_dwmPrivateEnsureResources(HWND hWnd)
       lpCapture->pSetWindowCompositionAttribute = GetProcAddress(lpCapture->hUser32, "SetWindowCompositionAttribute");
     }
 
-    if (!lpCapture->pDCompositionCreateDevice ||
+    if (!lpCapture->pDCompositionCreateDevice3 ||
         !lpCapture->pCreateSharedVisual ||
         !lpCapture->pUpdateSharedVisual)
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    if (!render_dwmPrivateRegisterHostClass())
+    {
+      render_dwmPrivateDeleteResources(hWnd);
+      return FALSE;
+    }
+
+    lpCapture->hwndHost = CreateWindowEx(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+      TEXT("magDwmPrivateHostClass"),
+      TEXT("magDwmPrivateHost"),
+      WS_POPUP,
+      0,
+      0,
+      1,
+      1,
+      hWnd,
+      NULL,
+      GetModuleHandle(NULL),
+      NULL);
+
+    if (!lpCapture->hwndHost ||
+        !render_dwmPrivateUpdateHostWindow(hWnd))
     {
       render_dwmPrivateDeleteResources(hWnd);
       return FALSE;
@@ -1630,23 +1568,27 @@ BOOL render_dwmPrivateEnsureResources(HWND hWnd)
       hr = ID3D11Device_QueryInterface(lpCapture->d3dDevice, &IID_IDXGIDevice, (void**)&lpCapture->dxgiDevice);
     }
 
-    pDCompositionCreateDevice = (PFN_DCOMPOSITIONCREATEDEVICE)lpCapture->pDCompositionCreateDevice;
+    pDCompositionCreateDevice3 = (PFN_DCOMPOSITIONCREATEDEVICE3)lpCapture->pDCompositionCreateDevice3;
     if (SUCCEEDED(hr))
     {
-      hr = pDCompositionCreateDevice(lpCapture->dxgiDevice, &IID_MAG_IDCompositionDevice, (void**)&lpCapture->dcompDevice);
+      hr = pDCompositionCreateDevice3((IUnknown*)lpCapture->dxgiDevice, &IID_MAG_IDCompositionDesktopDevice, (void**)&lpCapture->dcompDevice);
+      if (SUCCEEDED(hr))
+      {
+        lpCapture->fDesktopDevice = TRUE;
+      }
     }
 
     pCreateSharedVisual = (PFN_DWMPCREATESHAREDDESKTOPVISUAL)lpCapture->pCreateSharedVisual;
     if (SUCCEEDED(hr))
     {
-      hr = pCreateSharedVisual(hWnd, lpCapture->dcompDevice, (void**)&lpCapture->dcompVisual, &lpCapture->hThumbnail);
+      hr = pCreateSharedVisual(lpCapture->hwndHost, lpCapture->dcompDevice, (void**)&lpCapture->dcompVisual, &lpCapture->hThumbnail);
     }
 
     if (SUCCEEDED(hr))
     {
-      hr = ((MAG_IDCompositionDevice*)lpCapture->dcompDevice)->lpVtbl->CreateTargetForHwnd(
-        (MAG_IDCompositionDevice*)lpCapture->dcompDevice,
-        hWnd,
+      hr = ((MAG_IDCompositionDesktopDevice*)lpCapture->dcompDevice)->lpVtbl->CreateTargetForHwnd(
+        (MAG_IDCompositionDesktopDevice*)lpCapture->dcompDevice,
+        lpCapture->hwndHost,
         FALSE,
         (MAG_IDCompositionTarget**)&lpCapture->dcompTarget);
     }
@@ -1680,11 +1622,20 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
     LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
     RECT rcSource;
     SIZE destinationSize;
-    HWND exclude[1];
+    HWND exclude[2];
+    DWORD excludeCount = 0;
     HRESULT hr;
 
     if (!render_dwmPrivateEnsureResources(hWnd))
     {
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
+      return;
+    }
+
+    if (!render_dwmPrivateUpdateHostWindow(hWnd))
+    {
+      render_dwmPrivateDeleteResources(hWnd);
       render_gdiCaptureScreen(hWnd);
       render_wglRender(hWnd);
       return;
@@ -1698,21 +1649,22 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
 
     destinationSize.cx = lpsd->bi.biWidth;
     destinationSize.cy = lpsd->bi.biHeight;
-    exclude[0] = hWnd;
+    exclude[excludeCount++] = hWnd;
+    exclude[excludeCount++] = lpCapture->hwndHost;
 
     if (lpCapture->fUseMultiWindow)
     {
       PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL pUpdate =
         (PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)lpCapture->pUpdateSharedVisual;
 
-      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, ARRAYSIZE(exclude), &rcSource, &destinationSize, 1);
+      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, excludeCount, &rcSource, &destinationSize, 1);
     }
     else
     {
       PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL pUpdate =
         (PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)lpCapture->pUpdateSharedVisual;
 
-      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, ARRAYSIZE(exclude), &rcSource, &destinationSize);
+      hr = pUpdate(lpCapture->hThumbnail, NULL, 0, exclude, excludeCount, &rcSource, &destinationSize);
     }
 
     if (FAILED(hr))
@@ -2303,7 +2255,6 @@ void renderCleanup(HWND hWnd)
 
     render_dwmPrivateDeleteResources(hWnd);
     render_dwmThumbnailDeleteResources(hWnd);
-    render_magDeleteResources(hWnd);
     render_wgcDeleteResources(hWnd);
     render_dxgiDeleteResources(hWnd);
 
@@ -2328,36 +2279,25 @@ void renderRender(HWND hWnd)
     {
     case CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE:
       render_dxgiDeleteResources(hWnd);
-      render_magDeleteResources(hWnd);
       render_dwmThumbnailDeleteResources(hWnd);
       render_dwmPrivateDeleteResources(hWnd);
       render_wgcCaptureScreen(hWnd);
       break;
     case CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
       render_wgcDeleteResources(hWnd);
-      render_magDeleteResources(hWnd);
       render_dwmThumbnailDeleteResources(hWnd);
       render_dwmPrivateDeleteResources(hWnd);
       render_dxgiCaptureScreen(hWnd);
       break;
-    case CAPTURE_API_MAGNIFICATION:
-      render_wgcDeleteResources(hWnd);
-      render_dxgiDeleteResources(hWnd);
-      render_dwmThumbnailDeleteResources(hWnd);
-      render_dwmPrivateDeleteResources(hWnd);
-      render_magCaptureScreen(hWnd);
-      break;
     case CAPTURE_API_DWM_THUMBNAIL:
       render_wgcDeleteResources(hWnd);
       render_dxgiDeleteResources(hWnd);
-      render_magDeleteResources(hWnd);
       render_dwmPrivateDeleteResources(hWnd);
       render_dwmThumbnailCaptureScreen(hWnd);
       return;
     case CAPTURE_API_DWM_PRIVATE_VISUAL:
       render_wgcDeleteResources(hWnd);
       render_dxgiDeleteResources(hWnd);
-      render_magDeleteResources(hWnd);
       render_dwmThumbnailDeleteResources(hWnd);
       render_dwmPrivateCaptureScreen(hWnd);
       return;
@@ -2365,7 +2305,6 @@ void renderRender(HWND hWnd)
     default:
       render_wgcDeleteResources(hWnd);
       render_dxgiDeleteResources(hWnd);
-      render_magDeleteResources(hWnd);
       render_dwmThumbnailDeleteResources(hWnd);
       render_dwmPrivateDeleteResources(hWnd);
       render_gdiCaptureScreen(hWnd);

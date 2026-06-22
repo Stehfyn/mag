@@ -1,42 +1,28 @@
-#include "framework.h"
+#include "mag.h"
 
-typedef long NTSTATUS;
+#define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM
 
-NTSYSCALLAPI
-NTSTATUS
-NTAPI
-NtDelayExecution(
-    _In_ BOOLEAN Alertable,
-    _In_ PLARGE_INTEGER DelayInterval
-    );
-
-NTSYSCALLAPI
-NTSTATUS
-NTAPI
-NtYieldExecution(
-    VOID
-    );
-
-#define MILLISECONDS_FROM_100NANOSECONDS(durationNanoS) ((durationNanoS) / (1000.0 * 10.0))
-#define MILLISECONDS_TO_100NANOSECONDS(durationMs)      ((durationMs) * 1000 * 10)
-
-static
-VOID PFORCEINLINE WINAPI 
-TimerAPCProc(
-    LPVOID lpArg,               // Data value
-    DWORD  dwTimerLowValue,     // Timer low value
-    DWORD  dwTimerHighValue)    // Timer high value
-
+BOOL main_PumpMessages(HWND hWnd, int* lpExitCode)
 {
-    HWND hwnd;
+    MSG msg;
 
-    hwnd = lpArg;
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+    {
+      if (WM_QUIT == msg.message)
+      {
+        if (lpExitCode)
+        {
+          *lpExitCode = (int)msg.wParam;
+        }
 
-    mag_OnTimer(hwnd, 0);
-    NtYieldExecution();
+        return FALSE;
+      }
 
-    UNREFERENCED_PARAMETER(dwTimerLowValue);
-    UNREFERENCED_PARAMETER(dwTimerHighValue);
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+
+    return IsWindow(hWnd);
 }
 
 int 
@@ -44,39 +30,51 @@ WINAPI
 _tWinMain(
   _In_ HINSTANCE hInstance,
   _In_opt_ HINSTANCE hPrevInstance,
-  _In_ LPSTR lpCmdLine,
+  _In_ LPTSTR lpCmdLine,
   _In_ int nShowCmd)
 {
-    MSG msg;
-    HANDLE hTimer;
+    HWND hWnd;
+    int exitCode = 0;
+    ULONGLONG ullNextRenderTime;
 
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    if (!magInitInstance(hInstance, nShowCmd))
+    hWnd = magInitInstance(hInstance, nShowCmd);
+    if (!hWnd)
     {
       return FALSE;
     }
 
-    if (hTimer = CreateWaitableTimer(NULL, FALSE, NULL))
+    ullNextRenderTime = GetTickCount64();
+    while (main_PumpMessages(hWnd, &exitCode))
     {
-      LARGE_INTEGER liDueTime = { 0 };
-      GUITHREADINFO gti = { sizeof(gti) };
+      DWORD dwTimeout;
+      DWORD dwWait;
+      ULONGLONG ullNow = GetTickCount64();
 
-      if (GetGUIThreadInfo(GetCurrentThreadId(), &gti) &&
-          SetWaitableTimer(hTimer, &liDueTime, USER_TIMER_MINIMUM, TimerAPCProc, gti.hwndActive, FALSE))
+      if (ullNow >= ullNextRenderTime)
       {
-        LARGE_INTEGER liPumpTime;
-
-        liPumpTime.QuadPart = -MILLISECONDS_TO_100NANOSECONDS(7.0);
-
-        while (PumpMessageQueue(gti.hwndActive))
+        if (IsWindow(hWnd))
         {
-          GetInputState();
-          NtDelayExecution(TRUE, &liPumpTime);
+          mag_OnTimer(hWnd, 0);
+          ullNextRenderTime = ullNow + MAIN_RENDER_INTERVAL_MS;
         }
+        else
+        {
+          break;
+        }
+      }
+
+      ullNow = GetTickCount64();
+      dwTimeout = (ullNow >= ullNextRenderTime) ? 0 : (DWORD)(ullNextRenderTime - ullNow);
+      dwWait = MsgWaitForMultipleObjects(0, NULL, FALSE, dwTimeout, QS_ALLINPUT);
+
+      if (WAIT_FAILED == dwWait)
+      {
+        break;
       }
     }
 
-    return 0;
+    return exitCode;
 }

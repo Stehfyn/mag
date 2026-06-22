@@ -40,6 +40,7 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
 void mag_OnDestroy(HWND hWnd);
+void mag_SetTaskbarIcon(HWND hWnd);
 void mag_OnActivate(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized);
 void mag_OnPaint(HWND hWnd);
 UINT mag_OnEraseBkgnd(HWND hWnd, HDC hDC);
@@ -72,7 +73,6 @@ static const SETTINGSOPTION g_captureApiOptions[] =
   { CAPTURE_API_GDI_BITBLT, _T("GDI BitBlt"), TRUE },
   { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, _T("DXGI Desktop Duplication"), TRUE },
   { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, _T("Windows Graphics Capture"), TRUE },
-  { CAPTURE_API_MAGNIFICATION, _T("Magnification API"), TRUE },
   { CAPTURE_API_DWM_THUMBNAIL, _T("DWM Thumbnail"), TRUE },
   { CAPTURE_API_DWM_PRIVATE_VISUAL, _T("DWM Private Visual"), TRUE },
 };
@@ -284,6 +284,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
     SetCurrentProcessEfficiencyQoS();
+    mag_SetTaskbarIcon(hWnd);
 
     lpsd->graphicsApi = GRAPHICS_API_OPENGL;
     lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
@@ -295,6 +296,35 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     DwmEnableWindowComposition(hWnd, TRUE);
 
     return TRUE;
+}
+
+void mag_SetTaskbarIcon(HWND hWnd)
+{
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    HICON hIcon = (HICON)LoadImage(
+      hInstance,
+      MAKEINTRESOURCE(IDI_APPICON),
+      IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON),
+      GetSystemMetrics(SM_CYICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+    HICON hIconSm = (HICON)LoadImage(
+      hInstance,
+      MAKEINTRESOURCE(IDI_APPICON),
+      IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON),
+      GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+
+    if (hIcon)
+    {
+      SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+    }
+
+    if (hIconSm)
+    {
+      SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+    }
 }
 
 void mag_OnDestroy(HWND hWnd)
@@ -633,19 +663,31 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
     wcex.hInstance = hInstance;
-    //wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WINDOWSPROJECT1));
+    wcex.hIcon = (HICON)LoadImage(
+      hInstance,
+      MAKEINTRESOURCE(IDI_APPICON),
+      IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON),
+      GetSystemMetrics(SM_CYICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
     wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wcex.hbrBackground = GetStockBrush(BLACK_BRUSH);
     //wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
     wcex.lpszClassName = TEXT("magWindowClass");
     //wcex.lpszClassName  = szWindowClass;
-    //wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
+    wcex.hIconSm = (HICON)LoadImage(
+      hInstance,
+      MAKEINTRESOURCE(IDI_APPICON),
+      IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON),
+      GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
 
     return RegisterClassEx(&wcex);
 }
 
-BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
+HWND magInitInstance(HINSTANCE hInstance, int nCmdShow)
 {
     ATOM atm;
     HWND hWnd;
@@ -673,11 +715,11 @@ BOOL magInitInstance(HINSTANCE hInstance, int nCmdShow)
 
     if (!hWnd)
     {
-      return FALSE;
+      return NULL;
     }
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
     //SetWindowLongPtr(hWnd, GWL_EXSTYLE, (WS_EX_COMPOSITED|WS_EX_APPWINDOW) | GetWindowExStyle(hWnd));
-    return TRUE;
+    return hWnd;
 }

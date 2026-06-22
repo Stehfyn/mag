@@ -5,6 +5,7 @@
 #define IDR_MENU1                       101
 #define IDR_CHM                         102
 #define IDD_SETTINGS                    103
+#define IDI_APPICON                     104
 #define IDC_SETTINGS_GRAPHICS_API       1001
 #define IDC_SETTINGS_CAPTURE_API        1002
 #define IDC_SETTINGS_STATUS             1003
@@ -19,7 +20,7 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        104
+#define _APS_NEXT_RESOURCE_VALUE        105
 #define _APS_NEXT_COMMAND_VALUE         40010
 #define _APS_NEXT_CONTROL_VALUE         1004
 #define _APS_NEXT_SYMED_VALUE           101

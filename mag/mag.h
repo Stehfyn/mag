@@ -2,4 +2,5 @@
 
 #include "framework.h"
 
-BOOL magInitInstance(HINSTANCE, int);
+HWND magInitInstance(HINSTANCE, int);
+void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
