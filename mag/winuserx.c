@@ -12,7 +12,7 @@ BOOL SetWindowOwner(HWND hWnd, HWND hWndOwner)
 
     SetLastError(NO_ERROR);
 
-    offset = SetWindowLongPtr(hWnd, GWLP_HWNDPARENT, hWndOwner);
+    offset = SetWindowLongPtr(hWnd, GWLP_HWNDPARENT, (LONG_PTR)hWndOwner);
 
     return (0 == offset) && (NO_ERROR != GetLastError());
 }

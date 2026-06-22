@@ -9,6 +9,7 @@
 #define IDC_SETTINGS_GRAPHICS_API       1001
 #define IDC_SETTINGS_CAPTURE_API        1002
 #define IDC_SETTINGS_STATUS             1003
+#define IDC_SETTINGS_MOUSE_RELATIVE_ZOOM 1004
 #define ID_CONTEXTMENU_FOCUS            40005
 #define ID_CONTEXTMENU_HELP             40006
 #define ID_CONTEXTMENU_CLOSE            40007
@@ -22,7 +23,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        105
 #define _APS_NEXT_COMMAND_VALUE         40010
-#define _APS_NEXT_CONTROL_VALUE         1004
+#define _APS_NEXT_CONTROL_VALUE         1005
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

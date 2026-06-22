@@ -27,7 +27,7 @@ void help_Show(HWND hWnd)
             CloseHandle(hFile);
     }
 
-    SetWindowOwner(HtmlHelp(hWnd, s_szChmPath, HH_HELP_FINDER, NULL), GetDesktopWindow());
+    SetWindowOwner(HtmlHelp(hWnd, s_szChmPath, HH_HELP_FINDER, 0), GetDesktopWindow());
 }
 
 void help_Cleanup(void)

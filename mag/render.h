@@ -91,9 +91,12 @@ typedef struct SHAREDWGLDATA
 {
   BOOL             fTrackCursor;
   BOOL             fWinRtInitialized;
+  BOOL             fUseSourceOrigin;
+  BOOL             fMouseRelativeZoom;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
   POINT            pt;
+  POINT            ptSourceOrigin;
   RECT             rc;
   DISPLAYINFO      di;
   BITMAPINFOHEADER bi;
@@ -124,5 +127,5 @@ void renderResizeCapture(HWND hWnd);
 
 void renderRender(HWND hWnd);
 
-
+void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
 

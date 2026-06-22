@@ -219,6 +219,8 @@ BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPT
 BOOL render_dxgiEnsureStagingTexture(LPDXGIOUTPUTCAPTURE lpOutput, UINT width, UINT height);
 BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
 void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
+BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
+BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
 BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_dxgiCaptureScreen(HWND hWnd);
 void render_wgcCloseObject(IUnknown* object);
@@ -235,6 +237,7 @@ BOOL render_wgcEnsureStagingTexture(LPWGCMONITORCAPTURE lpCapture, UINT width, U
 BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture);
 BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_wgcCaptureScreen(HWND hWnd);
+void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource);
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
 void render_dwmThumbnailDeleteResources(HWND hWnd);
 BOOL render_dwmThumbnailEnsureResources(HWND hWnd);
@@ -619,6 +622,43 @@ void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UI
     }
 }
 
+BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst)
+{
+    const LONG sourceWidth = RECTWIDTH((*lprcSource));
+    const LONG sourceHeight = RECTHEIGHT((*lprcSource));
+
+    if (sourceWidth < 1 || sourceHeight < 1 || IsRectEmpty(lprcPart))
+    {
+      SetRectEmpty(lprcDst);
+      return FALSE;
+    }
+
+    lprcDst->left = MulDiv(lprcPart->left - lprcSource->left, lpsd->bi.biWidth, sourceWidth);
+    lprcDst->top = MulDiv(lprcPart->top - lprcSource->top, lpsd->bi.biHeight, sourceHeight);
+    lprcDst->right = MulDiv(lprcPart->right - lprcSource->left, lpsd->bi.biWidth, sourceWidth);
+    lprcDst->bottom = MulDiv(lprcPart->bottom - lprcSource->top, lpsd->bi.biHeight, sourceHeight);
+
+    lprcDst->left = CLAMP(lprcDst->left, 0, lpsd->bi.biWidth);
+    lprcDst->top = CLAMP(lprcDst->top, 0, lpsd->bi.biHeight);
+    lprcDst->right = CLAMP(lprcDst->right, 0, lpsd->bi.biWidth);
+    lprcDst->bottom = CLAMP(lprcDst->bottom, 0, lpsd->bi.biHeight);
+
+    if (IsRectEmpty(lprcDst))
+    {
+      return FALSE;
+    }
+
+    return TRUE;
+}
+
+BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource)
+{
+    return lprcSource->left != lprcClippedSource->left ||
+           lprcSource->top != lprcClippedSource->top ||
+           lprcSource->right != lprcClippedSource->right ||
+           lprcSource->bottom != lprcClippedSource->bottom;
+}
+
 BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection)
 {
     const UINT srcPartWidth = (UINT)RECTWIDTH((*lprcIntersection));
@@ -658,10 +698,11 @@ BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lp
       return FALSE;
     }
 
-    rcDst.left = MulDiv(lprcIntersection->left - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
-    rcDst.top = MulDiv(lprcIntersection->top - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
-    rcDst.right = MulDiv(lprcIntersection->right - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
-    rcDst.bottom = MulDiv(lprcIntersection->bottom - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+    if (!render_mapSourceRectToDestination(lpsd, lprcSource, lprcIntersection, &rcDst))
+    {
+      ID3D11DeviceContext_Unmap(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiStagingTexture, 0);
+      return TRUE;
+    }
 
     render_dxgiCopyMappedPixelsToRect(lpsd, (const BYTE*)mapped.pData, srcPartWidth, srcPartHeight, mapped.RowPitch, &rcDst);
     ID3D11DeviceContext_Unmap(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiStagingTexture, 0);
@@ -1140,10 +1181,11 @@ BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpC
       return FALSE;
     }
 
-    rcDst.left = MulDiv(lprcIntersection->left - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
-    rcDst.top = MulDiv(lprcIntersection->top - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
-    rcDst.right = MulDiv(lprcIntersection->right - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
-    rcDst.bottom = MulDiv(lprcIntersection->bottom - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+    if (!render_mapSourceRectToDestination(lpsd, lprcSource, lprcIntersection, &rcDst))
+    {
+      ID3D11DeviceContext_Unmap(lpCapture->d3dContext, (ID3D11Resource*)lpCapture->wgcStagingTexture, 0);
+      return TRUE;
+    }
 
     render_dxgiCopyMappedPixelsToRect(
       lpsd,
@@ -1157,7 +1199,7 @@ BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpC
     return TRUE;
 }
 
-void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
+void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const LONG cw = lpsd->bi.biWidth;
@@ -1167,6 +1209,7 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
     RECT rcVirtual = lpsd->di.rc;
     const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
     BOOL fCenterOnCursor;
+    BOOL fUseSourceOrigin;
     LONG srcW;
     LONG srcH;
     LONG srcX;
@@ -1175,6 +1218,7 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
     if (!ClientToScreen(hWnd, &tl))
     {
       SetRectEmpty(lprcSource);
+      SetRectEmpty(lprcClippedSource);
       return;
     }
 
@@ -1185,6 +1229,16 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
       center.y = tl.y + ch / 2;
     }
 
+    if (IsRectEmpty(&rcVirtual))
+    {
+      rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+      rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+      rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    }
+
+    fUseSourceOrigin = !fCenterOnCursor && lpsd->fUseSourceOrigin;
+
     if (m <= 1.0001f)
     {
       srcW = cw;
@@ -1192,6 +1246,10 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
       srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
       srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
       lpsd->pt = fCenterOnCursor ? center : tl;
+      if (!fCenterOnCursor)
+      {
+        lpsd->fUseSourceOrigin = FALSE;
+      }
     }
     else
     {
@@ -1201,22 +1259,32 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
       if (srcW < 1) srcW = 1;
       if (srcH < 1) srcH = 1;
 
-      srcX = center.x - srcW / 2;
-      srcY = center.y - srcH / 2;
+      if (fUseSourceOrigin)
+      {
+        srcX = lpsd->ptSourceOrigin.x;
+        srcY = lpsd->ptSourceOrigin.y;
+      }
+      else
+      {
+        srcX = center.x - srcW / 2;
+        srcY = center.y - srcH / 2;
+      }
+
       lpsd->pt = center;
     }
 
-    if (IsRectEmpty(&rcVirtual))
-    {
-      rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-      rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-      rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-      rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    }
-
-    srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
-    srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
     SetRect(lprcSource, srcX, srcY, srcX + srcW, srcY + srcH);
+    if (!IntersectRect(lprcClippedSource, lprcSource, &rcVirtual))
+    {
+      SetRectEmpty(lprcClippedSource);
+    }
+}
+
+void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
+{
+    RECT rcClippedSource;
+
+    render_computeSourceRects(hWnd, lprcSource, &rcClippedSource);
 }
 
 void render_dwmThumbnailDeleteResources(HWND hWnd)
@@ -1260,6 +1328,7 @@ void render_dwmThumbnailCaptureScreen(HWND hWnd)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DWM_THUMBNAIL_PROPERTIES props = { 0 };
     RECT rcSource;
+    RECT rcClippedSource;
     RECT rcVirtual = lpsd->di.rc;
 
     if (!render_dwmThumbnailEnsureResources(hWnd))
@@ -1269,9 +1338,12 @@ void render_dwmThumbnailCaptureScreen(HWND hWnd)
       return;
     }
 
-    render_computeSourceRect(hWnd, &rcSource);
-    if (IsRectEmpty(&rcSource))
+    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+    if (IsRectEmpty(&rcClippedSource) || render_sourceRectIsClipped(&rcSource, &rcClippedSource))
     {
+      render_dwmThumbnailDeleteResources(hWnd);
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
       return;
     }
 
@@ -1281,11 +1353,11 @@ void render_dwmThumbnailCaptureScreen(HWND hWnd)
       rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
     }
 
-    OffsetRect(&rcSource, -rcVirtual.left, -rcVirtual.top);
+    OffsetRect(&rcClippedSource, -rcVirtual.left, -rcVirtual.top);
 
     props.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
     SetRect(&props.rcDestination, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
-    props.rcSource = rcSource;
+    props.rcSource = rcClippedSource;
     props.opacity = 255;
     props.fVisible = TRUE;
     props.fSourceClientAreaOnly = FALSE;
@@ -1621,6 +1693,7 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPDWMPRIVATEVISUALCAPTURE lpCapture = &lpsd->dwmPrivate;
     RECT rcSource;
+    RECT rcClippedSource;
     SIZE destinationSize;
     HWND exclude[2];
     DWORD excludeCount = 0;
@@ -1641,9 +1714,12 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
       return;
     }
 
-    render_computeSourceRect(hWnd, &rcSource);
-    if (IsRectEmpty(&rcSource))
+    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+    if (IsRectEmpty(&rcClippedSource) || render_sourceRectIsClipped(&rcSource, &rcClippedSource))
     {
+      render_dwmPrivateDeleteResources(hWnd);
+      render_gdiCaptureScreen(hWnd);
+      render_wglRender(hWnd);
       return;
     }
 
@@ -1942,95 +2018,46 @@ void render_gdiCaptureScreen(HWND hWnd)
     {
       const LONG cw = lpsd->bi.biWidth;
       const LONG ch = lpsd->bi.biHeight;
-      POINT tl = { 0, 0 };
-      POINT center = { 0, 0 };
-      RECT rcSource = lpsd->di.rc;
-      const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
-      BOOL fCenterOnCursor;
+      RECT rcSource;
+      RECT rcClippedSource;
+      RECT rcDst;
 
-      if (!ClientToScreen(hWnd, &tl))
-      {
-        return;
-      }
-
-      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
-      if (!fCenterOnCursor)
-      {
-        center.x = tl.x + cw / 2;
-        center.y = tl.y + ch / 2;
-      }
-
-      if (IsRectEmpty(&rcSource))
-      {
-        rcSource.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        rcSource.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        rcSource.right = rcSource.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        rcSource.bottom = rcSource.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-      }
-
+      render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
       PatBlt(lpsd->hCaptureDC, 0, 0, cw, ch, BLACKNESS);
 
-      if (m <= 1.0001f)
+      if (!IsRectEmpty(&rcClippedSource) &&
+          render_mapSourceRectToDestination(lpsd, &rcSource, &rcClippedSource, &rcDst))
       {
-        LONG srcX = tl.x;
-        LONG srcY = tl.y;
-
-        if (fCenterOnCursor)
+        if (RECTWIDTH(rcDst) == RECTWIDTH(rcClippedSource) &&
+            RECTHEIGHT(rcDst) == RECTHEIGHT(rcClippedSource))
         {
-          srcX = center.x - cw / 2;
-          srcY = center.y - ch / 2;
+          BitBlt(
+            lpsd->hCaptureDC,
+            rcDst.left,
+            rcDst.top,
+            RECTWIDTH(rcDst),
+            RECTHEIGHT(rcDst),
+            lpsd->hDesktopDC,
+            rcClippedSource.left,
+            rcClippedSource.top,
+            SRCCOPY | CAPTUREBLT);
         }
-
-        if (fCenterOnCursor)
+        else
         {
-          srcX = render_clipSourceOrigin(srcX, cw, rcSource.left, rcSource.right);
-          srcY = render_clipSourceOrigin(srcY, ch, rcSource.top, rcSource.bottom);
+          SetStretchBltMode(lpsd->hCaptureDC, COLORONCOLOR);
+          StretchBlt(
+            lpsd->hCaptureDC,
+            rcDst.left,
+            rcDst.top,
+            RECTWIDTH(rcDst),
+            RECTHEIGHT(rcDst),
+            lpsd->hDesktopDC,
+            rcClippedSource.left,
+            rcClippedSource.top,
+            RECTWIDTH(rcClippedSource),
+            RECTHEIGHT(rcClippedSource),
+            SRCCOPY | CAPTUREBLT);
         }
-
-        lpsd->pt = fCenterOnCursor ? center : tl;
-        BitBlt(
-          lpsd->hCaptureDC,
-          0,
-          0,
-          cw,
-          ch,
-          lpsd->hDesktopDC,
-          srcX,
-          srcY,
-          SRCCOPY | CAPTUREBLT);
-      }
-      else
-      {
-        LONG srcW = (LONG)(cw / m);
-        LONG srcH = (LONG)(ch / m);
-        LONG srcX;
-        LONG srcY;
-
-        if (srcW < 1) srcW = 1;
-        if (srcH < 1) srcH = 1;
-
-        srcX = center.x - srcW / 2;
-        srcY = center.y - srcH / 2;
-        if (fCenterOnCursor)
-        {
-          srcX = render_clipSourceOrigin(srcX, srcW, rcSource.left, rcSource.right);
-          srcY = render_clipSourceOrigin(srcY, srcH, rcSource.top, rcSource.bottom);
-        }
-        lpsd->pt = center;
-
-        SetStretchBltMode(lpsd->hCaptureDC, COLORONCOLOR);
-        StretchBlt(
-          lpsd->hCaptureDC,
-          0,
-          0,
-          cw,
-          ch,
-          lpsd->hDesktopDC,
-          srcX,
-          srcY,
-          srcW,
-          srcH,
-          SRCCOPY | CAPTUREBLT);
       }
 
       GdiFlush();
@@ -2043,67 +2070,17 @@ void render_dxgiCaptureScreen(HWND hWnd)
 
     if (lpsd->glScreenData)
     {
-      const LONG cw = lpsd->bi.biWidth;
-      const LONG ch = lpsd->bi.biHeight;
-      POINT tl = { 0, 0 };
-      POINT center = { 0, 0 };
-      RECT rcVirtual = lpsd->di.rc;
       RECT rcSource;
-      const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
-      BOOL fCenterOnCursor;
-      LONG srcW;
-      LONG srcH;
-      LONG srcX;
-      LONG srcY;
+      RECT rcClippedSource;
       UINT i;
       BOOL fCapturedAny = FALSE;
 
-      if (!ClientToScreen(hWnd, &tl))
+      render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+      if (IsRectEmpty(&rcClippedSource))
       {
         return;
       }
-
-      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
-      if (!fCenterOnCursor)
-      {
-        center.x = tl.x + cw / 2;
-        center.y = tl.y + ch / 2;
-      }
-
-      if (m <= 1.0001f)
-      {
-        srcW = cw;
-        srcH = ch;
-        srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
-        srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
-        lpsd->pt = fCenterOnCursor ? center : tl;
-      }
-      else
-      {
-        srcW = (LONG)(cw / m);
-        srcH = (LONG)(ch / m);
-
-        if (srcW < 1) srcW = 1;
-        if (srcH < 1) srcH = 1;
-
-        srcX = center.x - srcW / 2;
-        srcY = center.y - srcH / 2;
-        lpsd->pt = center;
-      }
-
-      if (IsRectEmpty(&rcVirtual))
-      {
-        rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-      }
-
-      srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
-      srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
-      SetRect(&rcSource, srcX, srcY, srcX + srcW, srcY + srcH);
-
-      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
 
       for (i = 0; i < lpsd->di.numMonitors; ++i)
       {
@@ -2113,7 +2090,7 @@ void render_dxgiCaptureScreen(HWND hWnd)
         HMONITOR hMonitor;
         LPDXGIOUTPUTCAPTURE lpOutput = NULL;
 
-        if (!IntersectRect(&rcIntersection, &rcSource, &rcMonitor))
+        if (!IntersectRect(&rcIntersection, &rcClippedSource, &rcMonitor))
         {
           continue;
         }
@@ -2146,67 +2123,17 @@ void render_wgcCaptureScreen(HWND hWnd)
 
     if (lpsd->glScreenData)
     {
-      const LONG cw = lpsd->bi.biWidth;
-      const LONG ch = lpsd->bi.biHeight;
-      POINT tl = { 0, 0 };
-      POINT center = { 0, 0 };
-      RECT rcVirtual = lpsd->di.rc;
       RECT rcSource;
-      const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
-      BOOL fCenterOnCursor;
-      LONG srcW;
-      LONG srcH;
-      LONG srcX;
-      LONG srcY;
+      RECT rcClippedSource;
       UINT i;
       BOOL fCapturedAny = FALSE;
 
-      if (!ClientToScreen(hWnd, &tl))
+      render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+      if (IsRectEmpty(&rcClippedSource))
       {
         return;
       }
-
-      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
-      if (!fCenterOnCursor)
-      {
-        center.x = tl.x + cw / 2;
-        center.y = tl.y + ch / 2;
-      }
-
-      if (m <= 1.0001f)
-      {
-        srcW = cw;
-        srcH = ch;
-        srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
-        srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
-        lpsd->pt = fCenterOnCursor ? center : tl;
-      }
-      else
-      {
-        srcW = (LONG)(cw / m);
-        srcH = (LONG)(ch / m);
-
-        if (srcW < 1) srcW = 1;
-        if (srcH < 1) srcH = 1;
-
-        srcX = center.x - srcW / 2;
-        srcY = center.y - srcH / 2;
-        lpsd->pt = center;
-      }
-
-      if (IsRectEmpty(&rcVirtual))
-      {
-        rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-      }
-
-      srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
-      srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
-      SetRect(&rcSource, srcX, srcY, srcX + srcW, srcY + srcH);
-
-      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
 
       for (i = 0; i < lpsd->di.numMonitors; ++i)
       {
@@ -2216,7 +2143,7 @@ void render_wgcCaptureScreen(HWND hWnd)
         HMONITOR hMonitor;
         LPWGCMONITORCAPTURE lpCapture = NULL;
 
-        if (!IntersectRect(&rcIntersection, &rcSource, &rcMonitor))
+        if (!IntersectRect(&rcIntersection, &rcClippedSource, &rcMonitor))
         {
           continue;
         }
