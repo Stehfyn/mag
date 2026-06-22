@@ -242,9 +242,9 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
       if (lpsd->fTrackCursor)
       {
         DWORD dwExStyle = GetWindowExStyle(hWnd);
-        dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+        dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        dwExStyle |= WS_EX_LAYERED;
         SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
-        SetActiveWindow(GetDesktopWindow());
       }
       break;
     }
@@ -305,19 +305,10 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
     {
       if (lpsd->fTrackCursor)
       {
-        POINT pt;
         DWORD dwExStyle = GetWindowExStyle(hWnd);
-      
-        if (GetCursorPos(&pt))
-        {
-          pt.x -= RECTWIDTH(lpsd->rc) / 2;
-          pt.y -= RECTHEIGHT(lpsd->rc) / 2;
 
-          SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0,
-            SWP_NOSIZE| SWP_ASYNCWINDOWPOS);// | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
-        }
-
-        dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_LAYERED;// | WS_EX_COMPOSITED;
+        dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        dwExStyle |= WS_EX_LAYERED;// | WS_EX_COMPOSITED;
         SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
       }
 

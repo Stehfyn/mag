@@ -2,6 +2,7 @@
 
 #define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
 
+LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
 void render_wglInit(HWND hWnd);
 void render_wglInitPBuffer(HWND hWnd);
 void render_wglCreateResources(HWND hWnd);
@@ -13,6 +14,18 @@ void render_gdiCaptureScreen(HWND hWnd);
 void render_updateSurfaceInfo(HWND hWnd);
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd);
 void render_gdiDeleteCaptureBitmap(HWND hWnd);
+
+LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
+{
+    const LONG maxOrigin = clipMax - sourceExtent;
+
+    if (maxOrigin < clipMin)
+    {
+      return clipMin;
+    }
+
+    return CLAMP(origin, clipMin, maxOrigin);
+}
 
 void render_updateSurfaceInfo(HWND hWnd)
 {
@@ -361,18 +374,48 @@ void render_gdiCaptureScreen(HWND hWnd)
       const LONG cw = lpsd->bi.biWidth;
       const LONG ch = lpsd->bi.biHeight;
       POINT tl = { 0, 0 };
+      POINT center = { 0, 0 };
+      RECT rcSource = lpsd->di.rc;
       const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
+      BOOL fCenterOnCursor;
 
       if (!ClientToScreen(hWnd, &tl))
       {
         return;
       }
 
+      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
+      if (!fCenterOnCursor)
+      {
+        center.x = tl.x + cw / 2;
+        center.y = tl.y + ch / 2;
+      }
+
+      if (IsRectEmpty(&rcSource))
+      {
+        rcSource.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        rcSource.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        rcSource.right = rcSource.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        rcSource.bottom = rcSource.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+      }
+
       PatBlt(lpsd->hCaptureDC, 0, 0, cw, ch, BLACKNESS);
 
       if (m <= 1.0001f)
       {
-        lpsd->pt = tl;
+        LONG srcX = tl.x;
+        LONG srcY = tl.y;
+
+        if (fCenterOnCursor)
+        {
+          srcX = center.x - cw / 2;
+          srcY = center.y - ch / 2;
+        }
+
+        srcX = render_clipSourceOrigin(srcX, cw, rcSource.left, rcSource.right);
+        srcY = render_clipSourceOrigin(srcY, ch, rcSource.top, rcSource.bottom);
+
+        lpsd->pt = fCenterOnCursor ? center : tl;
         BitBlt(
           lpsd->hCaptureDC,
           0,
@@ -380,13 +423,12 @@ void render_gdiCaptureScreen(HWND hWnd)
           cw,
           ch,
           lpsd->hDesktopDC,
-          tl.x,
-          tl.y,
+          srcX,
+          srcY,
           SRCCOPY | CAPTUREBLT);
       }
       else
       {
-        const POINT center = { tl.x + cw / 2, tl.y + ch / 2 };
         LONG srcW = (LONG)(cw / m);
         LONG srcH = (LONG)(ch / m);
         LONG srcX;
@@ -397,6 +439,8 @@ void render_gdiCaptureScreen(HWND hWnd)
 
         srcX = center.x - srcW / 2;
         srcY = center.y - srcH / 2;
+        srcX = render_clipSourceOrigin(srcX, srcW, rcSource.left, rcSource.right);
+        srcY = render_clipSourceOrigin(srcY, srcH, rcSource.top, rcSource.bottom);
         lpsd->pt = center;
 
         SetStretchBltMode(lpsd->hCaptureDC, COLORONCOLOR);
