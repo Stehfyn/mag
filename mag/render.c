@@ -412,8 +412,11 @@ void render_gdiCaptureScreen(HWND hWnd)
           srcY = center.y - ch / 2;
         }
 
-        srcX = render_clipSourceOrigin(srcX, cw, rcSource.left, rcSource.right);
-        srcY = render_clipSourceOrigin(srcY, ch, rcSource.top, rcSource.bottom);
+        if (fCenterOnCursor)
+        {
+          srcX = render_clipSourceOrigin(srcX, cw, rcSource.left, rcSource.right);
+          srcY = render_clipSourceOrigin(srcY, ch, rcSource.top, rcSource.bottom);
+        }
 
         lpsd->pt = fCenterOnCursor ? center : tl;
         BitBlt(
@@ -439,8 +442,11 @@ void render_gdiCaptureScreen(HWND hWnd)
 
         srcX = center.x - srcW / 2;
         srcY = center.y - srcH / 2;
-        srcX = render_clipSourceOrigin(srcX, srcW, rcSource.left, rcSource.right);
-        srcY = render_clipSourceOrigin(srcY, srcH, rcSource.top, rcSource.bottom);
+        if (fCenterOnCursor)
+        {
+          srcX = render_clipSourceOrigin(srcX, srcW, rcSource.left, rcSource.right);
+          srcY = render_clipSourceOrigin(srcY, srcH, rcSource.top, rcSource.bottom);
+        }
         lpsd->pt = center;
 
         SetStretchBltMode(lpsd->hCaptureDC, COLORONCOLOR);
