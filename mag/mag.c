@@ -752,51 +752,11 @@ void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture)
 
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    RECT rcSourceOld;
-    RECT rcCapture;
-    BOOL fPreservePinnedCenter = FALSE;
-    DOUBLE anchorX = 0.0;
-    DOUBLE anchorY = 0.0;
-
     UNREFERENCED_PARAMETER(state);
     UNREFERENCED_PARAMETER(cx);
     UNREFERENCED_PARAMETER(cy);
 
-    if (lpsd &&
-        lpsd->fSourceOriginPinned &&
-        lpsd->fUseSourceOrigin &&
-        lpsd->fTexScaler > 1.0001f &&
-        lpsd->bi.biWidth > 0 &&
-        lpsd->bi.biHeight > 0)
-    {
-      render_computeSourceRect(hWnd, &rcSourceOld);
-      if (!IsRectEmpty(&rcSourceOld))
-      {
-        anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)RECTWIDTH(rcSourceOld) / 2.0);
-        anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)RECTHEIGHT(rcSourceOld) / 2.0);
-        fPreservePinnedCenter = TRUE;
-      }
-    }
-
     renderResizeCapture(hWnd);
-
-    if (fPreservePinnedCenter &&
-        lpsd->fTexScaler > 1.0001f &&
-        lpsd->bi.biWidth > 0 &&
-        lpsd->bi.biHeight > 0)
-    {
-      const LONG srcW = max(1, (LONG)(lpsd->bi.biWidth / lpsd->fTexScaler));
-      const LONG srcH = max(1, (LONG)(lpsd->bi.biHeight / lpsd->fTexScaler));
-      const LONG srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
-      const LONG srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
-
-      mag_GetCaptureRect(lpsd, &rcCapture);
-      lpsd->ptSourceOrigin.x = render_clipSourceOrigin(srcX, srcW, rcCapture.left, rcCapture.right);
-      lpsd->ptSourceOrigin.y = render_clipSourceOrigin(srcY, srcH, rcCapture.top, rcCapture.bottom);
-      lpsd->fUseSourceOrigin = TRUE;
-      lpsd->fSourceOriginPinned = TRUE;
-    }
 }
 
 void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu)
@@ -826,15 +786,55 @@ void mag_OnExitSizeMove(HWND hWnd)
 void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const BOOL fMoved = !(lpwndpos->flags & SWP_NOMOVE);
+    const BOOL fSized = !(lpwndpos->flags & SWP_NOSIZE);
+    RECT rcSourceOld;
+    RECT rcCapture;
+    BOOL fPreservePinnedCenter = FALSE;
+    DOUBLE anchorX = 0.0;
+    DOUBLE anchorY = 0.0;
+
+    if (lpsd &&
+        fSized &&
+        lpsd->fSourceOriginPinned &&
+        lpsd->fUseSourceOrigin &&
+        lpsd->fTexScaler > 1.0001f &&
+        lpsd->bi.biWidth > 0 &&
+        lpsd->bi.biHeight > 0)
+    {
+      render_computeSourceRect(hWnd, &rcSourceOld);
+      if (!IsRectEmpty(&rcSourceOld))
+      {
+        anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)RECTWIDTH(rcSourceOld) / 2.0);
+        anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)RECTHEIGHT(rcSourceOld) / 2.0);
+        fPreservePinnedCenter = TRUE;
+      }
+    }
 
     DefWindowProc(hWnd, WM_WINDOWPOSCHANGED, 0, (LPARAM)lpwndpos);
     
     if (lpsd &&
         lpsd->hDC &&
         lpsd->hCaptureDC &&
-        (!(lpwndpos->flags & SWP_NOMOVE) || !(lpwndpos->flags & SWP_NOSIZE)))
+        (fMoved || fSized))
     {
-      if (!lpsd->fSourceOriginPinned)
+      if (fPreservePinnedCenter &&
+          lpsd->fTexScaler > 1.0001f &&
+          lpsd->bi.biWidth > 0 &&
+          lpsd->bi.biHeight > 0)
+      {
+        const LONG srcW = max(1, (LONG)(lpsd->bi.biWidth / lpsd->fTexScaler));
+        const LONG srcH = max(1, (LONG)(lpsd->bi.biHeight / lpsd->fTexScaler));
+        const LONG srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
+        const LONG srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
+
+        mag_GetCaptureRect(lpsd, &rcCapture);
+        lpsd->ptSourceOrigin.x = render_clipSourceOrigin(srcX, srcW, rcCapture.left, rcCapture.right);
+        lpsd->ptSourceOrigin.y = render_clipSourceOrigin(srcY, srcH, rcCapture.top, rcCapture.bottom);
+        lpsd->fUseSourceOrigin = TRUE;
+        lpsd->fSourceOriginPinned = TRUE;
+      }
+      else if (!lpsd->fSourceOriginPinned)
       {
         lpsd->fUseSourceOrigin = FALSE;
       }
