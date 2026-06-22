@@ -2,6 +2,8 @@
 
 #include "framework.h"
 
+#include <d3d11.h>
+#include <dxgi1_2.h>
 #include <gl/GL.h>
 
 #define CHANNELS (4)
@@ -17,8 +19,25 @@ typedef enum GRAPHICSAPI
 typedef enum CAPTUREAPI
 {
   CAPTURE_API_GDI_BITBLT = 0,
+  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
+  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
+  CAPTURE_API_MAGNIFICATION,
   CAPTURE_API_COUNT
 } CAPTUREAPI;
+
+typedef struct DXGIOUTPUTCAPTURE
+{
+  ID3D11Device*             d3dDevice;
+  ID3D11DeviceContext*      d3dContext;
+  IDXGIOutputDuplication*   dxgiDuplication;
+  ID3D11Texture2D*          dxgiFrameTexture;
+  ID3D11Texture2D*          dxgiStagingTexture;
+  HMONITOR                  hMonitor;
+  RECT                      rcOutput;
+  UINT                      dxgiStagingWidth;
+  UINT                      dxgiStagingHeight;
+  BOOL                      fHasFrame;
+} DXGIOUTPUTCAPTURE, *LPDXGIOUTPUTCAPTURE;
 
 typedef struct SHAREDWGLDATA
 {
@@ -37,6 +56,7 @@ typedef struct SHAREDWGLDATA
   HDC              hDesktopDC;
   HBITMAP          hBitmapBg;
   HBITMAP          hBitmapOld;
+  DXGIOUTPUTCAPTURE dxgiOutputs[MAX_ENUM_MONITORS];
   GLclampf         cfClearColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;
@@ -45,6 +65,8 @@ typedef struct SHAREDWGLDATA
 } SHAREDWGLDATA, *LPSHAREDWGLDATA;
 
 void renderInit(HWND hWnd);
+
+void renderCleanup(HWND hWnd);
 
 void renderResizeCapture(HWND hWnd);
 

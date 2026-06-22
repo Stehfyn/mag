@@ -1,6 +1,11 @@
 #include "render.h"
 
+#pragma comment(lib, "d3d11")
+#pragma comment(lib, "dxgi")
+#pragma comment(lib, "dxguid")
+
 #define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
+#define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
 void render_wglInit(HWND hWnd);
@@ -14,6 +19,17 @@ void render_gdiCaptureScreen(HWND hWnd);
 void render_updateSurfaceInfo(HWND hWnd);
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd);
 void render_gdiDeleteCaptureBitmap(HWND hWnd);
+void render_dxgiDeleteResources(HWND hWnd);
+void render_dxgiDeleteOutputResources(LPDXGIOUTPUTCAPTURE lpOutput);
+LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor);
+LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPSHAREDWGLDATA lpsd);
+BOOL render_dxgiCreateDuplicationForMonitor(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput);
+BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput);
+BOOL render_dxgiEnsureStagingTexture(LPDXGIOUTPUTCAPTURE lpOutput, UINT width, UINT height);
+BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
+void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
+BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
+void render_dxgiCaptureScreen(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
 {
@@ -108,6 +124,332 @@ void render_gdiDeleteCaptureBitmap(HWND hWnd)
     }
 
     lpsd->glScreenData = NULL;
+}
+
+void render_dxgiDeleteOutputResources(LPDXGIOUTPUTCAPTURE lpOutput)
+{
+    SAFERELEASE(lpOutput->dxgiStagingTexture);
+    SAFERELEASE(lpOutput->dxgiFrameTexture);
+    SAFERELEASE(lpOutput->dxgiDuplication);
+    SAFERELEASE(lpOutput->d3dContext);
+    SAFERELEASE(lpOutput->d3dDevice);
+    ZeroMemory(lpOutput, sizeof(*lpOutput));
+}
+
+void render_dxgiDeleteResources(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->dxgiOutputs); ++i)
+    {
+      render_dxgiDeleteOutputResources(&lpsd->dxgiOutputs[i]);
+    }
+}
+
+LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor)
+{
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->dxgiOutputs); ++i)
+    {
+      if (lpsd->dxgiOutputs[i].hMonitor == hMonitor)
+      {
+        return &lpsd->dxgiOutputs[i];
+      }
+    }
+
+    return NULL;
+}
+
+LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPSHAREDWGLDATA lpsd)
+{
+    UINT i;
+
+    for (i = 0; i < ARRAYSIZE(lpsd->dxgiOutputs); ++i)
+    {
+      if (!lpsd->dxgiOutputs[i].hMonitor)
+      {
+        return &lpsd->dxgiOutputs[i];
+      }
+    }
+
+    return NULL;
+}
+
+BOOL render_dxgiCreateDuplicationForMonitor(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDXGIOUTPUTCAPTURE lpOutput = render_dxgiFindFreeOutputCapture(lpsd);
+    IDXGIFactory1* factory = NULL;
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* output = NULL;
+    IDXGIOutput1* output1 = NULL;
+    HRESULT hr;
+    UINT adapterIndex;
+    BOOL fResult = FALSE;
+
+    if (!lpOutput)
+    {
+      return FALSE;
+    }
+
+    hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void**)&factory);
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    for (adapterIndex = 0; SUCCEEDED(IDXGIFactory1_EnumAdapters1(factory, adapterIndex, &adapter)); ++adapterIndex)
+    {
+      UINT outputIndex;
+
+      for (outputIndex = 0; SUCCEEDED(IDXGIAdapter1_EnumOutputs(adapter, outputIndex, &output)); ++outputIndex)
+      {
+        DXGI_OUTPUT_DESC outputDesc;
+
+        if (SUCCEEDED(IDXGIOutput_GetDesc(output, &outputDesc)) && outputDesc.Monitor == hMonitor)
+        {
+          D3D11_TEXTURE2D_DESC frameDesc = { 0 };
+          D3D_FEATURE_LEVEL featureLevel;
+
+          hr = D3D11CreateDevice(
+            (IDXGIAdapter*)adapter,
+            D3D_DRIVER_TYPE_UNKNOWN,
+            NULL,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            NULL,
+            0,
+            D3D11_SDK_VERSION,
+            &lpOutput->d3dDevice,
+            &featureLevel,
+            &lpOutput->d3dContext);
+
+          if (SUCCEEDED(hr))
+          {
+            hr = IDXGIOutput_QueryInterface(output, &IID_IDXGIOutput1, (void**)&output1);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            hr = IDXGIOutput1_DuplicateOutput(output1, (IUnknown*)lpOutput->d3dDevice, &lpOutput->dxgiDuplication);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            frameDesc.Width = RECTWIDTH(outputDesc.DesktopCoordinates);
+            frameDesc.Height = RECTHEIGHT(outputDesc.DesktopCoordinates);
+            frameDesc.MipLevels = 1;
+            frameDesc.ArraySize = 1;
+            frameDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            frameDesc.SampleDesc.Count = 1;
+            frameDesc.Usage = D3D11_USAGE_DEFAULT;
+
+            hr = ID3D11Device_CreateTexture2D(lpOutput->d3dDevice, &frameDesc, NULL, &lpOutput->dxgiFrameTexture);
+          }
+
+          if (SUCCEEDED(hr))
+          {
+            lpOutput->hMonitor = hMonitor;
+            lpOutput->rcOutput = outputDesc.DesktopCoordinates;
+            *lplpOutput = lpOutput;
+            fResult = TRUE;
+          }
+
+          SAFERELEASE(output1);
+          SAFERELEASE(output);
+          SAFERELEASE(adapter);
+          SAFERELEASE(factory);
+
+          if (!fResult)
+          {
+            render_dxgiDeleteOutputResources(lpOutput);
+          }
+
+          return fResult;
+        }
+
+        SAFERELEASE(output);
+      }
+
+      SAFERELEASE(adapter);
+    }
+
+    SAFERELEASE(factory);
+    return FALSE;
+}
+
+BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPDXGIOUTPUTCAPTURE lpOutput = render_dxgiFindOutputCapture(lpsd, hMonitor);
+
+    if (lpOutput && lpOutput->dxgiDuplication)
+    {
+      *lplpOutput = lpOutput;
+      return TRUE;
+    }
+
+    return render_dxgiCreateDuplicationForMonitor(hWnd, hMonitor, lplpOutput);
+}
+
+BOOL render_dxgiEnsureStagingTexture(LPDXGIOUTPUTCAPTURE lpOutput, UINT width, UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc = { 0 };
+
+    if (lpOutput->dxgiStagingTexture &&
+        lpOutput->dxgiStagingWidth == width &&
+        lpOutput->dxgiStagingHeight == height)
+    {
+      return TRUE;
+    }
+
+    SAFERELEASE(lpOutput->dxgiStagingTexture);
+    lpOutput->dxgiStagingWidth = 0;
+    lpOutput->dxgiStagingHeight = 0;
+
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    if (FAILED(ID3D11Device_CreateTexture2D(lpOutput->d3dDevice, &desc, NULL, &lpOutput->dxgiStagingTexture)))
+    {
+      return FALSE;
+    }
+
+    lpOutput->dxgiStagingWidth = width;
+    lpOutput->dxgiStagingHeight = height;
+    return TRUE;
+}
+
+BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput)
+{
+    IDXGIResource* frameResource = NULL;
+    ID3D11Texture2D* frameTexture = NULL;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo = { 0 };
+    HRESULT hr = IDXGIOutputDuplication_AcquireNextFrame(lpOutput->dxgiDuplication, 0, &frameInfo, &frameResource);
+
+    if (DXGI_ERROR_WAIT_TIMEOUT == hr)
+    {
+      return lpOutput->fHasFrame;
+    }
+
+    if (DXGI_ERROR_ACCESS_LOST == hr)
+    {
+      render_dxgiDeleteOutputResources(lpOutput);
+      return FALSE;
+    }
+
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    hr = IDXGIResource_QueryInterface(frameResource, &IID_ID3D11Texture2D, (void**)&frameTexture);
+    if (SUCCEEDED(hr))
+    {
+      ID3D11DeviceContext_CopyResource(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiFrameTexture, (ID3D11Resource*)frameTexture);
+      lpOutput->fHasFrame = TRUE;
+    }
+
+    SAFERELEASE(frameTexture);
+    SAFERELEASE(frameResource);
+    IDXGIOutputDuplication_ReleaseFrame(lpOutput->dxgiDuplication);
+
+    return lpOutput->fHasFrame;
+}
+
+void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst)
+{
+    const UINT dstWidth = (UINT)RECTWIDTH((*lprcDst));
+    const UINT dstHeight = (UINT)RECTHEIGHT((*lprcDst));
+    const UINT screenWidth = (UINT)lpsd->bi.biWidth;
+    const UINT screenHeight = (UINT)lpsd->bi.biHeight;
+    const UINT screenPitch = screenWidth * CHANNELS;
+    UINT y;
+
+    if (!dstWidth || !dstHeight || !srcWidth || !srcHeight)
+    {
+      return;
+    }
+
+    for (y = 0; y < dstHeight; ++y)
+    {
+      const UINT srcY = min((UINT)(((ULONGLONG)y * srcHeight) / dstHeight), srcHeight - 1);
+      const UINT dstY = (UINT)lprcDst->top + y;
+      BYTE* dstRow = ((BYTE*)lpsd->glScreenData) + ((screenHeight - 1 - dstY) * screenPitch) + ((UINT)lprcDst->left * CHANNELS);
+      const BYTE* srcRow = src + (srcY * srcPitch);
+
+      if (srcWidth == dstWidth)
+      {
+        CopyMemory(dstRow, srcRow, dstWidth * CHANNELS);
+      }
+      else
+      {
+        UINT x;
+
+        for (x = 0; x < dstWidth; ++x)
+        {
+          const UINT srcX = min((UINT)(((ULONGLONG)x * srcWidth) / dstWidth), srcWidth - 1);
+          CopyMemory(dstRow + (x * CHANNELS), srcRow + (srcX * CHANNELS), CHANNELS);
+        }
+      }
+    }
+}
+
+BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection)
+{
+    const UINT srcPartWidth = (UINT)RECTWIDTH((*lprcIntersection));
+    const UINT srcPartHeight = (UINT)RECTHEIGHT((*lprcIntersection));
+    RECT rcDst;
+    D3D11_BOX box;
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr;
+
+    if (!render_dxgiUpdateFrame(lpOutput) ||
+        !render_dxgiEnsureStagingTexture(lpOutput, srcPartWidth, srcPartHeight))
+    {
+      return FALSE;
+    }
+
+    box.left = (UINT)(lprcIntersection->left - lpOutput->rcOutput.left);
+    box.top = (UINT)(lprcIntersection->top - lpOutput->rcOutput.top);
+    box.front = 0;
+    box.right = box.left + srcPartWidth;
+    box.bottom = box.top + srcPartHeight;
+    box.back = 1;
+
+    ID3D11DeviceContext_CopySubresourceRegion(
+      lpOutput->d3dContext,
+      (ID3D11Resource*)lpOutput->dxgiStagingTexture,
+      0,
+      0,
+      0,
+      0,
+      (ID3D11Resource*)lpOutput->dxgiFrameTexture,
+      0,
+      &box);
+
+    hr = ID3D11DeviceContext_Map(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiStagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    rcDst.left = MulDiv(lprcIntersection->left - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
+    rcDst.top = MulDiv(lprcIntersection->top - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+    rcDst.right = MulDiv(lprcIntersection->right - lprcSource->left, lpsd->bi.biWidth, RECTWIDTH((*lprcSource)));
+    rcDst.bottom = MulDiv(lprcIntersection->bottom - lprcSource->top, lpsd->bi.biHeight, RECTHEIGHT((*lprcSource)));
+
+    render_dxgiCopyMappedPixelsToRect(lpsd, (const BYTE*)mapped.pData, srcPartWidth, srcPartHeight, mapped.RowPitch, &rcDst);
+    ID3D11DeviceContext_Unmap(lpOutput->d3dContext, (ID3D11Resource*)lpOutput->dxgiStagingTexture, 0);
+
+    return TRUE;
 }
 
 void render_wglInit(HWND hWnd)
@@ -468,10 +810,118 @@ void render_gdiCaptureScreen(HWND hWnd)
     }
 }
 
+void render_dxgiCaptureScreen(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd->glScreenData)
+    {
+      const LONG cw = lpsd->bi.biWidth;
+      const LONG ch = lpsd->bi.biHeight;
+      POINT tl = { 0, 0 };
+      POINT center = { 0, 0 };
+      RECT rcVirtual = lpsd->di.rc;
+      RECT rcSource;
+      const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
+      BOOL fCenterOnCursor;
+      LONG srcW;
+      LONG srcH;
+      LONG srcX;
+      LONG srcY;
+      UINT i;
+      BOOL fCapturedAny = FALSE;
+
+      if (!ClientToScreen(hWnd, &tl))
+      {
+        return;
+      }
+
+      fCenterOnCursor = lpsd->fTrackCursor && GetCursorPos(&center);
+      if (!fCenterOnCursor)
+      {
+        center.x = tl.x + cw / 2;
+        center.y = tl.y + ch / 2;
+      }
+
+      if (m <= 1.0001f)
+      {
+        srcW = cw;
+        srcH = ch;
+        srcX = fCenterOnCursor ? center.x - srcW / 2 : tl.x;
+        srcY = fCenterOnCursor ? center.y - srcH / 2 : tl.y;
+        lpsd->pt = fCenterOnCursor ? center : tl;
+      }
+      else
+      {
+        srcW = (LONG)(cw / m);
+        srcH = (LONG)(ch / m);
+
+        if (srcW < 1) srcW = 1;
+        if (srcH < 1) srcH = 1;
+
+        srcX = center.x - srcW / 2;
+        srcY = center.y - srcH / 2;
+        lpsd->pt = center;
+      }
+
+      if (IsRectEmpty(&rcVirtual))
+      {
+        rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+      }
+
+      srcX = render_clipSourceOrigin(srcX, srcW, rcVirtual.left, rcVirtual.right);
+      srcY = render_clipSourceOrigin(srcY, srcH, rcVirtual.top, rcVirtual.bottom);
+      SetRect(&rcSource, srcX, srcY, srcX + srcW, srcY + srcH);
+
+      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+
+      for (i = 0; i < lpsd->di.numMonitors; ++i)
+      {
+        RECT rcMonitor = lpsd->di.monitors[i].monitorInfoEx.rcMonitor;
+        RECT rcIntersection;
+        POINT ptIntersection;
+        HMONITOR hMonitor;
+        LPDXGIOUTPUTCAPTURE lpOutput = NULL;
+
+        if (!IntersectRect(&rcIntersection, &rcSource, &rcMonitor))
+        {
+          continue;
+        }
+
+        ptIntersection.x = rcIntersection.left + RECTWIDTH(rcIntersection) / 2;
+        ptIntersection.y = rcIntersection.top + RECTHEIGHT(rcIntersection) / 2;
+        hMonitor = MonitorFromPoint(ptIntersection, MONITOR_DEFAULTTONULL);
+
+        if (!hMonitor ||
+            !render_dxgiEnsureDuplication(hWnd, hMonitor, &lpOutput) ||
+            !render_dxgiCaptureIntersection(lpsd, lpOutput, &rcSource, &rcIntersection))
+        {
+          render_gdiCaptureScreen(hWnd);
+          return;
+        }
+
+        fCapturedAny = TRUE;
+      }
+
+      if (!fCapturedAny)
+      {
+        render_gdiCaptureScreen(hWnd);
+      }
+    }
+}
+
 void renderInit(HWND hWnd)
 {
     render_wglInit(hWnd);
     //render_wglInitPBuffer(hWnd);
+}
+
+void renderCleanup(HWND hWnd)
+{
+    render_dxgiDeleteResources(hWnd);
 }
 
 void renderResizeCapture(HWND hWnd)
@@ -482,6 +932,18 @@ void renderResizeCapture(HWND hWnd)
 
 void renderRender(HWND hWnd)
 {
-    render_gdiCaptureScreen(hWnd);
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    switch (lpsd->captureApi)
+    {
+    case CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
+      render_dxgiCaptureScreen(hWnd);
+      break;
+    case CAPTURE_API_GDI_BITBLT:
+    default:
+      render_gdiCaptureScreen(hWnd);
+      break;
+    }
+
     render_wglRender(hWnd);
 }

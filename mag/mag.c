@@ -23,9 +23,19 @@
 #define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \
         ((fn)((hwnd), (BOOL)(wParam)), 0L)
 
+typedef struct SETTINGSOPTION
+{
+  UINT    id;
+  LPCTSTR pszName;
+  BOOL    fImplemented;
+} SETTINGSOPTION;
+
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
 void mag_ShowSettingsDialog(HWND hWnd);
+void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId);
+BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
+void mag_UpdateSettingsDialogState(HWND hDlg);
 INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
@@ -51,6 +61,19 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos);
 
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
+
+static const SETTINGSOPTION g_graphicsApiOptions[] =
+{
+  { GRAPHICS_API_OPENGL, _T("OpenGL"), TRUE },
+};
+
+static const SETTINGSOPTION g_captureApiOptions[] =
+{
+  { CAPTURE_API_GDI_BITBLT, _T("GDI BitBlt"), TRUE },
+  { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, _T("DXGI Desktop Duplication"), TRUE },
+  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, _T("Windows Graphics Capture (planned)"), FALSE },
+  { CAPTURE_API_MAGNIFICATION, _T("Magnification API (planned)"), FALSE },
+};
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
@@ -89,20 +112,83 @@ void mag_ShowSettingsDialog(HWND hWnd)
       (LPARAM)hWnd);
 }
 
+void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId)
+{
+    HWND hCtl = GetDlgItem(hDlg, idCtl);
+    UINT i;
+
+    for (i = 0; i < count; ++i)
+    {
+      const LRESULT item = SendMessage(hCtl, CB_ADDSTRING, 0, (LPARAM)options[i].pszName);
+
+      if (CB_ERR != item && CB_ERRSPACE != item)
+      {
+        SendMessage(hCtl, CB_SETITEMDATA, (WPARAM)item, (LPARAM)i);
+
+        if (options[i].id == selectedId)
+        {
+          SendMessage(hCtl, CB_SETCURSEL, (WPARAM)item, 0);
+        }
+      }
+    }
+
+    if (CB_ERR == SendMessage(hCtl, CB_GETCURSEL, 0, 0) && 0 < count)
+    {
+      SendMessage(hCtl, CB_SETCURSEL, 0, 0);
+    }
+}
+
+BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented)
+{
+    const LRESULT selectedItem = SendDlgItemMessage(hDlg, idCtl, CB_GETCURSEL, 0, 0);
+    LRESULT optionIndex;
+
+    if (CB_ERR == selectedItem)
+    {
+      return FALSE;
+    }
+
+    optionIndex = SendDlgItemMessage(hDlg, idCtl, CB_GETITEMDATA, (WPARAM)selectedItem, 0);
+    if (CB_ERR == optionIndex || optionIndex < 0 || (UINT)optionIndex >= count)
+    {
+      return FALSE;
+    }
+
+    *selectedId = options[optionIndex].id;
+    *fImplemented = options[optionIndex].fImplemented;
+    return TRUE;
+}
+
+void mag_UpdateSettingsDialogState(HWND hDlg)
+{
+    UINT selectedId;
+    BOOL fGraphicsImplemented = FALSE;
+    BOOL fCaptureImplemented = FALSE;
+    BOOL fValid;
+
+    fValid =
+      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), &selectedId, &fGraphicsImplemented) &&
+      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &selectedId, &fCaptureImplemented);
+
+    EnableWindow(GetDlgItem(hDlg, IDOK), fValid && fGraphicsImplemented && fCaptureImplemented);
+
+    if (!fValid)
+    {
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T("Select a graphics API and capture API."));
+    }
+    else if (!fGraphicsImplemented || !fCaptureImplemented)
+    {
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T("Planned APIs are listed but cannot be applied yet."));
+    }
+    else
+    {
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T(""));
+    }
+}
+
 INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static const LPCTSTR graphicsApis[] =
-    {
-      _T("OpenGL")
-    };
-
-    static const LPCTSTR captureApis[] =
-    {
-      _T("GDI BitBlt")
-    };
-
     LPSHAREDWGLDATA lpsd;
-    UINT i;
 
     switch (message)
     {
@@ -117,18 +203,9 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
       graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
       captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
 
-      for (i = 0; i < GRAPHICS_API_COUNT; ++i)
-      {
-        SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_ADDSTRING, 0, (LPARAM)graphicsApis[i]);
-      }
-
-      for (i = 0; i < CAPTURE_API_COUNT; ++i)
-      {
-        SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_ADDSTRING, 0, (LPARAM)captureApis[i]);
-      }
-
-      SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_SETCURSEL, (WPARAM)graphicsApi, 0);
-      SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_SETCURSEL, (WPARAM)captureApi, 0);
+      mag_AddSettingsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), graphicsApi);
+      mag_AddSettingsOptions(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), captureApi);
+      mag_UpdateSettingsDialogState(hDlg);
 
       return TRUE;
     }
@@ -139,18 +216,30 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
       case IDOK:
       {
         HWND hOwner = (HWND)GetWindowLongPtr(hDlg, DWLP_USER);
-        const LRESULT graphicsApi = SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_GETCURSEL, 0, 0);
-        const LRESULT captureApi = SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_GETCURSEL, 0, 0);
+        UINT graphicsApi = GRAPHICS_API_OPENGL;
+        UINT captureApi = CAPTURE_API_GDI_BITBLT;
+        BOOL fGraphicsImplemented = FALSE;
+        BOOL fCaptureImplemented = FALSE;
+
+        if (!mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), &graphicsApi, &fGraphicsImplemented) ||
+          !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &captureApi, &fCaptureImplemented) ||
+          !fGraphicsImplemented ||
+          !fCaptureImplemented)
+        {
+          MessageBox(hDlg, _T("That backend is listed for planning but is not implemented yet."), _T("Settings"), MB_OK | MB_ICONINFORMATION);
+          mag_UpdateSettingsDialogState(hDlg);
+          return TRUE;
+        }
 
         lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
         if (lpsd)
         {
-          if (0 <= graphicsApi && graphicsApi < GRAPHICS_API_COUNT)
+          if (graphicsApi < GRAPHICS_API_COUNT)
           {
             lpsd->graphicsApi = (GRAPHICSAPI)graphicsApi;
           }
 
-          if (0 <= captureApi && captureApi < CAPTURE_API_COUNT)
+          if (captureApi < CAPTURE_API_COUNT)
           {
             lpsd->captureApi = (CAPTUREAPI)captureApi;
           }
@@ -158,6 +247,16 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
         EndDialog(hDlg, IDOK);
         return TRUE;
+      }
+      case IDC_SETTINGS_GRAPHICS_API:
+      case IDC_SETTINGS_CAPTURE_API:
+      {
+        if (CBN_SELCHANGE == HIWORD(wParam))
+        {
+          mag_UpdateSettingsDialogState(hDlg);
+          return TRUE;
+        }
+        break;
       }
       case IDCANCEL:
       {
@@ -200,6 +299,7 @@ void mag_OnDestroy(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
+    renderCleanup(hWnd);
     help_Cleanup();
     VirtualFree(lpsd, 0, MEM_RELEASE);
     PostQuitMessage(0);
