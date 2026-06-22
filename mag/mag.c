@@ -7,6 +7,8 @@
 #define FORWARD_MSG(hwnd, message, fn)    \
     default: return (fn)((hwnd), (message), (wParam), (lParam))
 
+#define MOUSE_WHEEL_ZOOM_STEP_SCALE 0.25f
+
 /* void Cls_OnEnterSizeMove(HWND hwnd) */
 #define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
         ((fn)((hwnd)), 0L)
@@ -61,6 +63,8 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
 void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
 void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags);
 void mag_OnMouseMove(HWND hWnd, int x, int y, UINT keyFlags);
+void mag_OnNCMouseMove(HWND hWnd, int x, int y, UINT codeHitTest);
+void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen);
 void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture);
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy);
 void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu);
@@ -328,6 +332,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     lpsd->fMouseRelativeZoom = FALSE;
 
     renderInit(hWnd);
+    render_minimapNotifyActivity(hWnd);
 
     //SetTimer(hWnd, 1, 13, NULL);
     SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
@@ -628,8 +633,11 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
       const BOOL fKeepSourceOrigin = !lpsd->fTrackCursor && lpsd->fUseSourceOrigin;
       const BOOL fAnchorZoom = fMouseRelativeZoom || fKeepSourceOrigin;
       const FLOAT fScaleScale = powf(-logf(0.001f * (1.0f - lpsd->fScale) + .575f), 6);
+      const FLOAT fWheelSteps = (FLOAT)zDelta / (FLOAT)WHEEL_DELTA;
       DOUBLE anchorX = 0.0;
       DOUBLE anchorY = 0.0;
+
+      render_minimapNotifyActivity(hWnd);
 
       if (clientWidth < 1 || clientHeight < 1)
       {
@@ -656,7 +664,7 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
         }
       }
 
-      lpsd->fScale += ((0.0f < fScaleScale) ? fScaleScale : -1.0f + fScaleScale) * ((!zDelta) ? 0.0f : (0 < zDelta) ? -1.0f : 1.0f);
+      lpsd->fScale += ((0.0f < fScaleScale) ? fScaleScale : -1.0f + fScaleScale) * -fWheelSteps * MOUSE_WHEEL_ZOOM_STEP_SCALE;
       lpsd->fScale = CLAMP(lpsd->fScale, 0.001f, 1.0f);
       lpsd->fTexScaler = 1.0f + (15.0f * (1.0f - lpsd->fScale));
 
@@ -705,6 +713,8 @@ void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags
     UNREFERENCED_PARAMETER(fDoubleClick);
     UNREFERENCED_PARAMETER(keyFlags);
 
+    render_minimapNotifyActivity(hWnd);
+
     if (render_minimapBeginDrag(hWnd, ptClient))
     {
       SetCapture(hWnd);
@@ -720,6 +730,8 @@ void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags)
     UNREFERENCED_PARAMETER(y);
     UNREFERENCED_PARAMETER(keyFlags);
 
+    render_minimapNotifyActivity(hWnd);
+
     if (lpsd && lpsd->fMiniMapDragging)
     {
       render_minimapEndDrag(hWnd);
@@ -734,12 +746,46 @@ void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags)
 void mag_OnMouseMove(HWND hWnd, int x, int y, UINT keyFlags)
 {
     POINT ptClient = { x, y };
+    POINT ptScreen = ptClient;
 
     UNREFERENCED_PARAMETER(keyFlags);
+
+    if (ClientToScreen(hWnd, &ptScreen))
+    {
+      mag_NotifyMiniMapCursorActivity(hWnd, ptScreen);
+    }
 
     if (render_minimapDrag(hWnd, ptClient))
     {
       renderRender(hWnd);
+    }
+}
+
+void mag_OnNCMouseMove(HWND hWnd, int x, int y, UINT codeHitTest)
+{
+    POINT ptScreen = { x, y };
+
+    UNREFERENCED_PARAMETER(codeHitTest);
+
+    mag_NotifyMiniMapCursorActivity(hWnd, ptScreen);
+}
+
+void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd)
+    {
+      return;
+    }
+
+    if (!lpsd->fMiniMapHaveLastCursor ||
+        lpsd->ptMiniMapLastCursor.x != ptScreen.x ||
+        lpsd->ptMiniMapLastCursor.y != ptScreen.y)
+    {
+      lpsd->fMiniMapHaveLastCursor = TRUE;
+      lpsd->ptMiniMapLastCursor = ptScreen;
+      render_minimapNotifyActivity(hWnd);
     }
 }
 
@@ -775,11 +821,25 @@ void mag_OnExitMenuLoop(HWND hWnd,BOOL fIsShortcutMenu)
 
 void mag_OnEnterSizeMove(HWND hWnd)
 {
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd)
+    {
+      lpsd->fMiniMapHoldVisible = TRUE;
+    }
+    render_minimapNotifyActivity(hWnd);
     SetTimer(hWnd, 0x69, USER_TIMER_MINIMUM, 0);
 }
 
 void mag_OnExitSizeMove(HWND hWnd)
 {
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd)
+    {
+      lpsd->fMiniMapHoldVisible = FALSE;
+    }
+    render_minimapNotifyActivity(hWnd);
     KillTimer(hWnd, 0x69);
 }
 
@@ -818,6 +878,8 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
         lpsd->hCaptureDC &&
         (fMoved || fSized))
     {
+      render_minimapNotifyActivity(hWnd);
+
       if (fPreservePinnedCenter &&
           lpsd->fTexScaler > 1.0001f &&
           lpsd->bi.biWidth > 0 &&
@@ -863,6 +925,13 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
     HANDLE_MSG(hWnd,  WM_LBUTTONUP,         mag_OnLButtonUp);
     HANDLE_MSG(hWnd,  WM_MOUSEMOVE,         mag_OnMouseMove);
+    case WM_NCMOUSEMOVE:
+      mag_OnNCMouseMove(
+        hWnd,
+        (int)(short)LOWORD(lParam),
+        (int)(short)HIWORD(lParam),
+        (UINT)wParam);
+      return 0;
     HANDLE_MSG(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
     HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
     HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);

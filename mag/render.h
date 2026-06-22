@@ -94,12 +94,15 @@ typedef struct SHAREDWGLDATA
   BOOL             fUseSourceOrigin;
   BOOL             fMouseRelativeZoom;
   BOOL             fMiniMapDragging;
+  BOOL             fMiniMapHoldVisible;
+  BOOL             fMiniMapHaveLastCursor;
   BOOL             fSourceOriginPinned;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
   POINT            pt;
   POINT            ptSourceOrigin;
   POINT            ptMiniMapDragOffset;
+  POINT            ptMiniMapLastCursor;
   DWORD            dwMiniMapLastActivity;
   RECT             rc;
   DISPLAYINFO      di;

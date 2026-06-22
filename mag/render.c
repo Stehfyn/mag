@@ -713,14 +713,19 @@ FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd)
     const DWORD now = GetTickCount();
     const DWORD elapsed = now - lpsd->dwMiniMapLastActivity;
 
-    if (lpsd->fMiniMapDragging)
+    if (lpsd->fTexScaler <= 1.0001f)
+    {
+      return 0.0f;
+    }
+
+    if (lpsd->fMiniMapDragging || lpsd->fMiniMapHoldVisible)
     {
       return 1.0f;
     }
 
     if (!lpsd->dwMiniMapLastActivity)
     {
-      return 0.0f;
+      return 1.0f;
     }
 
     if (elapsed <= MINIMAP_VISIBLE_MS)
