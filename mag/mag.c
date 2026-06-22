@@ -204,12 +204,23 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     POINT cursor;
+    POINT ptClientOrigin = { 0, 0 };
     RECT rcWindow;
+    RECT rcClient;
     RECT rcMonitor;
-    LONG width;
-    LONG height;
+    LONG clientWidth;
+    LONG clientHeight;
+    LONG clientOffsetX;
+    LONG clientOffsetY;
+    LONG srcW;
+    LONG srcH;
+    LONG srcX;
+    LONG srcY;
+    LONG clientCursorX;
+    LONG clientCursorY;
     LONG x;
     LONG y;
+    FLOAT m;
     HMONITOR hMonitor;
     MONITORINFO mi = { sizeof(mi) };
 
@@ -218,24 +229,51 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
       return;
     }
 
-    if (!GetCursorPos(&cursor) || !GetWindowRect(hWnd, &rcWindow))
+    if (!GetCursorPos(&cursor) ||
+        !GetWindowRect(hWnd, &rcWindow) ||
+        !GetClientRect(hWnd, &rcClient) ||
+        !ClientToScreen(hWnd, &ptClientOrigin))
     {
       return;
     }
 
-    width = RECTWIDTH(rcWindow);
-    height = RECTHEIGHT(rcWindow);
-    x = cursor.x - width / 2;
-    y = cursor.y - height / 2;
+    clientWidth = RECTWIDTH(rcClient);
+    clientHeight = RECTHEIGHT(rcClient);
+    if (clientWidth < 1 || clientHeight < 1)
+    {
+      return;
+    }
 
+    clientOffsetX = ptClientOrigin.x - rcWindow.left;
+    clientOffsetY = ptClientOrigin.y - rcWindow.top;
     hMonitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
     if (hMonitor && GetMonitorInfo(hMonitor, &mi))
     {
       rcMonitor = mi.rcMonitor;
-
-      x = (width < RECTWIDTH(rcMonitor)) ? CLAMP(x, rcMonitor.left, rcMonitor.right - width) : rcMonitor.left;
-      y = (height < RECTHEIGHT(rcMonitor)) ? CLAMP(y, rcMonitor.top, rcMonitor.bottom - height) : rcMonitor.top;
     }
+    else
+    {
+      mag_GetCaptureRect(lpsd, &rcMonitor);
+    }
+
+    m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
+    if (m <= 1.0001f)
+    {
+      srcW = clientWidth;
+      srcH = clientHeight;
+    }
+    else
+    {
+      srcW = max(1, (LONG)(clientWidth / m));
+      srcH = max(1, (LONG)(clientHeight / m));
+    }
+
+    srcX = render_clipSourceOrigin(cursor.x - srcW / 2, srcW, rcMonitor.left, rcMonitor.right);
+    srcY = render_clipSourceOrigin(cursor.y - srcH / 2, srcH, rcMonitor.top, rcMonitor.bottom);
+    clientCursorX = CLAMP(MulDiv(cursor.x - srcX, clientWidth, srcW), 0, clientWidth);
+    clientCursorY = CLAMP(MulDiv(cursor.y - srcY, clientHeight, srcH), 0, clientHeight);
+    x = cursor.x - clientCursorX - clientOffsetX;
+    y = cursor.y - clientCursorY - clientOffsetY;
 
     if (rcWindow.left != x || rcWindow.top != y)
     {
