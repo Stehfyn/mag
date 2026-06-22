@@ -1468,7 +1468,7 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
     const LONG ch = lpsd->bi.biHeight;
     POINT tl = { 0, 0 };
     POINT center = { 0, 0 };
-    RECT rcVirtual = lpsd->di.rc;
+    RECT rcClip = lpsd->di.rc;
     const FLOAT m = (lpsd->fTexScaler < 1.0f) ? 1.0f : lpsd->fTexScaler;
     BOOL fCenterOnCursor;
     BOOL fUseSourceOrigin;
@@ -1491,12 +1491,23 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
       center.y = tl.y + ch / 2;
     }
 
-    if (IsRectEmpty(&rcVirtual))
+    if (fCenterOnCursor)
     {
-      rcVirtual.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-      rcVirtual.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-      rcVirtual.right = rcVirtual.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-      rcVirtual.bottom = rcVirtual.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+      const HMONITOR hMonitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO mi = { sizeof(mi) };
+
+      if (hMonitor && GetMonitorInfo(hMonitor, &mi))
+      {
+        rcClip = mi.rcMonitor;
+      }
+    }
+
+    if (IsRectEmpty(&rcClip))
+    {
+      rcClip.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+      rcClip.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+      rcClip.right = rcClip.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+      rcClip.bottom = rcClip.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
     }
 
     fUseSourceOrigin = !fCenterOnCursor && lpsd->fUseSourceOrigin;
@@ -1552,8 +1563,14 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
       lpsd->pt = center;
     }
 
+    if (fCenterOnCursor)
+    {
+      srcX = render_clipSourceOrigin(srcX, srcW, rcClip.left, rcClip.right);
+      srcY = render_clipSourceOrigin(srcY, srcH, rcClip.top, rcClip.bottom);
+    }
+
     SetRect(lprcSource, srcX, srcY, srcX + srcW, srcY + srcH);
-    if (!IntersectRect(lprcClippedSource, lprcSource, &rcVirtual))
+    if (!IntersectRect(lprcClippedSource, lprcSource, &rcClip))
     {
       SetRectEmpty(lprcClippedSource);
     }
