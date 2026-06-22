@@ -711,6 +711,11 @@ void render_minimapNotifyActivity(HWND hWnd)
 
 BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd)
 {
+    if (MAG_VIEW_LENS == lpsd->viewMode)
+    {
+      return FALSE;
+    }
+
     return lpsd->fTexScaler > 1.0001f ||
            (!lpsd->fTrackCursor && lpsd->fUseSourceOrigin && lpsd->fSourceOriginPinned);
 }

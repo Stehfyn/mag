@@ -61,7 +61,9 @@ IDR_MENU1 MENU
 BEGIN
     POPUP "Context Menu"
     BEGIN
+        MENUITEM "Window",                              ID_CONTEXTMENU_WINDOW_MODE
         MENUITEM "Follow Mouse",                        ID_CONTEXTMENU_FOLLOW_MOUSE
+        MENUITEM "Lens",                                ID_CONTEXTMENU_LENS_MODE
         MENUITEM "Settings...",                         ID_CONTEXTMENU_SETTINGS
         MENUITEM SEPARATOR
         MENUITEM "Help",                                ID_CONTEXTMENU_HELP

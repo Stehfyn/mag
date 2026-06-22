@@ -7,6 +7,7 @@
 #define COBJMACROS
 #include <windows.h>
 #include <windowsx.h>
+#include <shellapi.h>
 #include <htmlhelp.h>
 #include <dwmapi.h>
 #include <uxtheme.h>

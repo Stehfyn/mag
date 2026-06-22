@@ -8,6 +8,8 @@
     default: return (fn)((hwnd), (message), (wParam), (lParam))
 
 #define MOUSE_WHEEL_ZOOM_STEP_SCALE 0.25f
+#define WM_MAG_TRAYICON (WM_APP + 1)
+#define MAG_TRAY_ICON_ID 1
 
 /* void Cls_OnEnterSizeMove(HWND hwnd) */
 #define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
@@ -39,6 +41,11 @@ typedef struct SETTINGSOPTION
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
 void mag_ShowSettingsDialog(HWND hWnd);
+void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode);
+void mag_UpdateViewWindowStyle(HWND hWnd);
+void mag_UpdateLensWindowPosition(HWND hWnd);
+void mag_AddTrayIcon(HWND hWnd);
+void mag_DeleteTrayIcon(HWND hWnd);
 void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId);
 BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
 void mag_UpdateSettingsDialogState(HWND hDlg);
@@ -56,6 +63,7 @@ UINT mag_OnNCHittest(HWND hWnd, int x, int y);
 UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp);
 BOOL mag_OnNCActivate(HWND hWnd, BOOL fActive, HWND hwndActDeact, BOOL fMinimized);
 void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHitTest);
+LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam);
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
@@ -106,12 +114,31 @@ void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
 void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MAGVIEWMODE viewMode = lpsd ? lpsd->viewMode : MAG_VIEW_WINDOW;
+    UINT checkedPosition = 0;
     
     HMENU hMenu = CreatePopupMenu();
     //HMENU hMenu = LoadPopupMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU1));
 
+    switch (viewMode)
+    {
+    case MAG_VIEW_FOLLOW_MOUSE:
+      checkedPosition = 1;
+      break;
+    case MAG_VIEW_LENS:
+      checkedPosition = 2;
+      break;
+    case MAG_VIEW_WINDOW:
+    default:
+      checkedPosition = 0;
+      break;
+    }
 
-    AppendMenu(hMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, _T("Follow Mouse"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_WINDOW_MODE, _T("Window"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, _T("Follow Mouse"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_LENS_MODE, _T("Lens"));
+    CheckMenuRadioItem(hMenu, 0, 2, checkedPosition, MF_BYPOSITION);
+    AppendMenu(hMenu, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_SETTINGS, _T("Settings..."));
     AppendMenu(hMenu, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_HELP, _T("Help"));
@@ -120,6 +147,130 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
     TrackPopupMenuEx(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
 
     DestroyMenu(hMenu);
+}
+
+void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd || viewMode >= MAG_VIEW_COUNT)
+    {
+      return;
+    }
+
+    lpsd->viewMode = viewMode;
+    lpsd->fTrackCursor = (MAG_VIEW_FOLLOW_MOUSE == viewMode || MAG_VIEW_LENS == viewMode);
+    lpsd->fUseSourceOrigin = FALSE;
+    lpsd->fSourceOriginPinned = FALSE;
+    lpsd->fMiniMapDragging = FALSE;
+
+    mag_UpdateViewWindowStyle(hWnd);
+
+    if (MAG_VIEW_LENS == viewMode)
+    {
+      mag_UpdateLensWindowPosition(hWnd);
+    }
+
+    render_minimapNotifyActivity(hWnd);
+    renderRender(hWnd);
+}
+
+void mag_UpdateViewWindowStyle(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    DWORD dwExStyle;
+
+    if (!lpsd)
+    {
+      return;
+    }
+
+    dwExStyle = GetWindowExStyle(hWnd);
+    dwExStyle |= WS_EX_LAYERED;
+    if (MAG_VIEW_LENS == lpsd->viewMode)
+    {
+      dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+    }
+    else
+    {
+      dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+    }
+
+    SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
+    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
+void mag_UpdateLensWindowPosition(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    POINT cursor;
+    RECT rcWindow;
+    RECT rcMonitor;
+    LONG width;
+    LONG height;
+    LONG x;
+    LONG y;
+    HMONITOR hMonitor;
+    MONITORINFO mi = { sizeof(mi) };
+
+    if (!lpsd || MAG_VIEW_LENS != lpsd->viewMode)
+    {
+      return;
+    }
+
+    if (!GetCursorPos(&cursor) || !GetWindowRect(hWnd, &rcWindow))
+    {
+      return;
+    }
+
+    width = RECTWIDTH(rcWindow);
+    height = RECTHEIGHT(rcWindow);
+    x = cursor.x - width / 2;
+    y = cursor.y - height / 2;
+
+    hMonitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+    if (hMonitor && GetMonitorInfo(hMonitor, &mi))
+    {
+      rcMonitor = mi.rcMonitor;
+
+      x = (width < RECTWIDTH(rcMonitor)) ? CLAMP(x, rcMonitor.left, rcMonitor.right - width) : rcMonitor.left;
+      y = (height < RECTHEIGHT(rcMonitor)) ? CLAMP(y, rcMonitor.top, rcMonitor.bottom - height) : rcMonitor.top;
+    }
+
+    if (rcWindow.left != x || rcWindow.top != y)
+    {
+      SetWindowPos(hWnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+void mag_AddTrayIcon(HWND hWnd)
+{
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    NOTIFYICONDATA nid = { sizeof(nid) };
+
+    nid.hWnd = hWnd;
+    nid.uID = MAG_TRAY_ICON_ID;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = WM_MAG_TRAYICON;
+    nid.hIcon = (HICON)LoadImage(
+      hInstance,
+      MAKEINTRESOURCE(IDI_APPICON),
+      IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON),
+      GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED);
+    lstrcpyn(nid.szTip, _T("mag"), ARRAYSIZE(nid.szTip));
+
+    Shell_NotifyIcon(NIM_ADD, &nid);
+}
+
+void mag_DeleteTrayIcon(HWND hWnd)
+{
+    NOTIFYICONDATA nid = { sizeof(nid) };
+
+    nid.hWnd = hWnd;
+    nid.uID = MAG_TRAY_ICON_ID;
+    Shell_NotifyIcon(NIM_DELETE, &nid);
 }
 
 void mag_ShowHelpMenu(HWND hWnd, int x, int y)
@@ -326,9 +477,11 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 
     SetCurrentProcessEfficiencyQoS();
     mag_SetTaskbarIcon(hWnd);
+    mag_AddTrayIcon(hWnd);
 
     lpsd->graphicsApi = GRAPHICS_API_OPENGL;
     lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
+    lpsd->viewMode = MAG_VIEW_WINDOW;
     lpsd->fMouseRelativeZoom = FALSE;
 
     renderInit(hWnd);
@@ -374,6 +527,7 @@ void mag_OnDestroy(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
+    mag_DeleteTrayIcon(hWnd);
     renderCleanup(hWnd);
     help_Cleanup();
     VirtualFree(lpsd, 0, MEM_RELEASE);
@@ -522,23 +676,44 @@ void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHi
     mag_ShowPopupMenu(hWnd, x, y);
 }
 
+LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam)
+{
+    POINT pt;
+
+    if (MAG_TRAY_ICON_ID != (UINT)wParam)
+    {
+      return 0;
+    }
+
+    if (WM_RBUTTONUP == lParam || WM_CONTEXTMENU == lParam)
+    {
+      if (GetCursorPos(&pt))
+      {
+        SetForegroundWindow(hWnd);
+        mag_ShowPopupMenu(hWnd, pt.x, pt.y);
+        PostMessage(hWnd, WM_NULL, 0, 0);
+      }
+    }
+
+    return 0;
+}
+
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
 {
     switch(id){
+    case ID_CONTEXTMENU_WINDOW_MODE:
+    {
+      mag_SetViewMode(hWnd, MAG_VIEW_WINDOW);
+      break;
+    }
     case ID_CONTEXTMENU_FOLLOW_MOUSE:
     {
-      LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-      lpsd->fTrackCursor = !lpsd->fTrackCursor;
-      lpsd->fUseSourceOrigin = FALSE;
-      lpsd->fSourceOriginPinned = FALSE;
-
-      if (lpsd->fTrackCursor)
-      {
-        DWORD dwExStyle = GetWindowExStyle(hWnd);
-        dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
-        dwExStyle |= WS_EX_LAYERED;
-        SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
-      }
+      mag_SetViewMode(hWnd, MAG_VIEW_FOLLOW_MOUSE);
+      break;
+    }
+    case ID_CONTEXTMENU_LENS_MODE:
+    {
+      mag_SetViewMode(hWnd, MAG_VIEW_LENS);
       break;
     }
     case ID_CONTEXTMENU_SETTINGS:
@@ -571,22 +746,27 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
     UNREFERENCED_PARAMETER(cRepeat);
     UNREFERENCED_PARAMETER(flags);
 
-    switch (vk) {
-    if (lpsd->fTrackCursor)
-    { 
-      case VK_SPACE:
-      {   
-        lpsd->fTrackCursor = FALSE;
-        break;
-      }
-    }
-    if (GetForegroundWindow() == hWnd)
+    if (!lpsd || MAG_VIEW_LENS == lpsd->viewMode)
     {
-      case VK_ESCAPE:
+      return;
+    }
+
+    switch (vk) {
+    case VK_SPACE:
+    {
+      if (MAG_VIEW_FOLLOW_MOUSE == lpsd->viewMode)
+      {
+        mag_SetViewMode(hWnd, MAG_VIEW_WINDOW);
+      }
+      break;
+    }
+    case VK_ESCAPE:
+    {
+      if (GetForegroundWindow() == hWnd)
       {
         PostMessage(hWnd, WM_DESTROY, 0, 0);
-        break;
       }
+      break;
     }
     default:
       break;
@@ -603,11 +783,12 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
     {
       if (lpsd->fTrackCursor)
       {
-        DWORD dwExStyle = GetWindowExStyle(hWnd);
+        mag_UpdateViewWindowStyle(hWnd);
+      }
 
-        dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
-        dwExStyle |= WS_EX_LAYERED;// | WS_EX_COMPOSITED;
-        SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
+      if (MAG_VIEW_LENS == lpsd->viewMode)
+      {
+        mag_UpdateLensWindowPosition(hWnd);
       }
 
       SetWindowAlwaysOnTop(hWnd, TRUE);
@@ -931,7 +1112,18 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_NCACTIVATE,        mag_OnNCActivate);
     HANDLE_MSG(hWnd,  WM_NCRBUTTONDOWN,     mag_OnNCRButtonDown);
     HANDLE_MSG(hWnd,  WM_COMMAND,           mag_OnCommand);
-    HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
+    case WM_KEYUP:
+    {
+      LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+      if (lpsd && MAG_VIEW_LENS == lpsd->viewMode)
+      {
+        return DefWindowProc(hWnd, message, wParam, lParam);
+      }
+
+      mag_OnKeyUp(hWnd, (UINT)wParam, FALSE, LOWORD(lParam), HIWORD(lParam));
+      return 0;
+    }
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
     HANDLE_MSG(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
@@ -944,6 +1136,8 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         (int)(short)HIWORD(lParam),
         (UINT)wParam);
       return 0;
+    case WM_MAG_TRAYICON:
+      return mag_OnTrayIcon(hWnd, wParam, lParam);
     HANDLE_MSG(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
     HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
     HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);

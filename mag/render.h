@@ -26,6 +26,14 @@ typedef enum CAPTUREAPI
   CAPTURE_API_COUNT
 } CAPTUREAPI;
 
+typedef enum MAGVIEWMODE
+{
+  MAG_VIEW_WINDOW = 0,
+  MAG_VIEW_FOLLOW_MOUSE,
+  MAG_VIEW_LENS,
+  MAG_VIEW_COUNT
+} MAGVIEWMODE;
+
 typedef struct DXGIOUTPUTCAPTURE
 {
   ID3D11Device*             d3dDevice;
@@ -97,6 +105,7 @@ typedef struct SHAREDWGLDATA
   BOOL             fMiniMapHoldVisible;
   BOOL             fMiniMapHaveLastCursor;
   BOOL             fSourceOriginPinned;
+  MAGVIEWMODE      viewMode;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
   POINT            pt;
