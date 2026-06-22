@@ -859,7 +859,11 @@ BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient)
     srcX = render_clipSourceOrigin(srcX, srcW, layout.rcCapture.left, layout.rcCapture.right);
     srcY = render_clipSourceOrigin(srcY, srcH, layout.rcCapture.top, layout.rcCapture.bottom);
 
-    lpsd->fTrackCursor = FALSE;
+    if (lpsd->fTrackCursor)
+    {
+      return TRUE;
+    }
+
     lpsd->fUseSourceOrigin = TRUE;
     lpsd->fSourceOriginPinned = TRUE;
     lpsd->ptSourceOrigin.x = srcX;
