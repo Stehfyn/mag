@@ -25,6 +25,8 @@
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
+void mag_ShowSettingsDialog(HWND hWnd);
+INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
 void mag_OnDestroy(HWND hWnd);
@@ -58,9 +60,11 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
     //HMENU hMenu = LoadPopupMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU1));
 
 
-    AppendMenu(hMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, 1001, _T("Follow Mouse"));
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Help"));
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, 1003, _T("Exit"));
+    AppendMenu(hMenu, ((lpsd->fTrackCursor) ? MF_CHECKED : 0) | MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, _T("Follow Mouse"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_SETTINGS, _T("Settings..."));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_HELP, _T("Help"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_CLOSE, _T("Exit"));
 
     TrackPopupMenuEx(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
 
@@ -75,11 +79,113 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y)
     help_Show(hWnd);
 }
 
+void mag_ShowSettingsDialog(HWND hWnd)
+{
+    DialogBoxParam(
+      GetModuleHandle(NULL),
+      MAKEINTRESOURCE(IDD_SETTINGS),
+      hWnd,
+      mag_SettingsDlgProc,
+      (LPARAM)hWnd);
+}
+
+INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static const LPCTSTR graphicsApis[] =
+    {
+      _T("OpenGL")
+    };
+
+    static const LPCTSTR captureApis[] =
+    {
+      _T("GDI BitBlt")
+    };
+
+    LPSHAREDWGLDATA lpsd;
+    UINT i;
+
+    switch (message)
+    {
+    case WM_INITDIALOG:
+    {
+      HWND hOwner = (HWND)lParam;
+      UINT graphicsApi;
+      UINT captureApi;
+
+      SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)hOwner);
+      lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
+      graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
+      captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
+
+      for (i = 0; i < GRAPHICS_API_COUNT; ++i)
+      {
+        SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_ADDSTRING, 0, (LPARAM)graphicsApis[i]);
+      }
+
+      for (i = 0; i < CAPTURE_API_COUNT; ++i)
+      {
+        SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_ADDSTRING, 0, (LPARAM)captureApis[i]);
+      }
+
+      SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_SETCURSEL, (WPARAM)graphicsApi, 0);
+      SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_SETCURSEL, (WPARAM)captureApi, 0);
+
+      return TRUE;
+    }
+    case WM_COMMAND:
+    {
+      switch (LOWORD(wParam))
+      {
+      case IDOK:
+      {
+        HWND hOwner = (HWND)GetWindowLongPtr(hDlg, DWLP_USER);
+        const LRESULT graphicsApi = SendDlgItemMessage(hDlg, IDC_SETTINGS_GRAPHICS_API, CB_GETCURSEL, 0, 0);
+        const LRESULT captureApi = SendDlgItemMessage(hDlg, IDC_SETTINGS_CAPTURE_API, CB_GETCURSEL, 0, 0);
+
+        lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
+        if (lpsd)
+        {
+          if (0 <= graphicsApi && graphicsApi < GRAPHICS_API_COUNT)
+          {
+            lpsd->graphicsApi = (GRAPHICSAPI)graphicsApi;
+          }
+
+          if (0 <= captureApi && captureApi < CAPTURE_API_COUNT)
+          {
+            lpsd->captureApi = (CAPTUREAPI)captureApi;
+          }
+        }
+
+        EndDialog(hDlg, IDOK);
+        return TRUE;
+      }
+      case IDCANCEL:
+      {
+        EndDialog(hDlg, IDCANCEL);
+        return TRUE;
+      }
+      default:
+        break;
+      }
+      break;
+    }
+    default:
+      break;
+    }
+
+    return FALSE;
+}
+
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
     SetCurrentProcessEfficiencyQoS();
+
+    lpsd->graphicsApi = GRAPHICS_API_OPENGL;
+    lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
 
     renderInit(hWnd);
 
@@ -234,7 +340,7 @@ void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHi
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
 {
     switch(id){
-    case 1001:
+    case ID_CONTEXTMENU_FOLLOW_MOUSE:
     {
       LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
       lpsd->fTrackCursor = !lpsd->fTrackCursor;
@@ -248,12 +354,17 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
       }
       break;
     }
-    case 1002:
+    case ID_CONTEXTMENU_SETTINGS:
+    {
+      mag_ShowSettingsDialog(hWnd);
+      break;
+    }
+    case ID_CONTEXTMENU_HELP:
     {
       mag_ShowHelpMenu(hWnd, 0, 0);
       break;
     }
-    case 1003:
+    case ID_CONTEXTMENU_CLOSE:
     {
       DestroyWindow(hWnd);
       break;
