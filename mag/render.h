@@ -105,6 +105,8 @@ typedef struct SHAREDWGLDATA
   BOOL             fMiniMapHoldVisible;
   BOOL             fMiniMapHaveLastCursor;
   BOOL             fSourceOriginPinned;
+  BOOL             fInSizeMove;
+  BOOL             fRenderMessageDriven;
   MAGVIEWMODE      viewMode;
   GRAPHICSAPI      graphicsApi;
   CAPTUREAPI       captureApi;
@@ -112,7 +114,6 @@ typedef struct SHAREDWGLDATA
   POINT            ptSourceOrigin;
   POINT            ptMiniMapDragOffset;
   POINT            ptMiniMapLastCursor;
-  HWND             hwndLensMouseTarget;
   DWORD            dwMiniMapLastActivity;
   RECT             rc;
   DISPLAYINFO      di;
@@ -142,7 +143,10 @@ void renderCleanup(HWND hWnd);
 
 void renderResizeCapture(HWND hWnd);
 
+void renderSetMessageDriven(HWND hWnd, BOOL fMessageDriven);
+
 void renderRender(HWND hWnd);
+void renderSubmit(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
 

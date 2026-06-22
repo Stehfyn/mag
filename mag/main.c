@@ -1,11 +1,11 @@
 #include "mag.h"
+#include "render.h"
 
 #define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM
 
 typedef struct MAINVBLANKTHREAD
 {
   HWND   hWnd;
-  HANDLE hVBlankEvent;
   HANDLE hStopEvent;
   HANDLE hThread;
 } MAINVBLANKTHREAD, *LPMAINVBLANKTHREAD;
@@ -48,19 +48,20 @@ DWORD WINAPI main_VBlankThreadProc(LPVOID lpParameter)
         break;
       }
 
-      if (D3DKMTWaitForVerticalBlank(lpThread->hWnd))
-      {
-        SetEvent(lpThread->hVBlankEvent);
-      }
-      else
+      if (!D3DKMTWaitForVerticalBlank(lpThread->hWnd))
       {
         if (WAIT_OBJECT_0 == WaitForSingleObject(lpThread->hStopEvent, MAIN_RENDER_INTERVAL_MS))
         {
           break;
         }
-
-        SetEvent(lpThread->hVBlankEvent);
       }
+
+      if (WAIT_OBJECT_0 == WaitForSingleObject(lpThread->hStopEvent, 0) || !IsWindow(lpThread->hWnd))
+      {
+        break;
+      }
+
+      SendMessage(lpThread->hWnd, WM_MAG_RENDER, 0, 0);
     }
 
     return 0;
@@ -70,10 +71,9 @@ BOOL main_StartVBlankThread(HWND hWnd, LPMAINVBLANKTHREAD lpThread)
 {
     ZeroMemory(lpThread, sizeof(*lpThread));
     lpThread->hWnd = hWnd;
-    lpThread->hVBlankEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     lpThread->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    if (!lpThread->hVBlankEvent || !lpThread->hStopEvent)
+    if (!lpThread->hStopEvent)
     {
       main_StopVBlankThread(lpThread);
       return FALSE;
@@ -98,13 +98,39 @@ void main_StopVBlankThread(LPMAINVBLANKTHREAD lpThread)
 
     if (lpThread->hThread)
     {
-      WaitForSingleObject(lpThread->hThread, INFINITE);
-      CloseHandle(lpThread->hThread);
-    }
+      for (;;)
+      {
+        DWORD dwWait = MsgWaitForMultipleObjects(1, &lpThread->hThread, FALSE, INFINITE, QS_ALLINPUT);
 
-    if (lpThread->hVBlankEvent)
-    {
-      CloseHandle(lpThread->hVBlankEvent);
+        if (WAIT_OBJECT_0 == dwWait)
+        {
+          break;
+        }
+
+        if (WAIT_OBJECT_0 + 1 == dwWait)
+        {
+          MSG msg;
+
+          while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+          {
+            if (WM_QUIT == msg.message)
+            {
+              PostQuitMessage((int)msg.wParam);
+            }
+            else
+            {
+              TranslateMessage(&msg);
+              DispatchMessage(&msg);
+            }
+          }
+        }
+        else
+        {
+          break;
+        }
+      }
+
+      CloseHandle(lpThread->hThread);
     }
 
     if (lpThread->hStopEvent)
@@ -126,8 +152,7 @@ _tWinMain(
     HWND hWnd;
     int exitCode = 0;
     MAINVBLANKTHREAD vblankThread;
-    HANDLE waitHandles[1];
-    DWORD waitHandleCount = 0;
+    BOOL fMessageDrivenRender = FALSE;
 
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
@@ -140,23 +165,22 @@ _tWinMain(
 
     if (main_StartVBlankThread(hWnd, &vblankThread))
     {
-      waitHandles[waitHandleCount++] = vblankThread.hVBlankEvent;
+      fMessageDrivenRender = TRUE;
+      renderSetMessageDriven(hWnd, TRUE);
     }
 
     while (main_PumpMessages(hWnd, &exitCode))
     {
-      DWORD dwTimeout;
       DWORD dwWait;
 
-      dwTimeout = waitHandleCount ? INFINITE : MAIN_RENDER_INTERVAL_MS;
-      dwWait = MsgWaitForMultipleObjects(waitHandleCount, waitHandles, FALSE, dwTimeout, QS_ALLINPUT);
+      dwWait = MsgWaitForMultipleObjects(0, NULL, FALSE, fMessageDrivenRender ? INFINITE : MAIN_RENDER_INTERVAL_MS, QS_ALLINPUT);
 
       if (WAIT_FAILED == dwWait)
       {
         break;
       }
 
-      if ((waitHandleCount && WAIT_OBJECT_0 == dwWait) || WAIT_TIMEOUT == dwWait)
+      if (!fMessageDrivenRender && WAIT_TIMEOUT == dwWait)
       {
         if (IsWindow(hWnd))
         {

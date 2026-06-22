@@ -45,11 +45,6 @@ void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode);
 void mag_UpdateViewWindowStyle(HWND hWnd);
 void mag_UpdateLensWindowPosition(HWND hWnd);
 BOOL mag_IsLensMode(HWND hWnd);
-LPARAM mag_MakePointLParam(POINT pt);
-BOOL mag_GetLensSourcePoint(HWND hWnd, POINT ptClient, POINT* lpptSource);
-HWND mag_ChildWindowFromPointDeep(HWND hWnd, POINT ptScreen);
-HWND mag_WindowFromPointSkippingLens(HWND hLens, POINT ptScreen);
-LRESULT mag_ForwardLensMouseMessage(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 void mag_AddTrayIcon(HWND hWnd);
 void mag_DeleteTrayIcon(HWND hWnd);
 void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId);
@@ -73,6 +68,7 @@ LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam);
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
+void mag_OnRender(HWND hWnd);
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys);
 void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
 void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags);
@@ -89,15 +85,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos);
 
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
-
-typedef struct LENSWINDOWFROMPOINTCTX
-{
-  HWND  hLens;
-  POINT ptScreen;
-  HWND  hwndResult;
-} LENSWINDOWFROMPOINTCTX, *LPLENSWINDOWFROMPOINTCTX;
-
-BOOL CALLBACK mag_EnumWindowFromPointSkippingLens(HWND hWnd, LPARAM lParam);
 
 static const SETTINGSOPTION g_graphicsApiOptions[] =
 {
@@ -178,7 +165,6 @@ void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode)
     lpsd->fUseSourceOrigin = FALSE;
     lpsd->fSourceOriginPinned = FALSE;
     lpsd->fMiniMapDragging = FALSE;
-    lpsd->hwndLensMouseTarget = NULL;
 
     mag_UpdateViewWindowStyle(hWnd);
 
@@ -205,8 +191,7 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
     dwExStyle |= WS_EX_LAYERED;
     if (MAG_VIEW_LENS == lpsd->viewMode)
     {
-      dwExStyle &= ~WS_EX_TRANSPARENT;
-      dwExStyle |= WS_EX_NOACTIVATE;
+      dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
     }
     else
     {
@@ -229,8 +214,6 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
     LONG clientHeight;
     LONG clientOffsetX;
     LONG clientOffsetY;
-    LONG windowWidth;
-    LONG windowHeight;
     LONG srcW;
     LONG srcH;
     LONG srcX;
@@ -265,8 +248,6 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
 
     clientOffsetX = ptClientOrigin.x - rcWindow.left;
     clientOffsetY = ptClientOrigin.y - rcWindow.top;
-    windowWidth = RECTWIDTH(rcWindow);
-    windowHeight = RECTHEIGHT(rcWindow);
     hMonitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
     if (hMonitor && GetMonitorInfo(hMonitor, &mi))
     {
@@ -295,8 +276,6 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
     clientCursorY = CLAMP(MulDiv(cursor.y - srcY, clientHeight, srcH), 0, clientHeight);
     x = cursor.x - clientCursorX - clientOffsetX;
     y = cursor.y - clientCursorY - clientOffsetY;
-    x = (windowWidth < RECTWIDTH(rcMonitor)) ? CLAMP(x, rcMonitor.left, rcMonitor.right - windowWidth) : rcMonitor.left;
-    y = (windowHeight < RECTHEIGHT(rcMonitor)) ? CLAMP(y, rcMonitor.top, rcMonitor.bottom - windowHeight) : rcMonitor.top;
 
     if (rcWindow.left != x || rcWindow.top != y)
     {
@@ -309,222 +288,6 @@ BOOL mag_IsLensMode(HWND hWnd)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     return lpsd && MAG_VIEW_LENS == lpsd->viewMode;
-}
-
-LPARAM mag_MakePointLParam(POINT pt)
-{
-    return MAKELPARAM((WORD)(SHORT)pt.x, (WORD)(SHORT)pt.y);
-}
-
-BOOL mag_GetLensSourcePoint(HWND hWnd, POINT ptClient, POINT* lpptSource)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    RECT rcClient;
-    RECT rcSource;
-    LONG clientWidth;
-    LONG clientHeight;
-    LONG srcWidth;
-    LONG srcHeight;
-
-    if (!lpptSource ||
-        !lpsd ||
-        MAG_VIEW_LENS != lpsd->viewMode ||
-        !GetClientRect(hWnd, &rcClient))
-    {
-      return FALSE;
-    }
-
-    clientWidth = RECTWIDTH(rcClient);
-    clientHeight = RECTHEIGHT(rcClient);
-    if (clientWidth < 1 || clientHeight < 1)
-    {
-      return FALSE;
-    }
-
-    render_computeSourceRect(hWnd, &rcSource);
-    srcWidth = RECTWIDTH(rcSource);
-    srcHeight = RECTHEIGHT(rcSource);
-    if (srcWidth < 1 || srcHeight < 1)
-    {
-      return FALSE;
-    }
-
-    lpptSource->x = rcSource.left + MulDiv(ptClient.x, srcWidth, clientWidth);
-    lpptSource->y = rcSource.top + MulDiv(ptClient.y, srcHeight, clientHeight);
-    lpptSource->x = CLAMP(lpptSource->x, rcSource.left, rcSource.right - 1);
-    lpptSource->y = CLAMP(lpptSource->y, rcSource.top, rcSource.bottom - 1);
-
-    return TRUE;
-}
-
-HWND mag_ChildWindowFromPointDeep(HWND hWnd, POINT ptScreen)
-{
-    HWND hwndCurrent = hWnd;
-    UINT depth;
-
-    for (depth = 0; depth < 32 && hwndCurrent; ++depth)
-    {
-      POINT ptClient = ptScreen;
-      HWND hwndChild;
-
-      if (!ScreenToClient(hwndCurrent, &ptClient))
-      {
-        break;
-      }
-
-      hwndChild = ChildWindowFromPointEx(
-        hwndCurrent,
-        ptClient,
-        CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT);
-      if (!hwndChild || hwndChild == hwndCurrent)
-      {
-        break;
-      }
-
-      hwndCurrent = hwndChild;
-    }
-
-    return hwndCurrent;
-}
-
-BOOL CALLBACK mag_EnumWindowFromPointSkippingLens(HWND hWnd, LPARAM lParam)
-{
-    LPLENSWINDOWFROMPOINTCTX lpctx = (LPLENSWINDOWFROMPOINTCTX)lParam;
-    RECT rcWindow;
-
-    if (!lpctx ||
-        !hWnd ||
-        hWnd == lpctx->hLens ||
-        GetAncestor(hWnd, GA_ROOT) == lpctx->hLens ||
-        !IsWindowVisible(hWnd) ||
-        !GetWindowRect(hWnd, &rcWindow) ||
-        !PtInRect(&rcWindow, lpctx->ptScreen))
-    {
-      return TRUE;
-    }
-
-    lpctx->hwndResult = mag_ChildWindowFromPointDeep(hWnd, lpctx->ptScreen);
-    if (!lpctx->hwndResult)
-    {
-      lpctx->hwndResult = hWnd;
-    }
-
-    return FALSE;
-}
-
-HWND mag_WindowFromPointSkippingLens(HWND hLens, POINT ptScreen)
-{
-    LENSWINDOWFROMPOINTCTX ctx;
-
-    ctx.hLens = hLens;
-    ctx.ptScreen = ptScreen;
-    ctx.hwndResult = NULL;
-
-    EnumWindows(mag_EnumWindowFromPointSkippingLens, (LPARAM)&ctx);
-
-    return ctx.hwndResult;
-}
-
-LRESULT mag_ForwardLensMouseMessage(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    POINT ptClient;
-    POINT ptSource;
-    POINT ptTargetClient;
-    HWND hwndTarget;
-    LPARAM lParamTarget;
-    DWORD_PTR result = 0;
-    const BOOL fWheelMessage = (WM_MOUSEWHEEL == message || WM_MOUSEHWHEEL == message);
-    const BOOL fButtonDown =
-      WM_LBUTTONDOWN == message ||
-      WM_LBUTTONDBLCLK == message ||
-      WM_RBUTTONDOWN == message ||
-      WM_RBUTTONDBLCLK == message ||
-      WM_MBUTTONDOWN == message ||
-      WM_MBUTTONDBLCLK == message ||
-      WM_XBUTTONDOWN == message ||
-      WM_XBUTTONDBLCLK == message;
-    const BOOL fButtonUp =
-      WM_LBUTTONUP == message ||
-      WM_RBUTTONUP == message ||
-      WM_MBUTTONUP == message ||
-      WM_XBUTTONUP == message;
-
-    if (!lpsd || MAG_VIEW_LENS != lpsd->viewMode)
-    {
-      return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-
-    if (fWheelMessage)
-    {
-      ptClient.x = GET_X_LPARAM(lParam);
-      ptClient.y = GET_Y_LPARAM(lParam);
-      ScreenToClient(hWnd, &ptClient);
-    }
-    else
-    {
-      ptClient.x = GET_X_LPARAM(lParam);
-      ptClient.y = GET_Y_LPARAM(lParam);
-    }
-
-    if (!mag_GetLensSourcePoint(hWnd, ptClient, &ptSource))
-    {
-      return 0;
-    }
-
-    hwndTarget = lpsd->hwndLensMouseTarget;
-    if (!hwndTarget || !IsWindow(hwndTarget))
-    {
-      hwndTarget = mag_WindowFromPointSkippingLens(hWnd, ptSource);
-    }
-
-    if (!hwndTarget || hwndTarget == hWnd)
-    {
-      return 0;
-    }
-
-    if (fButtonDown)
-    {
-      HWND hwndRoot = GetAncestor(hwndTarget, GA_ROOT);
-
-      lpsd->hwndLensMouseTarget = hwndTarget;
-      SetCapture(hWnd);
-      if (hwndRoot && hwndRoot != hWnd)
-      {
-        SetForegroundWindow(hwndRoot);
-      }
-    }
-
-    if (fWheelMessage)
-    {
-      lParamTarget = mag_MakePointLParam(ptSource);
-    }
-    else
-    {
-      ptTargetClient = ptSource;
-      ScreenToClient(hwndTarget, &ptTargetClient);
-      lParamTarget = mag_MakePointLParam(ptTargetClient);
-    }
-
-    SendMessageTimeout(
-      hwndTarget,
-      message,
-      wParam,
-      lParamTarget,
-      SMTO_ABORTIFHUNG,
-      100,
-      &result);
-
-    if (fButtonUp)
-    {
-      lpsd->hwndLensMouseTarget = NULL;
-      if (GetCapture() == hWnd)
-      {
-        ReleaseCapture();
-      }
-    }
-
-    return (LRESULT)result;
 }
 
 void mag_AddTrayIcon(HWND hWnd)
@@ -903,7 +666,7 @@ UINT mag_OnNCHittest(HWND hWnd, int x, int y)
 
     if (mag_IsLensMode(hWnd))
     {
-      return HTCLIENT;
+      return HTTRANSPARENT;
     }
 
     GetWindowRect(hWnd, &rc);
@@ -1053,7 +816,7 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
     {
       if (GetForegroundWindow() == hWnd)
       {
-        PostMessage(hWnd, WM_DESTROY, 0, 0);
+        DestroyWindow(hWnd);
       }
       break;
     }
@@ -1068,22 +831,39 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 
     UNREFERENCED_PARAMETER(idEvent);
 
-    if (!InMenu())
+    if (lpsd && !lpsd->fRenderMessageDriven)
     {
-      if (lpsd->fTrackCursor)
-      {
-        mag_UpdateViewWindowStyle(hWnd);
-      }
-
-      if (MAG_VIEW_LENS == lpsd->viewMode)
-      {
-        mag_UpdateLensWindowPosition(hWnd);
-      }
-
-      SetWindowAlwaysOnTop(hWnd, TRUE);
-
-      renderRender(hWnd);
+      mag_OnRender(hWnd);
     }
+}
+
+void mag_OnRender(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd || !IsWindowEnabled(hWnd))
+    {
+      return;
+    }
+
+    if (InMenu() && !lpsd->fInSizeMove)
+    {
+      return;
+    }
+
+    if (lpsd->fTrackCursor)
+    {
+      mag_UpdateViewWindowStyle(hWnd);
+    }
+
+    if (MAG_VIEW_LENS == lpsd->viewMode)
+    {
+      mag_UpdateLensWindowPosition(hWnd);
+    }
+
+    SetWindowAlwaysOnTop(hWnd, TRUE);
+
+    renderSubmit(hWnd);
 }
 
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
@@ -1268,14 +1048,8 @@ void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen)
 
 void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
     UNREFERENCED_PARAMETER(hwndNewCapture);
 
-    if (lpsd)
-    {
-      lpsd->hwndLensMouseTarget = NULL;
-    }
     render_minimapEndDrag(hWnd);
 }
 
@@ -1309,6 +1083,7 @@ void mag_OnEnterSizeMove(HWND hWnd)
     if (lpsd)
     {
       lpsd->fMiniMapHoldVisible = TRUE;
+      lpsd->fInSizeMove = TRUE;
     }
     render_minimapNotifyActivity(hWnd);
     SetTimer(hWnd, 0x69, USER_TIMER_MINIMUM, 0);
@@ -1321,6 +1096,7 @@ void mag_OnExitSizeMove(HWND hWnd)
     if (lpsd)
     {
       lpsd->fMiniMapHoldVisible = FALSE;
+      lpsd->fInSizeMove = FALSE;
     }
     render_minimapNotifyActivity(hWnd);
     KillTimer(hWnd, 0x69);
@@ -1420,68 +1196,13 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
       return 0;
     }
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
-    case WM_MOUSEACTIVATE:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return MA_NOACTIVATE;
-      }
-      return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-    case WM_MOUSEMOVE:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return mag_ForwardLensMouseMessage(hWnd, message, wParam, lParam);
-      }
-      mag_OnMouseMove(hWnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), (UINT)wParam);
+    case WM_MAG_RENDER:
+      mag_OnRender(hWnd);
       return 0;
-    }
-    case WM_MOUSEWHEEL:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return mag_ForwardLensMouseMessage(hWnd, message, wParam, lParam);
-      }
-      mag_OnMouseWheel(hWnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), GET_WHEEL_DELTA_WPARAM(wParam), GET_KEYSTATE_WPARAM(wParam));
-      return 0;
-    }
-    case WM_MOUSEHWHEEL:
-    case WM_LBUTTONDBLCLK:
-    case WM_RBUTTONDOWN:
-    case WM_RBUTTONUP:
-    case WM_RBUTTONDBLCLK:
-    case WM_MBUTTONDOWN:
-    case WM_MBUTTONUP:
-    case WM_MBUTTONDBLCLK:
-    case WM_XBUTTONDOWN:
-    case WM_XBUTTONUP:
-    case WM_XBUTTONDBLCLK:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return mag_ForwardLensMouseMessage(hWnd, message, wParam, lParam);
-      }
-      return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-    case WM_LBUTTONDOWN:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return mag_ForwardLensMouseMessage(hWnd, message, wParam, lParam);
-      }
-      mag_OnLButtonDown(hWnd, FALSE, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), (UINT)wParam);
-      return 0;
-    }
-    case WM_LBUTTONUP:
-    {
-      if (mag_IsLensMode(hWnd))
-      {
-        return mag_ForwardLensMouseMessage(hWnd, message, wParam, lParam);
-      }
-      mag_OnLButtonUp(hWnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), (UINT)wParam);
-      return 0;
-    }
+    HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
+    HANDLE_MSG(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
+    HANDLE_MSG(hWnd,  WM_LBUTTONUP,         mag_OnLButtonUp);
+    HANDLE_MSG(hWnd,  WM_MOUSEMOVE,         mag_OnMouseMove);
     case WM_NCMOUSEMOVE:
       mag_OnNCMouseMove(
         hWnd,

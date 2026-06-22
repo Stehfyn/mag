@@ -2210,7 +2210,7 @@ void render_wglInitPBuffer(HWND hWnd)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
 
-    wglSwapIntervalEXT(0);
+    wglSwapIntervalEXT(-1);
 }
 
 void render_wglCreateResources(HWND hWnd)
@@ -2616,9 +2616,39 @@ void renderResizeCapture(HWND hWnd)
     render_wglResizeSurface(hWnd);
 }
 
+void renderSetMessageDriven(HWND hWnd, BOOL fMessageDriven)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (lpsd)
+    {
+      lpsd->fRenderMessageDriven = fMessageDriven;
+    }
+}
+
 void renderRender(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd)
+    {
+      return;
+    }
+
+    if (!lpsd->fRenderMessageDriven)
+    {
+      renderSubmit(hWnd);
+    }
+}
+
+void renderSubmit(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd)
+    {
+      return;
+    }
 
     switch (lpsd->captureApi)
     {
