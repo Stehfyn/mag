@@ -171,6 +171,8 @@ typedef struct DISPLAYINFO
 
 void wglInit(void);
 
+void wglLoadExtensions(void);
+
 int wglFindPixelFormat(HDC hDC, const int* piAttribIList, const FLOAT* pfAttribFList);
 
 BOOL gdiGetDisplayInfo(LPDISPLAYINFO lpdi);

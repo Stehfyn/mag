@@ -188,7 +188,7 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
     }
 
     dwExStyle = GetWindowExStyle(hWnd);
-    dwExStyle |= WS_EX_LAYERED;
+    dwExStyle &= ~WS_EX_LAYERED;
     if (MAG_VIEW_LENS == lpsd->viewMode)
     {
       dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;

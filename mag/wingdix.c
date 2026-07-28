@@ -4,7 +4,7 @@
 
 ATOM wgl_RegisterClass(void);
 BOOL wgl_SelectPixelFormat(HDC hDC);
-void wgl_Load(void);
+void wglLoadExtensions(void);
 void wgl_GetProc(HMODULE hModule, const char* pszProc, PROC* pProc);
 
 BOOL CALLBACK gdi_GetDisplayInfo(HMONITOR hMonitor, HDC hDC, LPRECT lprc, LPARAM lParam);
@@ -34,7 +34,7 @@ BOOL wgl_SelectPixelFormat(HDC hDC)
     return SetPixelFormat(hDC, ChoosePixelFormat(hDC, &pfd), &pfd);
 }
 
-void wgl_Load(void)
+void wglLoadExtensions(void)
 {
     HMODULE __opengl32;
 
@@ -144,7 +144,7 @@ void wglInit(void)
       return;
     }
 
-    wgl_Load();
+    wglLoadExtensions();
 }
 
 int wglFindPixelFormat(HDC hDC, const int* piAttribIList, const FLOAT* pfAttribFList)

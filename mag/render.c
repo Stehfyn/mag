@@ -2062,47 +2062,30 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
 
 void render_wglInit(HWND hWnd)
 {
-    const PIXELFORMATDESCRIPTOR pfd =
-    {
-      sizeof(PIXELFORMATDESCRIPTOR),
-      1,
-      PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-      PFD_TYPE_RGBA,
-      32,
-      0, 0, 0, 0, 0, 0,
-      8,
-      0,
-      0,
-      0, 0, 0, 0,
-      24,
-      8,
-      0,
-      PFD_MAIN_PLANE,
-      0,
-      0, 0, 0
-    };
-
-    const int iAttribs[] =
-    {
-      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
-      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-      WGL_COLOR_BITS_ARB, 32,
-      WGL_DEPTH_BITS_ARB, 24,
-      WGL_ALPHA_BITS_ARB, 8,
-      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
-      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
-      0
-    };
-
+    PIXELFORMATDESCRIPTOR pfd = { sizeof(pfd) };
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    int pixelFormat;
 
-    wglInit();
+    pfd.nVersion = 1;
+    pfd.dwFlags =
+      PFD_DRAW_TO_WINDOW |
+      PFD_SUPPORT_OPENGL |
+      PFD_DOUBLEBUFFER |
+      PFD_SUPPORT_COMPOSITION;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    pfd.cAlphaBits = 8;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+
     lpsd->hDC = GetDC(hWnd);
-    SetPixelFormat(lpsd->hDC, wglFindPixelFormat(lpsd->hDC, iAttribs, NULL), &pfd);
-    lpsd->hRC = wglCreateContextAttribsARB(lpsd->hDC, NULL, NULL);
-    wglMakeCurrent(lpsd->hDC, lpsd->hRC);
+    pixelFormat = ChoosePixelFormat(lpsd->hDC, &pfd);
+    WGLCHECK(pixelFormat);
+    WGLCHECK(SetPixelFormat(lpsd->hDC, pixelFormat, &pfd));
+
+    lpsd->hRC = wglCreateContext(lpsd->hDC);
+    WGLCHECK(lpsd->hRC);
+    WGLCHECK(wglMakeCurrent(lpsd->hDC, lpsd->hRC));
+    wglLoadExtensions();
 
     render_updateSurfaceInfo(hWnd);
     render_gdiCreateResources(hWnd);
@@ -2117,7 +2100,10 @@ void render_wglInit(HWND hWnd)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
 
-    wglSwapIntervalEXT(-1);
+    if (wglSwapIntervalEXT)
+    {
+      wglSwapIntervalEXT(1);
+    }
 }
 
 void render_wglInitPBuffer(HWND hWnd)
