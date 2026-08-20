@@ -2292,6 +2292,44 @@ void render_wglStrokeClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r,
     glEnd();
 }
 
+void render_wglDrawWindowOutline(LPSHAREDWGLDATA lpsd)
+{
+    const LONG width = lpsd->bi.biWidth;
+    const LONG height = lpsd->bi.biHeight;
+    const RECT edges[] =
+    {
+      { 0, 0, width, 1 },
+      { 0, height - 2, width, height - 1 },
+      { 0, 1, 1, height - 2 },
+      { width - 1, 1, width, height - 2 },
+    };
+    UINT i;
+
+    if (width < 2 || height < 2)
+    {
+      return;
+    }
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    for (i = 0; i < ARRAYSIZE(edges); ++i)
+    {
+      render_wglFillClientRect(
+        lpsd,
+        &edges[i],
+        lpsd->cfOutlineColor[0],
+        lpsd->cfOutlineColor[1],
+        lpsd->cfOutlineColor[2],
+        lpsd->cfOutlineColor[3]);
+    }
+
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 void render_wglDrawMiniMap(HWND hWnd)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -2407,6 +2445,7 @@ void render_wglRender(HWND hWnd)
     glEnd();
 
     render_wglDrawMiniMap(hWnd);
+    render_wglDrawWindowOutline(lpsd);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     //glFlush();

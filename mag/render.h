@@ -131,6 +131,7 @@ typedef struct SHAREDWGLDATA
   DWMTHUMBNAILCAPTURE dwmThumbnail;
   DWMPRIVATEVISUALCAPTURE dwmPrivate;
   GLclampf         cfClearColor[CHANNELS];
+  GLclampf         cfOutlineColor[CHANNELS];
   FLOAT            fTexScaler;
   GLuint           glScreenTexture;
   GLubyte*         glScreenData;

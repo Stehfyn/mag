@@ -43,6 +43,7 @@ void mag_ShowHelpMenu(HWND hWnd, int x, int y);
 void mag_ShowSettingsDialog(HWND hWnd);
 void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode);
 void mag_UpdateViewWindowStyle(HWND hWnd);
+void mag_UpdateWindowOutlineColor(HWND hWnd);
 void mag_UpdateLensWindowPosition(HWND hWnd);
 BOOL mag_IsLensMode(HWND hWnd);
 void mag_AddTrayIcon(HWND hWnd);
@@ -200,6 +201,23 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
 
     SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
     SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
+void mag_UpdateWindowOutlineColor(HWND hWnd)
+{
+    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    COLORREF accentColor;
+
+    if (!lpsd)
+    {
+      return;
+    }
+
+    accentColor = GetSysColor(COLOR_HIGHLIGHT);
+    lpsd->cfOutlineColor[0] = GetRValue(accentColor) / 255.0f;
+    lpsd->cfOutlineColor[1] = GetGValue(accentColor) / 255.0f;
+    lpsd->cfOutlineColor[2] = GetBValue(accentColor) / 255.0f;
+    lpsd->cfOutlineColor[3] = 1.0f;
 }
 
 void mag_UpdateLensWindowPosition(HWND hWnd)
@@ -525,6 +543,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     SetCurrentProcessEfficiencyQoS();
     mag_SetTaskbarIcon(hWnd);
     mag_AddTrayIcon(hWnd);
+    mag_UpdateWindowOutlineColor(hWnd);
 
     lpsd->graphicsApi = GRAPHICS_API_OPENGL;
     lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
@@ -1212,6 +1231,14 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
       return 0;
     case WM_MAG_TRAYICON:
       return mag_OnTrayIcon(hWnd, wParam, lParam);
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+      mag_UpdateWindowOutlineColor(hWnd);
+      renderRender(hWnd);
+      return 0;
+    case WM_SYSCOLORCHANGE:
+      mag_UpdateWindowOutlineColor(hWnd);
+      renderRender(hWnd);
+      return 0;
     HANDLE_MSG(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
     HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
     HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);
