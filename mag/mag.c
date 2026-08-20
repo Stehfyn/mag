@@ -7,29 +7,60 @@
 #define FORWARD_MSG(hwnd, message, fn)    \
     default: return (fn)((hwnd), (message), (wParam), (lParam))
 
+#define HANDLE_DIALOG_MSG(hwnd, message, fn) \
+    case (message): return SetDlgMsgResult((hwnd), (message), HANDLE_##message((hwnd), wParam, lParam, (fn)))
+
 #define MOUSE_WHEEL_ZOOM_STEP_SCALE 0.25f
 #define WM_MAG_TRAYICON (WM_APP + 1)
 #define MAG_TRAY_ICON_ID 1
 
-/* void Cls_OnEnterSizeMove(HWND hwnd) */
-#define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd)), 0L)
-
-/* void Cls_OnExitSizeMove(HWND hwnd */
-#define HANDLE_WM_EXITSIZEMOVE(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd)), 0L)
-
-/* void Cls_OnExitSizeMove(HWND hwnd */
-#define HANDLE_WM_ENTERMENULOOP(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd), (BOOL)(wParam)), 0L)
-
-/* void Cls_OnEnterSizeMove(HWND hwnd) */
-#define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \
-        ((fn)((hwnd), (BOOL)(wParam)), 0L)
-
 /* void Cls_OnCaptureChanged(HWND hwnd, HWND hwndNewCapture) */
 #define HANDLE_WM_CAPTURECHANGED(hwnd, wParam, lParam, fn) \
         ((fn)((hwnd), (HWND)(lParam)), 0L)
+#define FORWARD_WM_CAPTURECHANGED(hwnd, hwndNewCapture, fn) \
+        (void)(fn)((hwnd), WM_CAPTURECHANGED, 0L, (LPARAM)(HWND)(hwndNewCapture))
+
+/* void Cls_OnDwmColorizationColorChanged(HWND hwnd, DWORD colorizationColor, BOOL fOpaqueBlend) */
+#define HANDLE_WM_DWMCOLORIZATIONCOLORCHANGED(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (DWORD)(wParam), (BOOL)(lParam)), 0L)
+#define FORWARD_WM_DWMCOLORIZATIONCOLORCHANGED(hwnd, colorizationColor, fOpaqueBlend, fn) \
+        (void)(fn)((hwnd), WM_DWMCOLORIZATIONCOLORCHANGED, (WPARAM)(DWORD)(colorizationColor), (LPARAM)(BOOL)(fOpaqueBlend))
+
+/* void Cls_OnEnterMenuLoop(HWND hwnd, BOOL fIsTrackPopupMenu) */
+#define HANDLE_WM_ENTERMENULOOP(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (BOOL)(wParam)), 0L)
+#define FORWARD_WM_ENTERMENULOOP(hwnd, fIsTrackPopupMenu, fn) \
+        (void)(fn)((hwnd), WM_ENTERMENULOOP, (WPARAM)(BOOL)(fIsTrackPopupMenu), 0L)
+
+/* void Cls_OnEnterSizeMove(HWND hwnd) */
+#define HANDLE_WM_ENTERSIZEMOVE(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd)), 0L)
+#define FORWARD_WM_ENTERSIZEMOVE(hwnd, fn) \
+        (void)(fn)((hwnd), WM_ENTERSIZEMOVE, 0L, 0L)
+
+/* void Cls_OnExitMenuLoop(HWND hwnd, BOOL fIsTrackPopupMenu) */
+#define HANDLE_WM_EXITMENULOOP(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (BOOL)(wParam)), 0L)
+#define FORWARD_WM_EXITMENULOOP(hwnd, fIsTrackPopupMenu, fn) \
+        (void)(fn)((hwnd), WM_EXITMENULOOP, (WPARAM)(BOOL)(fIsTrackPopupMenu), 0L)
+
+/* void Cls_OnExitSizeMove(HWND hwnd) */
+#define HANDLE_WM_EXITSIZEMOVE(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd)), 0L)
+#define FORWARD_WM_EXITSIZEMOVE(hwnd, fn) \
+        (void)(fn)((hwnd), WM_EXITSIZEMOVE, 0L, 0L)
+
+/* void Cls_OnMagRender(HWND hwnd) */
+#define HANDLE_WM_MAG_RENDER(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd)), 0L)
+#define FORWARD_WM_MAG_RENDER(hwnd, fn) \
+        (void)(fn)((hwnd), WM_MAG_RENDER, 0L, 0L)
+
+/* void Cls_OnMagTrayIcon(HWND hwnd, UINT id, UINT notification) */
+#define HANDLE_WM_MAG_TRAYICON(hwnd, wParam, lParam, fn) \
+        ((fn)((hwnd), (UINT)(wParam), (UINT)(lParam)), 0L)
+#define FORWARD_WM_MAG_TRAYICON(hwnd, id, notification, fn) \
+        (void)(fn)((hwnd), WM_MAG_TRAYICON, (WPARAM)(UINT)(id), (LPARAM)(UINT)(notification))
 
 typedef struct SETTINGSOPTION
 {
@@ -52,7 +83,9 @@ void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options,
 BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
 void mag_UpdateSettingsDialogState(HWND hDlg);
 void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
-INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam);
+static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNotify);
+static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
 void mag_OnDestroy(HWND hWnd);
@@ -65,7 +98,7 @@ UINT mag_OnNCHittest(HWND hWnd, int x, int y);
 UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp);
 BOOL mag_OnNCActivate(HWND hWnd, BOOL fActive, HWND hwndActDeact, BOOL fMinimized);
 void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHitTest);
-LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam);
+void mag_OnTrayIcon(HWND hWnd, UINT id, UINT notification);
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify);
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
@@ -75,6 +108,8 @@ void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags
 void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags);
 void mag_OnMouseMove(HWND hWnd, int x, int y, UINT keyFlags);
 void mag_OnNCMouseMove(HWND hWnd, int x, int y, UINT codeHitTest);
+void mag_OnDwmColorizationColorChanged(HWND hWnd, DWORD colorizationColor, BOOL fOpaqueBlend);
+void mag_OnSysColorChange(HWND hWnd);
 void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen);
 void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture);
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy);
@@ -89,16 +124,16 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
 static const SETTINGSOPTION g_graphicsApiOptions[] =
 {
-  { GRAPHICS_API_OPENGL, _T("OpenGL"), TRUE },
+  { GRAPHICS_API_OPENGL, TEXT("OpenGL"), TRUE },
 };
 
 static const SETTINGSOPTION g_captureApiOptions[] =
 {
-  { CAPTURE_API_GDI_BITBLT, _T("GDI BitBlt"), TRUE },
-  { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, _T("DXGI Desktop Duplication"), TRUE },
-  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, _T("Windows Graphics Capture"), TRUE },
-  { CAPTURE_API_DWM_THUMBNAIL, _T("DWM Thumbnail"), TRUE },
-  { CAPTURE_API_DWM_PRIVATE_VISUAL, _T("DWM Private Visual"), TRUE },
+  { CAPTURE_API_GDI_BITBLT, TEXT("GDI BitBlt"), TRUE },
+  { CAPTURE_API_DXGI_DESKTOP_DUPLICATION, TEXT("DXGI Desktop Duplication"), TRUE },
+  { CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE, TEXT("Windows Graphics Capture"), TRUE },
+  { CAPTURE_API_DWM_THUMBNAIL, TEXT("DWM Thumbnail"), TRUE },
+  { CAPTURE_API_DWM_PRIVATE_VISUAL, TEXT("DWM Private Visual"), TRUE },
 };
 
 void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
@@ -137,15 +172,15 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
       break;
     }
 
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_WINDOW_MODE, _T("Window"));
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, _T("Follow Mouse"));
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_LENS_MODE, _T("Lens"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_WINDOW_MODE, TEXT("Window"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_FOLLOW_MOUSE, TEXT("Follow Mouse"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_LENS_MODE, TEXT("Lens"));
     CheckMenuRadioItem(hMenu, 0, 2, checkedPosition, MF_BYPOSITION);
     AppendMenu(hMenu, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_SETTINGS, _T("Settings..."));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_SETTINGS, TEXT("Settings..."));
     AppendMenu(hMenu, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_HELP, _T("Help"));
-    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_CLOSE, _T("Exit"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_HELP, TEXT("Help"));
+    AppendMenu(hMenu, MF_BYPOSITION | MF_STRING, ID_CONTEXTMENU_CLOSE, TEXT("Exit"));
 
     TrackPopupMenuEx(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_WORKAREA, x, y, hWnd, NULL);
 
@@ -324,7 +359,7 @@ void mag_AddTrayIcon(HWND hWnd)
       GetSystemMetrics(SM_CXSMICON),
       GetSystemMetrics(SM_CYSMICON),
       LR_DEFAULTCOLOR | LR_SHARED);
-    lstrcpyn(nid.szTip, _T("mag"), ARRAYSIZE(nid.szTip));
+    lstrcpyn(nid.szTip, TEXT("mag"), ARRAYSIZE(nid.szTip));
 
     Shell_NotifyIcon(NIM_ADD, &nid);
 }
@@ -418,54 +453,55 @@ void mag_UpdateSettingsDialogState(HWND hDlg)
 
     if (!fValid)
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T("Select a graphics API and capture API."));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Select a graphics API and capture API."));
     }
     else if (!fGraphicsImplemented || !fCaptureImplemented)
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T("Planned APIs are listed but cannot be applied yet."));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Planned APIs are listed but cannot be applied yet."));
     }
     else
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, _T(""));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT(""));
     }
 }
 
-INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam)
 {
+    HWND hOwner = (HWND)lParam;
     LPSHAREDWGLDATA lpsd;
+    UINT graphicsApi;
+    UINT captureApi;
 
-    switch (message)
+    UNREFERENCED_PARAMETER(hwndFocus);
+
+    SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)hOwner);
+    lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
+    graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
+    captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
+
+    mag_AddSettingsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), graphicsApi);
+    mag_AddSettingsOptions(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), captureApi);
+    SendDlgItemMessage(
+      hDlg,
+      IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,
+      BM_SETCHECK,
+      (lpsd && lpsd->fMouseRelativeZoom) ? BST_CHECKED : BST_UNCHECKED,
+      0);
+    mag_UpdateSettingsDialogState(hDlg);
+
+    return TRUE;
+}
+
+static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNotify)
+{
+    UNREFERENCED_PARAMETER(hwndCtl);
+
+    switch (id)
     {
-    case WM_INITDIALOG:
-    {
-      HWND hOwner = (HWND)lParam;
-      UINT graphicsApi;
-      UINT captureApi;
-
-      SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)hOwner);
-      lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
-      graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
-      captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
-
-      mag_AddSettingsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), graphicsApi);
-      mag_AddSettingsOptions(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), captureApi);
-      SendDlgItemMessage(
-        hDlg,
-        IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,
-        BM_SETCHECK,
-        (lpsd && lpsd->fMouseRelativeZoom) ? BST_CHECKED : BST_UNCHECKED,
-        0);
-      mag_UpdateSettingsDialogState(hDlg);
-
-      return TRUE;
-    }
-    case WM_COMMAND:
-    {
-      switch (LOWORD(wParam))
-      {
-      case IDOK:
+    case IDOK:
       {
         HWND hOwner = (HWND)GetWindowLongPtr(hDlg, DWLP_USER);
+        LPSHAREDWGLDATA lpsd;
         UINT graphicsApi = GRAPHICS_API_OPENGL;
         UINT captureApi = CAPTURE_API_GDI_BITBLT;
         BOOL fGraphicsImplemented = FALSE;
@@ -477,9 +513,9 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
           !fGraphicsImplemented ||
           !fCaptureImplemented)
         {
-          MessageBox(hDlg, _T("That backend is listed for planning but is not implemented yet."), _T("Settings"), MB_OK | MB_ICONINFORMATION);
+          MessageBox(hDlg, TEXT("That backend is listed for planning but is not implemented yet."), TEXT("Settings"), MB_OK | MB_ICONINFORMATION);
           mag_UpdateSettingsDialogState(hDlg);
-          return TRUE;
+          return;
         }
 
         lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
@@ -505,32 +541,34 @@ INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         }
 
         EndDialog(hDlg, IDOK);
-        return TRUE;
+        return;
       }
-      case IDC_SETTINGS_GRAPHICS_API:
-      case IDC_SETTINGS_CAPTURE_API:
+    case IDC_SETTINGS_GRAPHICS_API:
+    case IDC_SETTINGS_CAPTURE_API:
       {
-        if (CBN_SELCHANGE == HIWORD(wParam))
+        if (CBN_SELCHANGE == codeNotify)
         {
           mag_UpdateSettingsDialogState(hDlg);
-          return TRUE;
         }
-        break;
+        return;
       }
-      case IDCANCEL:
+    case IDCANCEL:
       {
         EndDialog(hDlg, IDCANCEL);
-        return TRUE;
+        return;
       }
-      default:
-        break;
-      }
-      break;
-    }
     default:
-      break;
+      return;
     }
+}
 
+static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    HANDLE_DIALOG_MSG(hDlg, WM_INITDIALOG, mag_Settings_OnInitDialog);
+    HANDLE_DIALOG_MSG(hDlg, WM_COMMAND,    mag_Settings_OnCommand);
+    }
     return FALSE;
 }
 
@@ -747,16 +785,16 @@ void mag_OnNCRButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT codeHi
     mag_ShowPopupMenu(hWnd, x, y);
 }
 
-LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam)
+void mag_OnTrayIcon(HWND hWnd, UINT id, UINT notification)
 {
     POINT pt;
 
-    if (MAG_TRAY_ICON_ID != (UINT)wParam)
+    if (MAG_TRAY_ICON_ID != id)
     {
-      return 0;
+      return;
     }
 
-    if (WM_RBUTTONUP == lParam || WM_CONTEXTMENU == lParam)
+    if (WM_RBUTTONUP == notification || WM_CONTEXTMENU == notification)
     {
       if (GetCursorPos(&pt))
       {
@@ -765,8 +803,6 @@ LRESULT mag_OnTrayIcon(HWND hWnd, WPARAM wParam, LPARAM lParam)
         PostMessage(hWnd, WM_NULL, 0, 0);
       }
     }
-
-    return 0;
 }
 
 void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
@@ -814,10 +850,14 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(fDown);
-    UNREFERENCED_PARAMETER(cRepeat);
-    UNREFERENCED_PARAMETER(flags);
 
-    if (!lpsd || MAG_VIEW_LENS == lpsd->viewMode)
+    if (lpsd && MAG_VIEW_LENS == lpsd->viewMode)
+    {
+      FORWARD_WM_KEYUP(hWnd, vk, cRepeat, flags, DefWindowProc);
+      return;
+    }
+
+    if (!lpsd)
     {
       return;
     }
@@ -1046,6 +1086,21 @@ void mag_OnNCMouseMove(HWND hWnd, int x, int y, UINT codeHitTest)
     mag_NotifyMiniMapCursorActivity(hWnd, ptScreen);
 }
 
+void mag_OnDwmColorizationColorChanged(HWND hWnd, DWORD colorizationColor, BOOL fOpaqueBlend)
+{
+    UNREFERENCED_PARAMETER(colorizationColor);
+    UNREFERENCED_PARAMETER(fOpaqueBlend);
+
+    mag_UpdateWindowOutlineColor(hWnd);
+    renderRender(hWnd);
+}
+
+void mag_OnSysColorChange(HWND hWnd)
+{
+    mag_UpdateWindowOutlineColor(hWnd);
+    renderRender(hWnd);
+}
+
 void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen)
 {
     LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -1202,43 +1257,17 @@ LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     HANDLE_MSG(hWnd,  WM_NCACTIVATE,        mag_OnNCActivate);
     HANDLE_MSG(hWnd,  WM_NCRBUTTONDOWN,     mag_OnNCRButtonDown);
     HANDLE_MSG(hWnd,  WM_COMMAND,           mag_OnCommand);
-    case WM_KEYUP:
-    {
-      LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
-      if (lpsd && MAG_VIEW_LENS == lpsd->viewMode)
-      {
-        return DefWindowProc(hWnd, message, wParam, lParam);
-      }
-
-      mag_OnKeyUp(hWnd, (UINT)wParam, FALSE, LOWORD(lParam), HIWORD(lParam));
-      return 0;
-    }
+    HANDLE_MSG(hWnd,  WM_KEYUP,             mag_OnKeyUp);
     HANDLE_MSG(hWnd,  WM_TIMER,             mag_OnTimer);
-    case WM_MAG_RENDER:
-      mag_OnRender(hWnd);
-      return 0;
+    HANDLE_MSG(hWnd,  WM_MAG_RENDER,        mag_OnRender);
     HANDLE_MSG(hWnd,  WM_MOUSEWHEEL,        mag_OnMouseWheel);
     HANDLE_MSG(hWnd,  WM_LBUTTONDOWN,       mag_OnLButtonDown);
     HANDLE_MSG(hWnd,  WM_LBUTTONUP,         mag_OnLButtonUp);
     HANDLE_MSG(hWnd,  WM_MOUSEMOVE,         mag_OnMouseMove);
-    case WM_NCMOUSEMOVE:
-      mag_OnNCMouseMove(
-        hWnd,
-        (int)(short)LOWORD(lParam),
-        (int)(short)HIWORD(lParam),
-        (UINT)wParam);
-      return 0;
-    case WM_MAG_TRAYICON:
-      return mag_OnTrayIcon(hWnd, wParam, lParam);
-    case WM_DWMCOLORIZATIONCOLORCHANGED:
-      mag_UpdateWindowOutlineColor(hWnd);
-      renderRender(hWnd);
-      return 0;
-    case WM_SYSCOLORCHANGE:
-      mag_UpdateWindowOutlineColor(hWnd);
-      renderRender(hWnd);
-      return 0;
+    HANDLE_MSG(hWnd,  WM_NCMOUSEMOVE,       mag_OnNCMouseMove);
+    HANDLE_MSG(hWnd,  WM_MAG_TRAYICON,      mag_OnTrayIcon);
+    HANDLE_MSG(hWnd,  WM_DWMCOLORIZATIONCOLORCHANGED, mag_OnDwmColorizationColorChanged);
+    HANDLE_MSG(hWnd,  WM_SYSCOLORCHANGE,    mag_OnSysColorChange);
     HANDLE_MSG(hWnd,  WM_CAPTURECHANGED,    mag_OnCaptureChanged);
     HANDLE_MSG(hWnd,  WM_ENTERMENULOOP,     mag_OnEnterMenuLoop);
     HANDLE_MSG(hWnd,  WM_EXITMENULOOP,      mag_OnExitMenuLoop);
