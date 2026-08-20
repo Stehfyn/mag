@@ -30,6 +30,9 @@
     <ClCompile Include="d3dkmtx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="dwmprivate.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="help.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -57,6 +60,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="d3dkmtx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dwmprivate.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="render.h">

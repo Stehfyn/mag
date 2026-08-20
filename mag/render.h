@@ -1,6 +1,7 @@
 #pragma once
 
 #include "framework.h"
+#include "dwmprivate.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -75,24 +76,7 @@ typedef struct DWMTHUMBNAILCAPTURE
 
 typedef struct DWMPRIVATEVISUALCAPTURE
 {
-  HWND         hwndHost;
-  HMODULE      hDComp;
-  HMODULE      hDwmApi;
-  HMODULE      hUser32;
-  FARPROC      pDCompositionCreateDevice;
-  FARPROC      pDCompositionCreateDevice3;
-  FARPROC      pCreateSharedVisual;
-  FARPROC      pUpdateSharedVisual;
-  FARPROC      pSetWindowCompositionAttribute;
-  ID3D11Device* d3dDevice;
-  IDXGIDevice* dxgiDevice;
-  IUnknown*    dcompDevice;
-  IUnknown*    dcompTarget;
-  IUnknown*    dcompVisual;
-  HTHUMBNAIL   hThumbnail;
-  BOOL         fDesktopDevice;
-  BOOL         fUseMultiWindow;
-  BOOL         fInitialized;
+  DWMPRIVATECAPTURESTATE* state;
 } DWMPRIVATEVISUALCAPTURE, *LPDWMPRIVATEVISUALCAPTURE;
 
 typedef struct SHAREDWGLDATA

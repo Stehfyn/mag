@@ -166,6 +166,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="d3dkmtx.c" />
+    <ClCompile Include="dwmprivate.cpp" />
     <ClCompile Include="dwmapix.c" />
     <ClCompile Include="help.c" />
     <ClCompile Include="mag.c" />
@@ -176,6 +177,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d3dkmtx.h" />
+    <ClInclude Include="dwmprivate.h" />
     <ClInclude Include="dwmapix.h" />
     <ClInclude Include="help.h" />
     <ClInclude Include="framework.h" />
