@@ -19,8 +19,10 @@ The following rules apply throughout:
 - `Auto` chooses the highest-performance supported route. It never chooses a traditional per-pixel layered-window round trip, a legacy BitBlt presentation path, WARP, or a CPU staging path while a hardware native route is usable.
 - Explicit legacy and diagnostic presentation targets remain available because full presentation-model parity requires them, but the UI labels their copy class and performance cost.
 - Requested presentation model and observed presentation model are different fields. Independent Flip, Hardware Composed Independent Flip, and multi-plane overlay promotion are system outcomes, not modes an application can force with one API call.
+- Presentation is orthogonal to rendering: `renderer -> native frame -> presenter -> host`. Every target profile is implemented for every renderer through a native shared-resource bridge where the APIs permit one, or through an explicitly classified GPU/CPU transfer where that target inherently requires it. A target must not remain a renderer-specific placeholder or be rejected merely because the selected renderer is not Direct3D 11.
 - Applying a setting is transactional. The old visible host and resources remain usable until the candidate has rendered and submitted a first frame.
 - A failed candidate leaves the old configuration active and leaves persisted settings unchanged.
+- Zero flicker is the minimum viable behavior for every selectable combination. A route that cannot preserve continuous, geometry-matched content during resize is unavailable and explains why; it is never exposed as a working setting with a known flickering fallback.
 - The zero-flicker resize gate is a visual gate. Existing resize code is treated as defective until that gate passes.
 
 ## Sources read and the contracts taken from them
@@ -208,6 +210,8 @@ The target is a solver input, not a false promise. Each profile owns the control
 | Composed: Copy with GPU GDI | Explicit redirected BitBlt/GDI-compatible GPU path | Exact observation |
 | Composed: Copy with CPU GDI | Explicit CPU DIB/GDI diagnostic path | Exact observation |
 
+The table applies across GDI, OpenGL, D3D9/9Ex, D3D11, D3D12, and Vulkan renderers. The presenter, not the renderer enum, owns the target model. The resolver may reject a product only for a measured machine/API capability or an unavoidable copy-policy conflict, and the reason must identify that failed prerequisite rather than say the target is unimplemented for that renderer.
+
 `IDXGIOutput6::CheckHardwareCompositionSupport` is used as a capability hint, not as proof of the active mode. Classic paths get a minimal process-scoped PresentMon-compatible ETW observer. Presentation Manager paths also consume composition-swapchain presentation statistics and buffer-retirement information. Observation shuts down cleanly and never installs a machine-wide service.
 
 ## Surface and host parity
@@ -394,6 +398,8 @@ The replacement resize protocol is:
 9. HWND flip presenters use a live-resize reservoir and defer destructive `ResizeBuffers` until a safe boundary. If a temporary composition bridge is needed to retain pixels, it is app-owned and removed after the new chain has presented.
 10. On `WM_EXITSIZEMOVE`, coalesce to the final size, retire surplus images after their tokens complete, and return to normal pacing.
 
+`WM_EXITSIZEMOVE` is never the first point at which new visuals become visible. Every committed `WM_WINDOWPOSCHANGED` publishes a fresh frame for that exact client geometry during the modal sizing loop. Ordinary live-resize frames use a nonblocking latest-frame policy; late work is dropped instead of being queued and displayed after newer geometry. Automated tracing fails a route if any geometry epoch is omitted, displayed out of order, or exceeds the bounded live-resize submission latency.
+
 Every present stamp records epoch, HWND generation, actual client/window rectangles, image identity/size, target and observed model, visual-tree commit id, present id, and retirement result. This makes stale strips and future-size frames diagnosable.
 
 ## Implementation stages
@@ -467,16 +473,19 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 ### Build and static gates
 
 - Debug and Release, Win32 and x64, using the repository's supported Windows SDK/toolset.
+- Every automated HWND/render test runs on a private non-input Win32 desktop created specifically for that test process. Failure to create or bind the private desktop fails closed before any test HWND is created. Automated tests never call `SwitchDesktop` and never create, move, capture, or present a test window on the user's input desktop.
 - No Windows SDK header is generated, edited, deleted, or vendored. Any missing two-macro message cracker belongs in the project's own extension header.
 - Every enum appears exactly once in an authoritative registry; UI and persistence are registry-driven.
 - WGL, D3D9, D3D11, D3D12, Vulkan, Direct2D, DirectWrite, DirectComposition, and Presentation API debug/validation output has no live-object or synchronization errors at shutdown.
 - `git diff --check` passes and generated help/source artifacts are updated only by their repository generator.
+- Normal startup creates the host hidden, creates only resources required by the resolved route, submits a complete first frame, and reveals it in one transaction. Timing traces fail startup that exposes the class/background brush, a white application frame, a busy cursor, or performs redundant renderer/presenter construction before first visibility.
 
 ### Functional matrix
 
 - Every graphics API with every meaningful capture API, UI API, text API, host, surface ownership, and presentation target.
 - Every connected Display Adapter with `Auto`, `Same as Display`, `Same as Capture`, and every compatible explicit Hardware Adapter; disconnected persisted identities and unsupported cross-adapter pairs produce exact status without rebinding to the wrong device.
 - Every ordered live transition between supported configurations, including failure rollback.
+- During every modal resize, each committed geometry epoch produces a fresh matching visual before the next epoch; no route may defer its first update until `WM_EXITSIZEMOVE`. Per-epoch submission stays within the test's bounded latency and stale/late frames are rejected rather than displayed.
 - Window, Follow Mouse, and Lens modes; pan, wheel zoom, pointer-relative zoom, minimap fade/drag, outline, overlays, activation policy, and pointer input.
 - Negative-coordinate monitors, mixed DPI, mixed refresh, HDR/SDR where supported, adapter migration, external-monitor-only, display disconnect/reconnect, minimize/restore, lock/UAC desktop transition, and occlusion.
 - Device-lost/out-of-date injection for D3D9, D3D11, D3D12, and Vulkan.
@@ -506,6 +515,10 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 ### Visible zero-flicker resize proof
 
 Run the real `mag.exe` and record/capture slow and rapid drags from all four edges and all four corners for every presentation-host family. Include grow, shrink, reversal mid-drag, off-screen edges, mixed-DPI monitor crossing, active video, and external-monitor-only.
+
+The test matrix covers the Cartesian product of every combination the capability solver leaves selectable: graphics, capture, UI, text, target, surface ownership, composition host, copy requirement, alpha mode, Display Adapter, and Hardware Adapter. Unsupported products must be rejected before Apply. A single flickering supported product fails the release; there is no exempt legacy, diagnostic, layered, or software route.
+
+This is a deliberate human-visible acceptance session, not an automated test. All automated resize and presentation tests remain on their private non-input desktop; no automation is allowed to take control of or place test windows on the desktop the user is using.
 
 The failure count must be zero for:
 

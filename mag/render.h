@@ -3,6 +3,8 @@
 #include "framework.h"
 #include "dwmprivate.h"
 #include "graphics.h"
+#include "graphics_layered.h"
+#include "presentation.h"
 #include "ui_renderer.h"
 
 #include <d3d11.h>
@@ -11,16 +13,6 @@
 #define CHANNELS (4)
 #define BITS_PER_PIXEL (CHANNELS << 3) // 8 bits = 2^3 
 #define SURFACE_BYTES(rc) (CHANNELS * RECTWIDTH((rc)) * RECTHEIGHT((rc)))
-
-typedef enum CAPTUREAPI
-{
-  CAPTURE_API_GDI_BITBLT = 0,
-  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
-  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
-  CAPTURE_API_DWM_THUMBNAIL,
-  CAPTURE_API_DWM_PRIVATE_VISUAL,
-  CAPTURE_API_COUNT
-} CAPTUREAPI;
 
 typedef enum MAGVIEWMODE
 {
@@ -92,6 +84,10 @@ typedef struct MAGSTATE
   TEXTRENDERER     textRenderer;
   CAPTUREAPI       captureApi;
   CAPTUREAPI       activeCaptureApi;
+  MAGPRESENTATIONSETTINGS presentationSettings;
+  MAGPRESENTATIONSETTINGS resolvedPresentation;
+  MAGPRESENTATIONSTATUS presentationStatus;
+  MAGLAYEREDPRESENTER* layeredPresenter;
   SRWLOCK          graphicsLock;
   const MAGGRAPHICSBACKEND* graphicsBackend;
   void*            graphicsState;
@@ -106,6 +102,9 @@ typedef struct MAGSTATE
   DISPLAYINFO      di;
   BITMAPINFOHEADER bi;
   MAGPIXELBUFFER   frame;
+  UINT             frameCapacityWidth;
+  UINT             frameCapacityHeight;
+  UINT64           captureSurfaceGeneration;
   MAGUIDRAWLIST    uiDrawList;
   MAGUIRENDERER*   uiRenderer;
   MAGPIXELBUFFER   presentationFrame;
@@ -114,6 +113,18 @@ typedef struct MAGSTATE
   BOOL             fInResizePresent;
   BOOL             fGraphicsPresentationEnabled;
   BOOL             fResizeContractViolation;
+  BOOL             fForceGraphicsRecreate;
+  BOOL             fGeometryTransition;
+  BOOL             fDeferredResize;
+  SIZE             deferredClientSize;
+  UINT64           geometryEpoch;
+  UINT64           committedGeometryEpoch;
+  UINT64           presentedGeometryEpoch;
+  UINT64           stateTransitionEpoch;
+  UINT64           presentedStateTransitionEpoch;
+  LONGLONG         presentedTargetFrame;
+  MAGPRESENTINTENT presentIntent;
+  BOOL             fPresentIntentActive;
   UINT             resizePrecommitCount;
   UINT             resizeCommitCount;
   FLOAT            fScale;
@@ -137,6 +148,7 @@ void renderCleanup(HWND hWnd);
 BOOL renderResizeCapture(HWND hWnd);
 BOOL renderPrepareWindowResize(HWND hWnd, SIZE proposedClientSize);
 BOOL renderPresentCommittedGeometry(HWND hWnd);
+BOOL renderSubmitStateTransitionFrame(HWND hWnd, BOOL synchronize);
 
 BOOL renderSetGraphicsApi(HWND hWnd, GRAPHICSAPI api, LPTSTR reason, UINT reasonCount);
 BOOL renderApplyPresentationSettings(
@@ -154,6 +166,15 @@ BOOL renderApplySettings(
   TEXTRENDERER textRenderer,
   LPTSTR reason,
   UINT reasonCount);
+BOOL renderApplyFullSettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  CAPTUREAPI captureApi,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  const MAGPRESENTATIONSETTINGS* presentation,
+  LPTSTR reason,
+  UINT reasonCount);
 BOOL renderSetUiRendering(
   HWND hWnd,
   UIGRAPHICSAPI uiApi,
@@ -166,6 +187,7 @@ HANDLE renderDuplicateFrameWaitHandle(HWND hWnd);
 
 void renderRender(HWND hWnd);
 BOOL renderSubmit(HWND hWnd);
+BOOL renderSubmitLiveFrame(HWND hWnd);
 int renderRunGraphicsSmoke(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);

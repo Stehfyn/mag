@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "graphics.h"
+#include "presentation.h"
 
 #include <gl/GL.h>
 
@@ -12,10 +13,23 @@ typedef struct MAGOPENGLSTATE
   const MAGGLYPHATLAS* glyphAtlasIdentity;
   UINT   width;
   UINT   height;
+  UINT   capacityWidth;
+  UINT   capacityHeight;
+  UINT64 resourceGeneration;
+  UINT   syncInterval;
 } MAGOPENGLSTATE;
 
 static BOOL magGraphicsOpenGLIsAvailable(LPTSTR reason, UINT reasonCount)
 {
+    if (!magGraphicsIsInputDesktop())
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("Window-system OpenGL is unavailable on the private non-input test desktop."), reasonCount);
+      }
+      return FALSE;
+    }
+
     if (reason && reasonCount)
     {
       reason[0] = TEXT('\0');
@@ -25,9 +39,35 @@ static BOOL magGraphicsOpenGLIsAvailable(LPTSTR reason, UINT reasonCount)
 
 static BOOL magGraphicsOpenGLCreateTexture(MAGOPENGLSTATE* state, SIZE clientSize)
 {
+    SIZE reservoirSize;
+    GLint maximumTextureSize = 0;
+
     if (clientSize.cx < 1 || clientSize.cy < 1)
     {
       return FALSE;
+    }
+
+    state->width = (UINT)clientSize.cx;
+    state->height = (UINT)clientSize.cy;
+    if (state->texture &&
+        state->width <= state->capacityWidth &&
+        state->height <= state->capacityHeight)
+    {
+      return TRUE;
+    }
+
+    reservoirSize = magGraphicsChooseReservoirSize(NULL, clientSize);
+    reservoirSize.cx = max(reservoirSize.cx, (LONG)state->capacityWidth);
+    reservoirSize.cy = max(reservoirSize.cy, (LONG)state->capacityHeight);
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    if (maximumTextureSize < clientSize.cx || maximumTextureSize < clientSize.cy)
+    {
+      return FALSE;
+    }
+    if (0 < maximumTextureSize)
+    {
+      reservoirSize.cx = min(reservoirSize.cx, maximumTextureSize);
+      reservoirSize.cy = min(reservoirSize.cy, maximumTextureSize);
     }
 
     if (state->texture)
@@ -48,24 +88,30 @@ static BOOL magGraphicsOpenGLCreateTexture(MAGOPENGLSTATE* state, SIZE clientSiz
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, clientSize.cx, clientSize.cy, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, reservoirSize.cx, reservoirSize.cy, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
 
-    state->width = (UINT)clientSize.cx;
-    state->height = (UINT)clientSize.cy;
+    state->capacityWidth = (UINT)reservoirSize.cx;
+    state->capacityHeight = (UINT)reservoirSize.cy;
+    ++state->resourceGeneration;
     return GL_NO_ERROR == glGetError();
 }
 
-static BOOL magGraphicsOpenGLCreate(HWND hWnd, SIZE clientSize, void** stateOut)
+static BOOL magGraphicsOpenGLCreate(
+  HWND hWnd,
+  SIZE clientSize,
+  const struct MAGPRESENTATIONSETTINGS* presentation,
+  void** stateOut)
 {
     PIXELFORMATDESCRIPTOR pfd = { sizeof(pfd) };
     MAGOPENGLSTATE* state;
     int pixelFormat;
 
-    if (!stateOut)
+    if (!stateOut || !presentation)
     {
       return FALSE;
     }
     *stateOut = NULL;
+    SetLastError(ERROR_SUCCESS);
 
     state = (MAGOPENGLSTATE*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*state));
     if (!state)
@@ -84,6 +130,7 @@ static BOOL magGraphicsOpenGLCreate(HWND hWnd, SIZE clientSize, void** stateOut)
     if (!state->hDC)
     {
       HeapFree(GetProcessHeap(), 0, state);
+      SetLastError(0xE001);
       return FALSE;
     }
 
@@ -95,6 +142,7 @@ static BOOL magGraphicsOpenGLCreate(HWND hWnd, SIZE clientSize, void** stateOut)
       {
         ReleaseDC(hWnd, state->hDC);
         HeapFree(GetProcessHeap(), 0, state);
+        SetLastError(0xE002);
         return FALSE;
       }
     }
@@ -108,6 +156,7 @@ static BOOL magGraphicsOpenGLCreate(HWND hWnd, SIZE clientSize, void** stateOut)
       }
       ReleaseDC(hWnd, state->hDC);
       HeapFree(GetProcessHeap(), 0, state);
+      SetLastError(0xE003);
       return FALSE;
     }
 
@@ -123,15 +172,19 @@ static BOOL magGraphicsOpenGLCreate(HWND hWnd, SIZE clientSize, void** stateOut)
 
     if (wglSwapIntervalEXT)
     {
-      wglSwapIntervalEXT(1);
+      wglSwapIntervalEXT((int)presentation->syncInterval);
     }
+    state->syncInterval = presentation->syncInterval;
 
     if (!magGraphicsOpenGLCreateTexture(state, clientSize))
     {
+      const GLenum error = glGetError();
+      const DWORD failure = error ? (0xE100 | (DWORD)error) : 0xE004;
       wglMakeCurrent(NULL, NULL);
       wglDeleteContext(state->hRC);
       ReleaseDC(hWnd, state->hDC);
       HeapFree(GetProcessHeap(), 0, state);
+      SetLastError(failure);
       return FALSE;
     }
 
@@ -363,13 +416,23 @@ static void magGraphicsOpenGLDrawText(
     glDisable(GL_TEXTURE_2D);
 }
 
-static BOOL magGraphicsOpenGLRender(HWND hWnd, void* opaqueState, const MAGPIXELBUFFER* frame, const MAGUIDRAWLIST* ui)
+static BOOL magGraphicsOpenGLRender(
+  HWND hWnd,
+  void* opaqueState,
+  const MAGPIXELBUFFER* frame,
+  const MAGUIDRAWLIST* ui,
+  const MAGPRESENTINTENT* intent)
 {
     MAGOPENGLSTATE* state = (MAGOPENGLSTATE*)opaqueState;
     UINT i;
+    const FLOAT uMax = state && state->capacityWidth
+      ? (FLOAT)state->width / (FLOAT)state->capacityWidth
+      : 1.0f;
+    const FLOAT vMax = state && state->capacityHeight
+      ? (FLOAT)state->height / (FLOAT)state->capacityHeight
+      : 1.0f;
 
     UNREFERENCED_PARAMETER(hWnd);
-
     if (!state || !frame || !frame->pixels ||
         frame->width != state->width || frame->height != state->height ||
         !wglMakeCurrent(state->hDC, state->hRC))
@@ -387,18 +450,20 @@ static BOOL magGraphicsOpenGLRender(HWND hWnd, void* opaqueState, const MAGPIXEL
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, state->texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, (GLint)(frame->stride / 4U));
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, state->width, state->height, GL_BGRA, GL_UNSIGNED_BYTE, frame->pixels);
+    glPixelStorei(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, 0);
 
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
     glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 1.0f : 0.0f);
+    glTexCoord2f(0.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? vMax : 0.0f);
     glVertex2f(-1.0f, -1.0f);
-    glTexCoord2f(1.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 1.0f : 0.0f);
+    glTexCoord2f(uMax, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? vMax : 0.0f);
     glVertex2f(1.0f, -1.0f);
-    glTexCoord2f(1.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 0.0f : 1.0f);
+    glTexCoord2f(uMax, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 0.0f : vMax);
     glVertex2f(1.0f, 1.0f);
-    glTexCoord2f(0.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 0.0f : 1.0f);
+    glTexCoord2f(0.0f, frame->rowOrder == MAG_ROW_ORDER_TOP_DOWN ? 0.0f : vMax);
     glVertex2f(-1.0f, 1.0f);
     glEnd();
 
@@ -427,13 +492,30 @@ static BOOL magGraphicsOpenGLRender(HWND hWnd, void* opaqueState, const MAGPIXEL
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glFlush();
-    return SwapBuffers(state->hDC);
+    if (intent && !intent->synchronize && wglSwapIntervalEXT)
+    {
+      wglSwapIntervalEXT(0);
+    }
+    {
+      BOOL presented = SwapBuffers(state->hDC);
+      if (intent && !intent->synchronize && wglSwapIntervalEXT)
+      {
+        wglSwapIntervalEXT((int)state->syncInterval);
+      }
+      return presented;
+    }
 }
 
 static HANDLE magGraphicsOpenGLGetFrameWaitHandle(void* state)
 {
     UNREFERENCED_PARAMETER(state);
     return NULL;
+}
+
+static UINT64 magGraphicsOpenGLGetResourceGeneration(void* opaqueState)
+{
+    MAGOPENGLSTATE* state = (MAGOPENGLSTATE*)opaqueState;
+    return state ? state->resourceGeneration : 0;
 }
 
 const MAGGRAPHICSBACKEND g_magGraphicsOpenGLBackend =
@@ -448,4 +530,7 @@ const MAGGRAPHICSBACKEND g_magGraphicsOpenGLBackend =
   magGraphicsOpenGLSetPresentationEnabled,
   magGraphicsOpenGLRender,
   magGraphicsOpenGLGetFrameWaitHandle,
+  magGraphicsOpenGLGetResourceGeneration,
+  NULL,
+  NULL,
 };

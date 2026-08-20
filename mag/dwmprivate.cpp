@@ -1,6 +1,7 @@
 #define NOMINMAX
 
 #include "dwmprivate.h"
+#include "graphics.h"
 
 #include <d3d11.h>
 #include <dcomp.h>
@@ -77,10 +78,13 @@ struct DWMPRIVATECAPTURESTATE
   ComPtr<IDCompositionVisual2>              viewVisual;
   ComPtr<IDCompositionVisual>               sharedVisual;
   ComPtr<IDCompositionVisual2>              overlayVisual;
-  ComPtr<IDXGISwapChain1>                   overlaySwapChain;
+  ComPtr<IDXGISwapChain2>                   overlaySwapChain;
   HTHUMBNAIL                                thumbnail = NULL;
   UINT                                      overlayWidth = 0;
   UINT                                      overlayHeight = 0;
+  UINT                                      overlayCapacityWidth = 0;
+  UINT                                      overlayCapacityHeight = 0;
+  UINT64                                    overlayResourceGeneration = 0;
   BOOL                                      useMultiWindow = FALSE;
   BOOL                                      livePreviewExcluded = FALSE;
   BOOL                                      desktopConfigured = FALSE;
@@ -166,7 +170,8 @@ static void DwmPrivateFillRect(DWMPRIVATECAPTURESTATE* state, const RECT& rect, 
 
   for (LONG y = clipped.top; y < clipped.bottom; ++y)
   {
-    std::uint32_t* row = state->overlayPixels.data() + (static_cast<std::size_t>(y) * state->overlayWidth);
+    std::uint32_t* row = state->overlayPixels.data() +
+      (static_cast<std::size_t>(y) * state->overlayCapacityWidth);
 
     for (LONG x = clipped.left; x < clipped.right; ++x)
     {
@@ -186,7 +191,8 @@ static void DwmPrivateClearRect(DWMPRIVATECAPTURESTATE* state, const RECT& rect)
 
   for (LONG y = clipped.top; y < clipped.bottom; ++y)
   {
-    std::uint32_t* row = state->overlayPixels.data() + (static_cast<std::size_t>(y) * state->overlayWidth);
+    std::uint32_t* row = state->overlayPixels.data() +
+      (static_cast<std::size_t>(y) * state->overlayCapacityWidth);
     std::fill(row + clipped.left, row + clipped.right, 0U);
   }
 }
@@ -203,7 +209,8 @@ static void DwmPrivateStrokeRect(DWMPRIVATECAPTURESTATE* state, const RECT& rect
 
   for (LONG y = clipped.top; y < clipped.bottom; ++y)
   {
-    std::uint32_t* row = state->overlayPixels.data() + (static_cast<std::size_t>(y) * state->overlayWidth);
+    std::uint32_t* row = state->overlayPixels.data() +
+      (static_cast<std::size_t>(y) * state->overlayCapacityWidth);
 
     for (LONG x = clipped.left; x < clipped.right; ++x)
     {
@@ -315,20 +322,34 @@ static HRESULT DwmPrivateEnsureOverlay(DWMPRIVATECAPTURESTATE* state, UINT width
 {
   ComPtr<IDXGIAdapter> adapter;
   ComPtr<IDXGIFactory2> factory;
-  ComPtr<IDXGISwapChain1> swapChain;
+  ComPtr<IDXGISwapChain1> swapChain1;
+  ComPtr<IDXGISwapChain2> swapChain;
   DXGI_SWAP_CHAIN_DESC1 desc = {};
   std::vector<std::uint32_t> pixels;
-  const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  SIZE minimumSize = { static_cast<LONG>(width), static_cast<LONG>(height) };
+  const SIZE reservoirSize = magGraphicsChooseReservoirSize(state->hwndDestination, minimumSize);
+  const UINT capacityWidth = static_cast<UINT>(reservoirSize.cx);
+  const UINT capacityHeight = static_cast<UINT>(reservoirSize.cy);
+  const std::size_t pixelCount =
+    static_cast<std::size_t>(capacityWidth) * static_cast<std::size_t>(capacityHeight);
   HRESULT hr;
 
-  if (state->overlaySwapChain && state->overlayWidth == width && state->overlayHeight == height)
+  if (state->overlaySwapChain &&
+      width <= state->overlayCapacityWidth &&
+      height <= state->overlayCapacityHeight)
   {
-    return S_OK;
+    hr = state->overlaySwapChain->SetSourceSize(width, height);
+    if (SUCCEEDED(hr))
+    {
+      state->overlayWidth = width;
+      state->overlayHeight = height;
+    }
+    return hr;
   }
 
   if (!width || !height ||
-      width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
-      height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      capacityWidth > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      capacityHeight > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
       pixelCount > std::numeric_limits<std::size_t>::max() / sizeof(std::uint32_t))
   {
     return E_INVALIDARG;
@@ -349,8 +370,8 @@ static HRESULT DwmPrivateEnsureOverlay(DWMPRIVATECAPTURESTATE* state, UINT width
     hr = adapter->GetParent(IID_PPV_ARGS(&factory));
   }
 
-  desc.Width = width;
-  desc.Height = height;
+  desc.Width = capacityWidth;
+  desc.Height = capacityHeight;
   desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
   desc.Stereo = FALSE;
   desc.SampleDesc.Count = 1;
@@ -362,7 +383,21 @@ static HRESULT DwmPrivateEnsureOverlay(DWMPRIVATECAPTURESTATE* state, UINT width
 
   if (SUCCEEDED(hr))
   {
-    hr = factory->CreateSwapChainForComposition(state->d3dDevice.Get(), &desc, NULL, &swapChain);
+    hr = factory->CreateSwapChainForComposition(
+      state->d3dDevice.Get(),
+      &desc,
+      NULL,
+      &swapChain1);
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = swapChain1.As(&swapChain);
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = swapChain->SetSourceSize(width, height);
   }
 
   if (SUCCEEDED(hr))
@@ -379,6 +414,9 @@ static HRESULT DwmPrivateEnsureOverlay(DWMPRIVATECAPTURESTATE* state, UINT width
   state->overlayPixels = std::move(pixels);
   state->overlayWidth = width;
   state->overlayHeight = height;
+  state->overlayCapacityWidth = capacityWidth;
+  state->overlayCapacityHeight = capacityHeight;
+  ++state->overlayResourceGeneration;
   return S_OK;
 }
 
@@ -392,7 +430,12 @@ static HRESULT DwmPrivateUpdateOverlay(
   const std::uint32_t opaqueBlack = 0xff000000U;
   HRESULT hr;
 
-  std::fill(state->overlayPixels.begin(), state->overlayPixels.end(), opaqueBlack);
+  for (UINT y = 0; y < state->overlayHeight; ++y)
+  {
+    std::uint32_t* row = state->overlayPixels.data() +
+      (static_cast<std::size_t>(y) * state->overlayCapacityWidth);
+    std::fill(row, row + state->overlayWidth, opaqueBlack);
+  }
   if (captureDestination)
   {
     DwmPrivateClearRect(state, *captureDestination);
@@ -423,12 +466,21 @@ static HRESULT DwmPrivateUpdateOverlay(
     return hr;
   }
 
+  const D3D11_BOX updateBox =
+  {
+    0,
+    0,
+    0,
+    state->overlayWidth,
+    state->overlayHeight,
+    1
+  };
   state->d3dContext->UpdateSubresource(
     backBuffer.Get(),
     0,
-    NULL,
+    &updateBox,
     state->overlayPixels.data(),
-    state->overlayWidth * sizeof(std::uint32_t),
+    state->overlayCapacityWidth * sizeof(std::uint32_t),
     0);
 
   return state->overlaySwapChain->Present(0, 0);
@@ -762,4 +814,10 @@ extern "C" BOOL DwmPrivateCaptureUpdate(
   }
 
   return SUCCEEDED(hr);
+}
+
+extern "C" UINT64 DwmPrivateCaptureGetResourceGeneration(
+  const DWMPRIVATECAPTURESTATE* state)
+{
+  return state ? state->overlayResourceGeneration : 0;
 }

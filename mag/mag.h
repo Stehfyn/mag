@@ -6,3 +6,4 @@
 
 HWND magInitInstance(HINSTANCE, int);
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent);
+void mag_UpdateViewWindowStyle(HWND hWnd);

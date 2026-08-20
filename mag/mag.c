@@ -69,9 +69,25 @@ typedef struct SETTINGSOPTION
   BOOL    fImplemented;
 } SETTINGSOPTION;
 
+typedef const MAGNAMEDOPTION* (*MAGOPTIONATPROC)(UINT index);
+
+typedef struct MAGSETTINGSDIALOGSTATE
+{
+  HWND owner;
+  MAGADAPTERCATALOG catalog;
+  BOOL catalogValid;
+  TCHAR catalogReason[MAG_PRESENTATION_REASON_LENGTH];
+} MAGSETTINGSDIALOGSTATE;
+
+#define MAG_SETTINGS_EXPLICIT_ITEM_BASE 0x10000U
+
 #pragma comment(lib, "Advapi32")
 
 #define MAG_SETTINGS_REGISTRY_KEY TEXT("Software\\mag")
+
+#ifndef WS_EX_NOREDIRECTIONBITMAP
+#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
+#endif
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
@@ -93,6 +109,7 @@ void mag_SaveSettings(const LPMAGSTATE lpsd);
 void mag_GetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture);
 static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam);
 static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNotify);
+static void mag_Settings_OnDestroy(HWND hDlg);
 static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct);
@@ -166,9 +183,32 @@ static BOOL mag_ReadSettingDword(LPCTSTR valueName, DWORD* value)
       &size);
 }
 
+static BOOL mag_ReadSettingString(
+  LPCTSTR valueName,
+  LPTSTR value,
+  DWORD valueCount)
+{
+    DWORD size = valueCount * sizeof(*value);
+
+    if (!value || !valueCount)
+    {
+      return FALSE;
+    }
+    value[0] = TEXT('\0');
+    return ERROR_SUCCESS == RegGetValue(
+      HKEY_CURRENT_USER,
+      MAG_SETTINGS_REGISTRY_KEY,
+      valueName,
+      RRF_RT_REG_SZ,
+      NULL,
+      value,
+      &size);
+}
+
 void mag_LoadSettings(LPMAGSTATE lpsd)
 {
     DWORD value;
+    const DWORD presentationVersion = lpsd->presentationSettings.version;
 
     if (mag_ReadSettingDword(TEXT("GraphicsApi"), &value) && value < GRAPHICS_API_COUNT)
     {
@@ -189,6 +229,73 @@ void mag_LoadSettings(LPMAGSTATE lpsd)
     if (mag_ReadSettingDword(TEXT("MouseRelativeZoom"), &value))
     {
       lpsd->fMouseRelativeZoom = 0 != value;
+    }
+
+    if (mag_ReadSettingDword(TEXT("PresentationVersion"), &value) &&
+        value == presentationVersion)
+    {
+#define MAG_READ_PRESENT_ENUM(Name, Field, Count, Type) \
+      if (mag_ReadSettingDword(TEXT(Name), &value) && value < (Count)) \
+      { \
+        lpsd->presentationSettings.Field = (Type)value; \
+      }
+      MAG_READ_PRESENT_ENUM("PresentationTarget", target, MAG_PRESENT_COUNT, MAGPRESENTATIONTARGET)
+      MAG_READ_PRESENT_ENUM("SurfaceOwnership", surfaceOwnership, MAG_SURFACE_COUNT, MAGSURFACEOWNERSHIP)
+      MAG_READ_PRESENT_ENUM("CompositionHost", host, MAG_HOST_COUNT, MAGCOMPOSITIONHOST)
+      MAG_READ_PRESENT_ENUM("CopyRequirement", copyRequirement, MAG_COPY_COUNT, MAGCOPYREQUIREMENT)
+      MAG_READ_PRESENT_ENUM("LayeredAlphaMode", alphaMode, MAG_LAYER_ALPHA_COUNT, MAGLAYEREDALPHAMODE)
+      MAG_READ_PRESENT_ENUM("DisplayAdapterMode", display.mode, MAG_DISPLAY_ADAPTER_MODE_COUNT, MAGDISPLAYADAPTERMODE)
+      MAG_READ_PRESENT_ENUM("HardwareAdapterMode", hardware.mode, MAG_HARDWARE_ADAPTER_MODE_COUNT, MAGHARDWAREADAPTERMODE)
+#undef MAG_READ_PRESENT_ENUM
+
+      if (mag_ReadSettingDword(TEXT("ConstantAlpha"), &value) && value <= 255)
+      {
+        lpsd->presentationSettings.constantAlpha = (BYTE)value;
+      }
+      if (mag_ReadSettingDword(TEXT("LayerColorKey"), &value))
+      {
+        lpsd->presentationSettings.colorKey = (COLORREF)value;
+      }
+      if (mag_ReadSettingDword(TEXT("StrictPresentationTarget"), &value))
+      {
+        lpsd->presentationSettings.strictTarget = 0 != value;
+      }
+      if (mag_ReadSettingDword(TEXT("AllowTearing"), &value))
+      {
+        lpsd->presentationSettings.allowTearing = 0 != value;
+      }
+      if (mag_ReadSettingDword(TEXT("PresentationBufferCount"), &value) && value >= 2 && value <= 16)
+      {
+        lpsd->presentationSettings.bufferCount = value;
+      }
+      if (mag_ReadSettingDword(TEXT("MaximumFrameLatency"), &value) && value >= 1 && value <= 16)
+      {
+        lpsd->presentationSettings.maximumFrameLatency = value;
+      }
+      if (mag_ReadSettingDword(TEXT("SyncInterval"), &value) && value <= 4)
+      {
+        lpsd->presentationSettings.syncInterval = value;
+      }
+      if (mag_ReadSettingDword(TEXT("DisplayAdapterLuidLow"), &value))
+      {
+        lpsd->presentationSettings.display.adapterLuid.LowPart = value;
+      }
+      if (mag_ReadSettingDword(TEXT("DisplayAdapterLuidHigh"), &value))
+      {
+        lpsd->presentationSettings.display.adapterLuid.HighPart = (LONG)value;
+      }
+      mag_ReadSettingString(
+        TEXT("DisplayDeviceName"),
+        lpsd->presentationSettings.display.deviceName,
+        ARRAYSIZE(lpsd->presentationSettings.display.deviceName));
+      if (mag_ReadSettingDword(TEXT("HardwareAdapterLuidLow"), &value))
+      {
+        lpsd->presentationSettings.hardware.adapterLuid.LowPart = value;
+      }
+      if (mag_ReadSettingDword(TEXT("HardwareAdapterLuidHigh"), &value))
+      {
+        lpsd->presentationSettings.hardware.adapterLuid.HighPart = (LONG)value;
+      }
     }
 }
 
@@ -217,12 +324,47 @@ void mag_SaveSettings(const LPMAGSTATE lpsd)
       const DWORD uiApi = lpsd->uiGraphicsApi;
       const DWORD textRenderer = lpsd->textRenderer;
       const DWORD mouseRelativeZoom = lpsd->fMouseRelativeZoom;
+      const MAGPRESENTATIONSETTINGS* presentation = &lpsd->presentationSettings;
+
+#define MAG_WRITE_DWORD(Name, Value) \
+      do \
+      { \
+        const DWORD savedValue = (DWORD)(Value); \
+        RegSetValueEx(key, TEXT(Name), 0, REG_DWORD, (const BYTE*)&savedValue, sizeof(savedValue)); \
+      } while (0)
 
       RegSetValueEx(key, TEXT("GraphicsApi"), 0, REG_DWORD, (const BYTE*)&graphicsApi, sizeof(graphicsApi));
       RegSetValueEx(key, TEXT("CaptureApi"), 0, REG_DWORD, (const BYTE*)&captureApi, sizeof(captureApi));
       RegSetValueEx(key, TEXT("UiGraphicsApi"), 0, REG_DWORD, (const BYTE*)&uiApi, sizeof(uiApi));
       RegSetValueEx(key, TEXT("TextRenderer"), 0, REG_DWORD, (const BYTE*)&textRenderer, sizeof(textRenderer));
       RegSetValueEx(key, TEXT("MouseRelativeZoom"), 0, REG_DWORD, (const BYTE*)&mouseRelativeZoom, sizeof(mouseRelativeZoom));
+      MAG_WRITE_DWORD("PresentationVersion", presentation->version);
+      MAG_WRITE_DWORD("PresentationTarget", presentation->target);
+      MAG_WRITE_DWORD("SurfaceOwnership", presentation->surfaceOwnership);
+      MAG_WRITE_DWORD("CompositionHost", presentation->host);
+      MAG_WRITE_DWORD("CopyRequirement", presentation->copyRequirement);
+      MAG_WRITE_DWORD("LayeredAlphaMode", presentation->alphaMode);
+      MAG_WRITE_DWORD("ConstantAlpha", presentation->constantAlpha);
+      MAG_WRITE_DWORD("LayerColorKey", presentation->colorKey);
+      MAG_WRITE_DWORD("StrictPresentationTarget", presentation->strictTarget);
+      MAG_WRITE_DWORD("AllowTearing", presentation->allowTearing);
+      MAG_WRITE_DWORD("PresentationBufferCount", presentation->bufferCount);
+      MAG_WRITE_DWORD("MaximumFrameLatency", presentation->maximumFrameLatency);
+      MAG_WRITE_DWORD("SyncInterval", presentation->syncInterval);
+      MAG_WRITE_DWORD("DisplayAdapterMode", presentation->display.mode);
+      MAG_WRITE_DWORD("DisplayAdapterLuidLow", presentation->display.adapterLuid.LowPart);
+      MAG_WRITE_DWORD("DisplayAdapterLuidHigh", presentation->display.adapterLuid.HighPart);
+      MAG_WRITE_DWORD("HardwareAdapterMode", presentation->hardware.mode);
+      MAG_WRITE_DWORD("HardwareAdapterLuidLow", presentation->hardware.adapterLuid.LowPart);
+      MAG_WRITE_DWORD("HardwareAdapterLuidHigh", presentation->hardware.adapterLuid.HighPart);
+      RegSetValueEx(
+        key,
+        TEXT("DisplayDeviceName"),
+        0,
+        REG_SZ,
+        (const BYTE*)presentation->display.deviceName,
+        (lstrlen(presentation->display.deviceName) + 1) * sizeof(TCHAR));
+#undef MAG_WRITE_DWORD
     }
     RegCloseKey(key);
     UNREFERENCED_PARAMETER(disposition);
@@ -308,6 +450,7 @@ void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode)
 void mag_UpdateViewWindowStyle(HWND hWnd)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    DWORD oldExStyle;
     DWORD dwExStyle;
 
     if (!lpsd)
@@ -315,8 +458,17 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
       return;
     }
 
-    dwExStyle = GetWindowExStyle(hWnd);
-    dwExStyle &= ~WS_EX_LAYERED;
+    oldExStyle = GetWindowExStyle(hWnd);
+    dwExStyle = oldExStyle;
+    dwExStyle &= ~(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP);
+    if (MAG_HOST_TRADITIONAL_LAYERED == lpsd->resolvedPresentation.host)
+    {
+      dwExStyle |= WS_EX_LAYERED;
+    }
+    else if (MAG_SURFACE_NO_REDIRECTION == lpsd->resolvedPresentation.surfaceOwnership)
+    {
+      dwExStyle |= WS_EX_NOREDIRECTIONBITMAP;
+    }
     if (MAG_VIEW_LENS == lpsd->viewMode)
     {
       dwExStyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
@@ -326,8 +478,18 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
       dwExStyle &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
     }
 
-    SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
-    SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    if (dwExStyle != oldExStyle)
+    {
+      SetWindowLongPtr(hWnd, GWL_EXSTYLE, dwExStyle);
+      SetWindowPos(
+        hWnd,
+        HWND_TOPMOST,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    }
 }
 
 void mag_UpdateWindowOutlineColor(HWND hWnd)
@@ -585,16 +747,357 @@ BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* o
     return TRUE;
 }
 
+static void mag_AddNamedOptions(
+  HWND hDlg,
+  int idCtl,
+  UINT count,
+  MAGOPTIONATPROC optionAt,
+  UINT selectedId)
+{
+    HWND hCtl = GetDlgItem(hDlg, idCtl);
+    UINT i;
+
+    SendMessage(hCtl, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < count; ++i)
+    {
+      const MAGNAMEDOPTION* option = optionAt(i);
+      LRESULT item;
+
+      if (!option)
+      {
+        continue;
+      }
+      item = SendMessage(hCtl, CB_ADDSTRING, 0, (LPARAM)option->name);
+      if (CB_ERR != item && CB_ERRSPACE != item)
+      {
+        SendMessage(hCtl, CB_SETITEMDATA, (WPARAM)item, (LPARAM)option->id);
+        if (option->id == selectedId)
+        {
+          SendMessage(hCtl, CB_SETCURSEL, (WPARAM)item, 0);
+        }
+      }
+    }
+    if (CB_ERR == SendMessage(hCtl, CB_GETCURSEL, 0, 0) && count)
+    {
+      SendMessage(hCtl, CB_SETCURSEL, 0, 0);
+    }
+}
+
+static BOOL mag_GetSelectedNamedOption(
+  HWND hDlg,
+  int idCtl,
+  UINT count,
+  UINT* selectedId)
+{
+    LRESULT item = SendDlgItemMessage(hDlg, idCtl, CB_GETCURSEL, 0, 0);
+    LRESULT value;
+
+    if (CB_ERR == item || !selectedId)
+    {
+      return FALSE;
+    }
+    value = SendDlgItemMessage(hDlg, idCtl, CB_GETITEMDATA, (WPARAM)item, 0);
+    if (CB_ERR == value || value < 0 || (UINT)value >= count)
+    {
+      return FALSE;
+    }
+    *selectedId = (UINT)value;
+    return TRUE;
+}
+
+static LRESULT mag_AddComboItem(HWND hCtl, LPCTSTR text, UINT_PTR data)
+{
+    LRESULT item = SendMessage(hCtl, CB_ADDSTRING, 0, (LPARAM)text);
+
+    if (CB_ERR != item && CB_ERRSPACE != item)
+    {
+      SendMessage(hCtl, CB_SETITEMDATA, (WPARAM)item, (LPARAM)data);
+    }
+    return item;
+}
+
+static void mag_AddDisplayAdapterOptions(
+  HWND hDlg,
+  const MAGSETTINGSDIALOGSTATE* dialog,
+  const MAGDISPLAYSELECTION* selected)
+{
+    HWND hCtl = GetDlgItem(hDlg, IDC_SETTINGS_DISPLAY_ADAPTER);
+    LRESULT selectedItem = CB_ERR;
+    LRESULT item;
+    UINT i;
+
+    SendMessage(hCtl, CB_RESETCONTENT, 0, 0);
+    item = mag_AddComboItem(hCtl, TEXT("Auto (window output)"), MAG_DISPLAY_ADAPTER_AUTO);
+    if (selected && MAG_DISPLAY_ADAPTER_AUTO == selected->mode)
+    {
+      selectedItem = item;
+    }
+    item = mag_AddComboItem(hCtl, TEXT("Follow captured display"), MAG_DISPLAY_ADAPTER_FOLLOW_CAPTURE);
+    if (selected && MAG_DISPLAY_ADAPTER_FOLLOW_CAPTURE == selected->mode)
+    {
+      selectedItem = item;
+    }
+
+    for (i = 0; dialog && dialog->catalogValid && i < dialog->catalog.outputCount; ++i)
+    {
+      const MAGOUTPUTINFO* output = &dialog->catalog.outputs[i];
+      const MAGADAPTERINFO* adapter = output->adapterIndex < dialog->catalog.adapterCount
+        ? &dialog->catalog.adapters[output->adapterIndex]
+        : NULL;
+      TCHAR label[320];
+
+      if (!adapter)
+      {
+        continue;
+      }
+      _sntprintf_s(
+        label,
+        ARRAYSIZE(label),
+        _TRUNCATE,
+        TEXT("%s | %s | %ld,%ld %ldx%ld | %u Hz%s"),
+        adapter->description,
+        output->deviceName,
+        output->desktopCoordinates.left,
+        output->desktopCoordinates.top,
+        RECTWIDTH(output->desktopCoordinates),
+        RECTHEIGHT(output->desktopCoordinates),
+        output->refreshDenominator
+          ? output->refreshNumerator / output->refreshDenominator
+          : 0,
+        output->hdr ? TEXT(" | HDR") : TEXT(""));
+      item = mag_AddComboItem(hCtl, label, MAG_SETTINGS_EXPLICIT_ITEM_BASE + i);
+      if (selected && MAG_DISPLAY_ADAPTER_EXPLICIT == selected->mode &&
+          magAdapterLuidEqual(selected->adapterLuid, adapter->luid) &&
+          0 == lstrcmpi(selected->deviceName, output->deviceName))
+      {
+        selectedItem = item;
+      }
+    }
+
+    SendMessage(hCtl, CB_SETCURSEL, CB_ERR == selectedItem ? 0 : selectedItem, 0);
+}
+
+static void mag_AddHardwareAdapterOptions(
+  HWND hDlg,
+  const MAGSETTINGSDIALOGSTATE* dialog,
+  const MAGHARDWARESELECTION* selected)
+{
+    HWND hCtl = GetDlgItem(hDlg, IDC_SETTINGS_HARDWARE_ADAPTER);
+    LRESULT selectedItem = CB_ERR;
+    LRESULT item;
+    UINT i;
+
+    SendMessage(hCtl, CB_RESETCONTENT, 0, 0);
+    item = mag_AddComboItem(hCtl, TEXT("Auto (highest-performance compatible)"), MAG_HARDWARE_ADAPTER_AUTO);
+    if (selected && MAG_HARDWARE_ADAPTER_AUTO == selected->mode)
+    {
+      selectedItem = item;
+    }
+    item = mag_AddComboItem(hCtl, TEXT("Same as Display Adapter"), MAG_HARDWARE_ADAPTER_SAME_AS_DISPLAY);
+    if (selected && MAG_HARDWARE_ADAPTER_SAME_AS_DISPLAY == selected->mode)
+    {
+      selectedItem = item;
+    }
+    item = mag_AddComboItem(hCtl, TEXT("Same as Capture Adapter"), MAG_HARDWARE_ADAPTER_SAME_AS_CAPTURE);
+    if (selected && MAG_HARDWARE_ADAPTER_SAME_AS_CAPTURE == selected->mode)
+    {
+      selectedItem = item;
+    }
+    item = mag_AddComboItem(hCtl, TEXT("WARP (software, explicit fallback)"), MAG_HARDWARE_ADAPTER_WARP);
+    if (selected && MAG_HARDWARE_ADAPTER_WARP == selected->mode)
+    {
+      selectedItem = item;
+    }
+
+    for (i = 0; dialog && dialog->catalogValid && i < dialog->catalog.adapterCount; ++i)
+    {
+      const MAGADAPTERINFO* adapter = &dialog->catalog.adapters[i];
+      TCHAR label[256];
+
+      if (adapter->software)
+      {
+        continue;
+      }
+      _sntprintf_s(
+        label,
+        ARRAYSIZE(label),
+        _TRUNCATE,
+        TEXT("%s | LUID %08lX:%08lX%s"),
+        adapter->description,
+        (DWORD)adapter->luid.HighPart,
+        adapter->luid.LowPart,
+        adapter->remote ? TEXT(" | remote") : TEXT(""));
+      item = mag_AddComboItem(hCtl, label, MAG_SETTINGS_EXPLICIT_ITEM_BASE + i);
+      if (selected && MAG_HARDWARE_ADAPTER_EXPLICIT == selected->mode &&
+          magAdapterLuidEqual(selected->adapterLuid, adapter->luid))
+      {
+        selectedItem = item;
+      }
+    }
+
+    SendMessage(hCtl, CB_SETCURSEL, CB_ERR == selectedItem ? 0 : selectedItem, 0);
+}
+
+static BOOL mag_GetPresentationDialogSettings(
+  HWND hDlg,
+  const MAGSETTINGSDIALOGSTATE* dialog,
+  MAGPRESENTATIONSETTINGS* settings)
+{
+    UINT value;
+    LRESULT item;
+    LRESULT itemData;
+    BOOL translated;
+    TCHAR colorText[32];
+    TCHAR* end = NULL;
+    ULONG color;
+
+    if (!settings)
+    {
+      return FALSE;
+    }
+    magPresentationSettingsSetDefaults(settings);
+    if (!mag_GetSelectedNamedOption(hDlg, IDC_SETTINGS_PRESENT_TARGET, MAG_PRESENT_COUNT, &value))
+    {
+      return FALSE;
+    }
+    settings->target = (MAGPRESENTATIONTARGET)value;
+    if (!mag_GetSelectedNamedOption(hDlg, IDC_SETTINGS_SURFACE_OWNERSHIP, MAG_SURFACE_COUNT, &value))
+    {
+      return FALSE;
+    }
+    settings->surfaceOwnership = (MAGSURFACEOWNERSHIP)value;
+    if (!mag_GetSelectedNamedOption(hDlg, IDC_SETTINGS_COMPOSITION_HOST, MAG_HOST_COUNT, &value))
+    {
+      return FALSE;
+    }
+    settings->host = (MAGCOMPOSITIONHOST)value;
+    if (!mag_GetSelectedNamedOption(hDlg, IDC_SETTINGS_COPY_REQUIREMENT, MAG_COPY_COUNT, &value))
+    {
+      return FALSE;
+    }
+    settings->copyRequirement = (MAGCOPYREQUIREMENT)value;
+    if (!mag_GetSelectedNamedOption(hDlg, IDC_SETTINGS_ALPHA_MODE, MAG_LAYER_ALPHA_COUNT, &value))
+    {
+      return FALSE;
+    }
+    settings->alphaMode = (MAGLAYEREDALPHAMODE)value;
+
+    item = SendDlgItemMessage(hDlg, IDC_SETTINGS_DISPLAY_ADAPTER, CB_GETCURSEL, 0, 0);
+    itemData = CB_ERR == item ? CB_ERR : SendDlgItemMessage(
+      hDlg, IDC_SETTINGS_DISPLAY_ADAPTER, CB_GETITEMDATA, (WPARAM)item, 0);
+    if (CB_ERR == itemData || itemData < 0)
+    {
+      return FALSE;
+    }
+    if ((UINT_PTR)itemData >= MAG_SETTINGS_EXPLICIT_ITEM_BASE)
+    {
+      UINT outputIndex = (UINT)((UINT_PTR)itemData - MAG_SETTINGS_EXPLICIT_ITEM_BASE);
+      const MAGOUTPUTINFO* output;
+
+      if (!dialog || !dialog->catalogValid || outputIndex >= dialog->catalog.outputCount)
+      {
+        return FALSE;
+      }
+      output = &dialog->catalog.outputs[outputIndex];
+      if (output->adapterIndex >= dialog->catalog.adapterCount)
+      {
+        return FALSE;
+      }
+      settings->display.mode = MAG_DISPLAY_ADAPTER_EXPLICIT;
+      settings->display.adapterLuid = dialog->catalog.adapters[output->adapterIndex].luid;
+      lstrcpyn(settings->display.deviceName, output->deviceName, ARRAYSIZE(settings->display.deviceName));
+    }
+    else if ((UINT)itemData < MAG_DISPLAY_ADAPTER_MODE_COUNT)
+    {
+      settings->display.mode = (MAGDISPLAYADAPTERMODE)itemData;
+    }
+    else
+    {
+      return FALSE;
+    }
+
+    item = SendDlgItemMessage(hDlg, IDC_SETTINGS_HARDWARE_ADAPTER, CB_GETCURSEL, 0, 0);
+    itemData = CB_ERR == item ? CB_ERR : SendDlgItemMessage(
+      hDlg, IDC_SETTINGS_HARDWARE_ADAPTER, CB_GETITEMDATA, (WPARAM)item, 0);
+    if (CB_ERR == itemData || itemData < 0)
+    {
+      return FALSE;
+    }
+    if ((UINT_PTR)itemData >= MAG_SETTINGS_EXPLICIT_ITEM_BASE)
+    {
+      UINT adapterIndex = (UINT)((UINT_PTR)itemData - MAG_SETTINGS_EXPLICIT_ITEM_BASE);
+
+      if (!dialog || !dialog->catalogValid || adapterIndex >= dialog->catalog.adapterCount)
+      {
+        return FALSE;
+      }
+      settings->hardware.mode = MAG_HARDWARE_ADAPTER_EXPLICIT;
+      settings->hardware.adapterLuid = dialog->catalog.adapters[adapterIndex].luid;
+    }
+    else if ((UINT)itemData < MAG_HARDWARE_ADAPTER_MODE_COUNT)
+    {
+      settings->hardware.mode = (MAGHARDWAREADAPTERMODE)itemData;
+    }
+    else
+    {
+      return FALSE;
+    }
+
+    settings->strictTarget = BST_CHECKED == SendDlgItemMessage(
+      hDlg, IDC_SETTINGS_STRICT_TARGET, BM_GETCHECK, 0, 0);
+    settings->allowTearing = BST_CHECKED == SendDlgItemMessage(
+      hDlg, IDC_SETTINGS_ALLOW_TEARING, BM_GETCHECK, 0, 0);
+    settings->bufferCount = GetDlgItemInt(hDlg, IDC_SETTINGS_BUFFER_COUNT, &translated, FALSE);
+    if (!translated || settings->bufferCount < 2 || settings->bufferCount > 16)
+    {
+      return FALSE;
+    }
+    settings->maximumFrameLatency = GetDlgItemInt(hDlg, IDC_SETTINGS_FRAME_LATENCY, &translated, FALSE);
+    if (!translated || settings->maximumFrameLatency < 1 || settings->maximumFrameLatency > 16)
+    {
+      return FALSE;
+    }
+    settings->syncInterval = GetDlgItemInt(hDlg, IDC_SETTINGS_SYNC_INTERVAL, &translated, FALSE);
+    if (!translated || settings->syncInterval > 4)
+    {
+      return FALSE;
+    }
+    value = GetDlgItemInt(hDlg, IDC_SETTINGS_CONSTANT_ALPHA, &translated, FALSE);
+    if (!translated || value > 255)
+    {
+      return FALSE;
+    }
+    settings->constantAlpha = (BYTE)value;
+
+    GetDlgItemText(hDlg, IDC_SETTINGS_COLOR_KEY, colorText, ARRAYSIZE(colorText));
+    color = _tcstoul(colorText, &end, 16);
+    if (!colorText[0] || !end || *end || color > 0xFFFFFFUL)
+    {
+      return FALSE;
+    }
+    settings->colorKey = RGB(
+      (color >> 16) & 0xFF,
+      (color >> 8) & 0xFF,
+      color & 0xFF);
+    return TRUE;
+}
+
 void mag_UpdateSettingsDialogState(HWND hDlg)
 {
+    MAGSETTINGSDIALOGSTATE* dialog = (MAGSETTINGSDIALOGSTATE*)GetWindowLongPtr(hDlg, DWLP_USER);
     UINT graphicsId = GRAPHICS_API_OPENGL;
     UINT captureId = CAPTURE_API_GDI_BITBLT;
     UINT uiId = UI_GRAPHICS_API_NATIVE;
     UINT textId = TEXT_RENDERER_DIRECTWRITE;
+    MAGPRESENTATIONSETTINGS requested;
+    MAGPRESENTATIONSETTINGS resolved;
+    MAGPRESENTATIONSTATUS status;
     BOOL fGraphicsImplemented = FALSE;
     BOOL fCaptureImplemented = FALSE;
     BOOL fUiImplemented = FALSE;
     BOOL fTextImplemented = FALSE;
+    BOOL fPresentationValid;
+    BOOL fPresentationSupported = FALSE;
     BOOL fValid;
 
     fValid =
@@ -602,30 +1105,66 @@ void mag_UpdateSettingsDialogState(HWND hDlg)
       mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &captureId, &fCaptureImplemented) &&
       mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), &uiId, &fUiImplemented) &&
       mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), &textId, &fTextImplemented);
+    fPresentationValid = mag_GetPresentationDialogSettings(hDlg, dialog, &requested);
+    if (fValid && fPresentationValid && dialog && dialog->catalogValid &&
+        fGraphicsImplemented && fCaptureImplemented && fUiImplemented && fTextImplemented)
+    {
+      fPresentationSupported = magPresentationResolve(
+        dialog->owner,
+        (GRAPHICSAPI)graphicsId,
+        (CAPTUREAPI)captureId,
+        (UIGRAPHICSAPI)uiId,
+        (TEXTRENDERER)textId,
+        &requested,
+        &dialog->catalog,
+        &resolved,
+        &status) && status.configurationSupported && status.flickerFree;
+    }
 
     EnableWindow(
       GetDlgItem(hDlg, IDOK),
-      fValid && fGraphicsImplemented && fCaptureImplemented && fUiImplemented && fTextImplemented);
+      fValid && fPresentationValid && fGraphicsImplemented && fCaptureImplemented &&
+        fUiImplemented && fTextImplemented && fPresentationSupported);
 
     if (!fValid)
     {
       SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Select graphics, capture, UI, and text renderers."));
     }
-    else if (!fGraphicsImplemented || !fCaptureImplemented || !fUiImplemented || !fTextImplemented)
+    else if (!fPresentationValid)
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("The selected renderer is unavailable on this system."));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Select valid presentation values. Buffers 2-16, latency 1-16, sync 0-4, alpha 0-255, color RRGGBB."));
     }
-    else if (CAPTURE_API_DWM_THUMBNAIL == captureId ||
-             CAPTURE_API_DWM_PRIVATE_VISUAL == captureId)
+    else if (!dialog || !dialog->catalogValid)
     {
       SetDlgItemText(
         hDlg,
         IDC_SETTINGS_STATUS,
-        TEXT("DWM owns this visual; Graphics, UI, and text selections are its pixel fallback."));
+        dialog && dialog->catalogReason[0]
+          ? dialog->catalogReason
+          : TEXT("Display and hardware adapters could not be enumerated."));
+    }
+    else if (!fGraphicsImplemented || !fCaptureImplemented || !fUiImplemented || !fTextImplemented)
+    {
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("The selected renderer is unavailable on this system."));
+    }
+    else if (!fPresentationSupported)
+    {
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, status.reason[0]
+        ? status.reason
+        : TEXT("This combination cannot guarantee flicker-free presentation and is unavailable."));
     }
     else
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT(""));
+      TCHAR summary[768];
+
+      _sntprintf_s(
+        summary,
+        ARRAYSIZE(summary),
+        _TRUNCATE,
+        TEXT("%s Copy class: %s. Flicker-free resize contract: required and supported."),
+        status.reason,
+        magCopyClassName(status.copyClass));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, summary);
     }
 }
 
@@ -633,24 +1172,99 @@ static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam)
 {
     HWND hOwner = (HWND)lParam;
     LPMAGSTATE lpsd;
+    MAGSETTINGSDIALOGSTATE* dialog;
+    MAGPRESENTATIONSETTINGS defaults;
+    const MAGPRESENTATIONSETTINGS* presentation;
     UINT graphicsApi;
     UINT captureApi;
     UINT uiApi;
     UINT textRenderer;
+    TCHAR colorKey[16];
 
     UNREFERENCED_PARAMETER(hwndFocus);
 
-    SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)hOwner);
+    dialog = (MAGSETTINGSDIALOGSTATE*)HeapAlloc(
+      GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dialog));
+    if (!dialog)
+    {
+      EndDialog(hDlg, IDCANCEL);
+      return TRUE;
+    }
+    dialog->owner = hOwner;
+    dialog->catalogValid = magAdapterCatalogEnumerate(
+      &dialog->catalog,
+      dialog->catalogReason,
+      ARRAYSIZE(dialog->catalogReason));
+    SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)dialog);
     lpsd = (LPMAGSTATE)GetWindowLongPtr(hOwner, GWLP_USERDATA);
     graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
     captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
     uiApi = (lpsd && lpsd->uiGraphicsApi < UI_GRAPHICS_API_COUNT) ? lpsd->uiGraphicsApi : UI_GRAPHICS_API_NATIVE;
     textRenderer = (lpsd && lpsd->textRenderer < TEXT_RENDERER_COUNT) ? lpsd->textRenderer : TEXT_RENDERER_DIRECTWRITE;
+    magPresentationSettingsSetDefaults(&defaults);
+    presentation = lpsd ? &lpsd->presentationSettings : &defaults;
 
     mag_AddGraphicsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, (GRAPHICSAPI)graphicsApi);
     mag_AddSettingsOptions(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), captureApi);
     mag_AddSettingsOptions(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), uiApi);
     mag_AddSettingsOptions(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), textRenderer);
+    mag_AddNamedOptions(
+      hDlg,
+      IDC_SETTINGS_PRESENT_TARGET,
+      magPresentationTargetCount(),
+      magPresentationTargetAt,
+      presentation->target);
+    mag_AddNamedOptions(
+      hDlg,
+      IDC_SETTINGS_SURFACE_OWNERSHIP,
+      magSurfaceOwnershipCount(),
+      magSurfaceOwnershipAt,
+      presentation->surfaceOwnership);
+    mag_AddNamedOptions(
+      hDlg,
+      IDC_SETTINGS_COMPOSITION_HOST,
+      magCompositionHostCount(),
+      magCompositionHostAt,
+      presentation->host);
+    mag_AddNamedOptions(
+      hDlg,
+      IDC_SETTINGS_COPY_REQUIREMENT,
+      magCopyRequirementCount(),
+      magCopyRequirementAt,
+      presentation->copyRequirement);
+    mag_AddNamedOptions(
+      hDlg,
+      IDC_SETTINGS_ALPHA_MODE,
+      magLayeredAlphaModeCount(),
+      magLayeredAlphaModeAt,
+      presentation->alphaMode);
+    mag_AddDisplayAdapterOptions(hDlg, dialog, &presentation->display);
+    mag_AddHardwareAdapterOptions(hDlg, dialog, &presentation->hardware);
+    SendDlgItemMessage(
+      hDlg,
+      IDC_SETTINGS_STRICT_TARGET,
+      BM_SETCHECK,
+      presentation->strictTarget ? BST_CHECKED : BST_UNCHECKED,
+      0);
+    SendDlgItemMessage(
+      hDlg,
+      IDC_SETTINGS_ALLOW_TEARING,
+      BM_SETCHECK,
+      presentation->allowTearing ? BST_CHECKED : BST_UNCHECKED,
+      0);
+    SetDlgItemInt(hDlg, IDC_SETTINGS_BUFFER_COUNT, presentation->bufferCount, FALSE);
+    SetDlgItemInt(hDlg, IDC_SETTINGS_FRAME_LATENCY, presentation->maximumFrameLatency, FALSE);
+    SetDlgItemInt(hDlg, IDC_SETTINGS_SYNC_INTERVAL, presentation->syncInterval, FALSE);
+    SetDlgItemInt(hDlg, IDC_SETTINGS_CONSTANT_ALPHA, presentation->constantAlpha, FALSE);
+    _sntprintf_s(
+      colorKey,
+      ARRAYSIZE(colorKey),
+      _TRUNCATE,
+      TEXT("%02X%02X%02X"),
+      GetRValue(presentation->colorKey),
+      GetGValue(presentation->colorKey),
+      GetBValue(presentation->colorKey));
+    SetDlgItemText(hDlg, IDC_SETTINGS_COLOR_KEY, colorKey);
     SendDlgItemMessage(
       hDlg,
       IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,
@@ -662,6 +1276,17 @@ static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam)
     return TRUE;
 }
 
+static void mag_Settings_OnDestroy(HWND hDlg)
+{
+    MAGSETTINGSDIALOGSTATE* dialog = (MAGSETTINGSDIALOGSTATE*)GetWindowLongPtr(hDlg, DWLP_USER);
+
+    SetWindowLongPtr(hDlg, DWLP_USER, 0);
+    if (dialog)
+    {
+      HeapFree(GetProcessHeap(), 0, dialog);
+    }
+}
+
 static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNotify)
 {
     UNREFERENCED_PARAMETER(hwndCtl);
@@ -670,8 +1295,10 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
     {
     case IDOK:
       {
-        HWND hOwner = (HWND)GetWindowLongPtr(hDlg, DWLP_USER);
+        MAGSETTINGSDIALOGSTATE* dialog = (MAGSETTINGSDIALOGSTATE*)GetWindowLongPtr(hDlg, DWLP_USER);
+        HWND hOwner = dialog ? dialog->owner : NULL;
         LPMAGSTATE lpsd;
+        MAGPRESENTATIONSETTINGS presentation;
         UINT graphicsApi = GRAPHICS_API_OPENGL;
         UINT captureApi = CAPTURE_API_GDI_BITBLT;
         UINT uiApi = UI_GRAPHICS_API_NATIVE;
@@ -686,6 +1313,7 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
           !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &captureApi, &fCaptureImplemented) ||
           !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), &uiApi, &fUiImplemented) ||
           !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), &textRenderer, &fTextImplemented) ||
+          !mag_GetPresentationDialogSettings(hDlg, dialog, &presentation) ||
           !fGraphicsImplemented ||
           !fCaptureImplemented ||
           !fUiImplemented ||
@@ -705,12 +1333,13 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
           {
             TCHAR reason[256];
 
-            if (!renderApplySettings(
+            if (!renderApplyFullSettings(
                   hOwner,
                   (GRAPHICSAPI)graphicsApi,
                   (CAPTUREAPI)captureApi,
                   (UIGRAPHICSAPI)uiApi,
                   (TEXTRENDERER)textRenderer,
+                  &presentation,
                   reason,
                   ARRAYSIZE(reason)))
             {
@@ -740,8 +1369,22 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
     case IDC_SETTINGS_CAPTURE_API:
     case IDC_SETTINGS_UI_API:
     case IDC_SETTINGS_TEXT_RENDERER:
+    case IDC_SETTINGS_PRESENT_TARGET:
+    case IDC_SETTINGS_SURFACE_OWNERSHIP:
+    case IDC_SETTINGS_COMPOSITION_HOST:
+    case IDC_SETTINGS_COPY_REQUIREMENT:
+    case IDC_SETTINGS_ALPHA_MODE:
+    case IDC_SETTINGS_DISPLAY_ADAPTER:
+    case IDC_SETTINGS_HARDWARE_ADAPTER:
+    case IDC_SETTINGS_STRICT_TARGET:
+    case IDC_SETTINGS_ALLOW_TEARING:
+    case IDC_SETTINGS_BUFFER_COUNT:
+    case IDC_SETTINGS_FRAME_LATENCY:
+    case IDC_SETTINGS_SYNC_INTERVAL:
+    case IDC_SETTINGS_CONSTANT_ALPHA:
+    case IDC_SETTINGS_COLOR_KEY:
       {
-        if (CBN_SELCHANGE == codeNotify)
+        if (CBN_SELCHANGE == codeNotify || BN_CLICKED == codeNotify || EN_CHANGE == codeNotify)
         {
           mag_UpdateSettingsDialogState(hDlg);
         }
@@ -763,6 +1406,7 @@ static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wPar
     {
     HANDLE_DIALOG_MSG(hDlg, WM_INITDIALOG, mag_Settings_OnInitDialog);
     HANDLE_DIALOG_MSG(hDlg, WM_COMMAND,    mag_Settings_OnCommand);
+    HANDLE_DIALOG_MSG(hDlg, WM_DESTROY,    mag_Settings_OnDestroy);
     }
     return FALSE;
 }
@@ -770,6 +1414,7 @@ static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wPar
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MARGINS margins = { 1, 1, 1, 1 };
 
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
@@ -777,6 +1422,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     mag_SetTaskbarIcon(hWnd);
     mag_AddTrayIcon(hWnd);
     mag_UpdateWindowOutlineColor(hWnd);
+    DwmExtendFrameIntoClientArea(hWnd, &margins);
 
     lpsd->graphicsApi = GRAPHICS_API_OPENGL;
     lpsd->uiGraphicsApi = UI_GRAPHICS_API_NATIVE;
@@ -784,6 +1430,7 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
     lpsd->viewMode = MAG_VIEW_WINDOW;
     lpsd->fMouseRelativeZoom = FALSE;
+    magPresentationSettingsSetDefaults(&lpsd->presentationSettings);
     mag_LoadSettings(lpsd);
 
     renderInit(hWnd);
@@ -838,16 +1485,15 @@ void mag_OnDestroy(HWND hWnd)
 
 void mag_OnActivate(HWND hWnd, UINT state, HWND hWndActDeact, BOOL fMinimized)
 {
-    UNREFERENCED_PARAMETER(state);
     UNREFERENCED_PARAMETER(hWndActDeact);
 
-    if (!fMinimized)
+    if (!fMinimized &&
+        (WA_ACTIVE == state || WA_CLICKACTIVE == state || WA_INACTIVE == state))
     {
-      const MARGINS margins = { 1, 1, 1, 1 };
-      DwmExtendFrameIntoClientArea(hWnd, &margins);
-
-      SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_TOPMOST | GetWindowExStyle(hWnd));
-      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+      /* Activation is a content transition, not a reason to rebuild the
+         non-client frame.  Restarting the presenter prevents an older queued
+         frame from resurfacing as activation changes composition state. */
+      renderSubmitStateTransitionFrame(hWnd, TRUE);
     }
 }
 
@@ -884,9 +1530,10 @@ BOOL mag_OnNCCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 
 UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
 {
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
     if (fCalcValidRects)
     {
-      UINT result = WVR_VALIDRECTS;
       SIZE proposedClientSize;
 
       if (IsMaximized(hWnd))
@@ -897,10 +1544,9 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
             MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), (LPMONITORINFO)&mi))
         {
           lpcsp->rgrc[0] = mi.rcWork;
-          result = 0;
         }
       }
-      else
+      else if (!lpsd || MAG_HOST_TRADITIONAL_LAYERED != lpsd->resolvedPresentation.host)
       {
         lpcsp->rgrc[0].bottom += 1;
       }
@@ -914,7 +1560,7 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
       proposedClientSize.cx = RECTWIDTH(lpcsp->rgrc[0]);
       proposedClientSize.cy = RECTHEIGHT(lpcsp->rgrc[0]);
       renderPrepareWindowResize(hWnd, proposedClientSize);
-      return result;
+      return 0;
     }
 
     return 0;
@@ -1109,7 +1755,7 @@ void mag_OnRender(HWND hWnd)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    if (!lpsd || !IsWindowEnabled(hWnd))
+    if (!lpsd || !IsWindowEnabled(hWnd) || lpsd->fGeometryTransition)
     {
       return;
     }
@@ -1129,9 +1775,14 @@ void mag_OnRender(HWND hWnd)
       mag_UpdateLensWindowPosition(hWnd);
     }
 
-    SetWindowAlwaysOnTop(hWnd, TRUE);
-
-    renderSubmit(hWnd);
+    if (lpsd->fInSizeMove)
+    {
+      renderSubmitLiveFrame(hWnd);
+    }
+    else
+    {
+      renderSubmit(hWnd);
+    }
 }
 
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
@@ -1338,13 +1989,10 @@ void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture)
 
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
 {
-    UNREFERENCED_PARAMETER(cx);
-    UNREFERENCED_PARAMETER(cy);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (SIZE_MINIMIZED == state)
     {
-      LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
       if (lpsd)
       {
         lpsd->fPresentedContentValid = FALSE;
@@ -1352,7 +2000,12 @@ void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
       return;
     }
 
-    renderResizeCapture(hWnd);
+    if (lpsd && cx > 0 && cy > 0)
+    {
+      lpsd->deferredClientSize.cx = cx;
+      lpsd->deferredClientSize.cy = cy;
+      lpsd->fDeferredResize = TRUE;
+    }
 }
 
 void mag_OnEnterMenuLoop(HWND hWnd, BOOL fIsTrackPopupMenu)
@@ -1390,6 +2043,18 @@ void mag_OnExitSizeMove(HWND hWnd)
     {
       lpsd->fMiniMapHoldVisible = FALSE;
       lpsd->fInSizeMove = FALSE;
+      /*
+       * WM_EXITSIZEMOVE is not a rendering checkpoint.  Every committed
+       * geometry epoch must already have been resized and presented from its
+       * WM_WINDOWPOSCHANGED.  Doing that work here masks stale modal-loop
+       * frames and is exactly the delayed-update failure this contract is
+       * intended to prevent.
+       */
+      if (lpsd->fDeferredResize || lpsd->fGeometryTransition)
+      {
+        lpsd->fResizeContractViolation = TRUE;
+      }
+      lpsd->fGeometryTransition = FALSE;
     }
     render_minimapNotifyActivity(hWnd);
     KillTimer(hWnd, 0x69);
@@ -1428,7 +2093,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     
     if (lpsd &&
         lpsd->graphicsBackend &&
-        lpsd->hCaptureDC &&
         (fMoved || fSized))
     {
       render_minimapNotifyActivity(hWnd);
@@ -1459,11 +2123,16 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
       }
       if (fSized)
       {
+        renderResizeCapture(hWnd);
         renderPresentCommittedGeometry(hWnd);
+        lpsd->fGeometryTransition = FALSE;
       }
       else
       {
-        renderRender(hWnd);
+        /* A pure move carries the visual with the HWND, but a magnifier's
+           source and exclusion relationship also move.  Submit immediately
+           with restart semantics so no queued pre-move frame can reappear. */
+        renderSubmitStateTransitionFrame(hWnd, TRUE);
       }
     }
 }
@@ -1508,7 +2177,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
 {
     WNDCLASSEX wcex = { sizeof(wcex) };
 
-    wcex.style = CS_OWNDC | CS_SAVEBITS | CS_BYTEALIGNCLIENT | CS_BYTEALIGNWINDOW;
+    wcex.style = 0;
     wcex.lpfnWndProc = mag_WndProc;
     wcex.cbClsExtra = 0;
     wcex.cbWndExtra = 0;
@@ -1521,8 +2190,7 @@ ATOM mag_RegisterClassEx(HINSTANCE hInstance)
       GetSystemMetrics(SM_CYICON),
       LR_DEFAULTCOLOR | LR_SHARED);
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wcex.hbrBackground = GetStockBrush(BLACK_BRUSH);
+    wcex.hbrBackground = NULL;
     //wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_WINDOWSPROJECT1);
     wcex.lpszClassName = TEXT("magWindowClass");
     //wcex.lpszClassName  = szWindowClass;
@@ -1542,8 +2210,10 @@ HWND magInitInstance(HINSTANCE hInstance, int nCmdShow)
     ATOM atm;
     HWND hWnd;
 
+    UNREFERENCED_PARAMETER(nCmdShow);
+
     hWnd = CreateWindowEx(
-      WS_EX_TRANSPARENT | 
+      WS_EX_TOPMOST |
       //WS_EX_PALETTEWINDOW |
       WS_EX_APPWINDOW |
       WS_EX_CONTEXTHELP |
@@ -1568,8 +2238,5 @@ HWND magInitInstance(HINSTANCE hInstance, int nCmdShow)
       return NULL;
     }
 
-    ShowWindow(hWnd, nCmdShow);
-    UpdateWindow(hWnd);
-    //SetWindowLongPtr(hWnd, GWL_EXSTYLE, (WS_EX_COMPOSITED|WS_EX_APPWINDOW) | GetWindowExStyle(hWnd));
     return hWnd;
 }

@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+struct MAGPRESENTATIONSETTINGS;
+
 #define MAG_UI_MAX_DRAW_COMMANDS 128
 #define MAG_UI_MAX_TEXT_LENGTH 64
 
@@ -34,6 +36,16 @@ typedef enum TEXTRENDERER
   TEXT_RENDERER_GDI,
   TEXT_RENDERER_COUNT
 } TEXTRENDERER;
+
+typedef enum CAPTUREAPI
+{
+  CAPTURE_API_GDI_BITBLT = 0,
+  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
+  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
+  CAPTURE_API_DWM_THUMBNAIL,
+  CAPTURE_API_DWM_PRIVATE_VISUAL,
+  CAPTURE_API_COUNT
+} CAPTUREAPI;
 
 typedef enum MAGROWORDER
 {
@@ -111,7 +123,14 @@ typedef struct MAGCPUCOMPOSITOR
 {
   BYTE*  pixels;
   SIZE_T capacity;
+  UINT64 generation;
 } MAGCPUCOMPOSITOR, *LPMAGCPUCOMPOSITOR;
+
+typedef struct MAGPRESENTINTENT
+{
+  BOOL restartSequence;
+  BOOL synchronize;
+} MAGPRESENTINTENT;
 
 typedef struct MAGGRAPHICSBACKEND
 {
@@ -119,12 +138,24 @@ typedef struct MAGGRAPHICSBACKEND
   LPCTSTR     name;
   BOOL        implemented;
   BOOL (*IsAvailable)(LPTSTR reason, UINT reasonCount);
-  BOOL (*Create)(HWND hWnd, SIZE clientSize, void** stateOut);
+  BOOL (*Create)(
+    HWND hWnd,
+    SIZE clientSize,
+    const struct MAGPRESENTATIONSETTINGS* presentation,
+    void** stateOut);
   void (*Destroy)(HWND hWnd, void* state);
   BOOL (*Resize)(HWND hWnd, void* state, SIZE clientSize);
   BOOL (*SetPresentationEnabled)(HWND hWnd, void* state, BOOL enabled);
-  BOOL (*Render)(HWND hWnd, void* state, const MAGPIXELBUFFER* frame, const MAGUIDRAWLIST* ui);
+  BOOL (*Render)(
+    HWND hWnd,
+    void* state,
+    const MAGPIXELBUFFER* frame,
+    const MAGUIDRAWLIST* ui,
+    const MAGPRESENTINTENT* intent);
   HANDLE (*GetFrameWaitHandle)(void* state);
+  UINT64 (*GetResourceGeneration)(void* state);
+  BOOL (*GetNextEstimatedFrameTime)(void* state, LONGLONG* frameTime);
+  BOOL (*GetObservedPresentationTarget)(void* state, UINT* target);
 } MAGGRAPHICSBACKEND;
 
 void magUiDrawListReset(LPMAGUIDRAWLIST list);
@@ -142,12 +173,18 @@ BOOL magGraphicsComposeFrame(
   const MAGPIXELBUFFER* frame,
   const MAGUIDRAWLIST* ui,
   LPMAGPIXELBUFFER output);
+BOOL magGraphicsReserveCpuCompositor(
+  LPMAGCPUCOMPOSITOR compositor,
+  UINT width,
+  UINT height);
 void magGraphicsDestroyCpuCompositor(LPMAGCPUCOMPOSITOR compositor);
 
 UINT magGraphicsGetBackendCount(void);
 const MAGGRAPHICSBACKEND* magGraphicsGetBackendAt(UINT index);
 const MAGGRAPHICSBACKEND* magGraphicsGetBackend(GRAPHICSAPI api);
 BOOL magGraphicsSetPresentationEnabledNoop(HWND hWnd, void* state, BOOL enabled);
+SIZE magGraphicsChooseReservoirSize(HWND hWnd, SIZE minimumSize);
+BOOL magGraphicsIsInputDesktop(void);
 
 extern const MAGGRAPHICSBACKEND g_magGraphicsOpenGLBackend;
 extern const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend;

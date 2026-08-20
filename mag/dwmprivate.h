@@ -37,6 +37,9 @@ BOOL DwmPrivateCaptureUpdate(
   const DWMPRIVATEDRAWCOMMAND* lpDrawCommands,
   UINT                    drawCommandCount);
 
+UINT64 DwmPrivateCaptureGetResourceGeneration(
+  const DWMPRIVATECAPTURESTATE* lpState);
+
 #ifdef __cplusplus
 }
 #endif

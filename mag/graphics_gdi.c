@@ -9,6 +9,7 @@ typedef struct MAGGDISTATE
   HBITMAP  hColorBitmap;
   HBITMAP  hColorBitmapOld;
   DWORD*   colorPixel;
+  UINT64   resourceGeneration;
 } MAGGDISTATE;
 
 static BOOL magGraphicsGdiIsAvailable(LPTSTR reason, UINT reasonCount)
@@ -20,13 +21,18 @@ static BOOL magGraphicsGdiIsAvailable(LPTSTR reason, UINT reasonCount)
     return TRUE;
 }
 
-static BOOL magGraphicsGdiCreate(HWND hWnd, SIZE clientSize, void** stateOut)
+static BOOL magGraphicsGdiCreate(
+  HWND hWnd,
+  SIZE clientSize,
+  const struct MAGPRESENTATIONSETTINGS* presentation,
+  void** stateOut)
 {
     MAGGDISTATE* state;
     BITMAPINFO bmi = { 0 };
 
     UNREFERENCED_PARAMETER(hWnd);
     UNREFERENCED_PARAMETER(clientSize);
+    UNREFERENCED_PARAMETER(presentation);
 
     if (!stateOut)
     {
@@ -78,6 +84,7 @@ static BOOL magGraphicsGdiCreate(HWND hWnd, SIZE clientSize, void** stateOut)
       return FALSE;
     }
 
+    state->resourceGeneration = 1;
     *stateOut = state;
     return TRUE;
 }
@@ -169,7 +176,12 @@ static void magGraphicsGdiStroke(MAGGDISTATE* state, HDC hDC, const MAGUIDRAWCOM
     }
 }
 
-static BOOL magGraphicsGdiRender(HWND hWnd, void* opaqueState, const MAGPIXELBUFFER* frame, const MAGUIDRAWLIST* ui)
+static BOOL magGraphicsGdiRender(
+  HWND hWnd,
+  void* opaqueState,
+  const MAGPIXELBUFFER* frame,
+  const MAGUIDRAWLIST* ui,
+  const MAGPRESENTINTENT* intent)
 {
     MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
     BITMAPINFO bmi = { 0 };
@@ -177,6 +189,7 @@ static BOOL magGraphicsGdiRender(HWND hWnd, void* opaqueState, const MAGPIXELBUF
     UINT i;
     int copied;
 
+    UNREFERENCED_PARAMETER(intent);
     if (!state || !frame || !frame->pixels || !frame->width || !frame->height)
     {
       return FALSE;
@@ -189,7 +202,7 @@ static BOOL magGraphicsGdiRender(HWND hWnd, void* opaqueState, const MAGPIXELBUF
     }
 
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-    bmi.bmiHeader.biWidth = (LONG)frame->width;
+    bmi.bmiHeader.biWidth = (LONG)(frame->stride / 4U);
     bmi.bmiHeader.biHeight = MAG_ROW_ORDER_TOP_DOWN == frame->rowOrder ? -(LONG)frame->height : (LONG)frame->height;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
@@ -235,6 +248,12 @@ static HANDLE magGraphicsGdiGetFrameWaitHandle(void* state)
     return NULL;
 }
 
+static UINT64 magGraphicsGdiGetResourceGeneration(void* opaqueState)
+{
+    MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+    return state ? state->resourceGeneration : 0;
+}
+
 const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend =
 {
   GRAPHICS_API_GDI,
@@ -247,4 +266,7 @@ const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend =
   magGraphicsSetPresentationEnabledNoop,
   magGraphicsGdiRender,
   magGraphicsGdiGetFrameWaitHandle,
+  magGraphicsGdiGetResourceGeneration,
+  NULL,
+  NULL,
 };

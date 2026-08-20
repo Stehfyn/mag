@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "graphics.h"
+#include "presentation.h"
 
 #define VK_USE_PLATFORM_WIN32_KHR
 #define VK_NO_PROTOTYPES
@@ -37,7 +38,9 @@ typedef struct MAGVULKANSTATE
   VkCommandPool    commandPool;
   MAGVKFRAME       frames[MAG_VK_FRAMES_IN_FLIGHT];
   UINT             currentFrame;
+  UINT64           resourceGeneration;
   MAGCPUCOMPOSITOR compositor;
+  MAGPRESENTATIONSETTINGS presentation;
 
   PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
   PFN_vkCreateInstance vkCreateInstance;
@@ -53,6 +56,7 @@ typedef struct MAGVULKANSTATE
   PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
   PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
   PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+  PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
   PFN_vkCreateDevice vkCreateDevice;
   PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
   PFN_vkDestroyDevice vkDestroyDevice;
@@ -77,6 +81,7 @@ typedef struct MAGVULKANSTATE
   PFN_vkEndCommandBuffer vkEndCommandBuffer;
   PFN_vkQueueSubmit vkQueueSubmit;
   PFN_vkQueuePresentKHR vkQueuePresentKHR;
+  PFN_vkQueueWaitIdle vkQueueWaitIdle;
   PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
   PFN_vkCreateBuffer vkCreateBuffer;
   PFN_vkDestroyBuffer vkDestroyBuffer;
@@ -97,6 +102,15 @@ typedef struct MAGVULKANSTATE
 
 static BOOL magGraphicsVulkanIsAvailable(LPTSTR reason, UINT reasonCount)
 {
+    if (!magGraphicsIsInputDesktop())
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("Vulkan Win32 presentation is unavailable on the private non-input test desktop."), reasonCount);
+      }
+      return FALSE;
+    }
+
     HMODULE module = LoadLibrary(TEXT("vulkan-1.dll"));
     BOOL available = FALSE;
 
@@ -164,6 +178,7 @@ static BOOL magGraphicsVulkanLoadInstanceFunctions(MAGVULKANSTATE* state)
       MAG_VK_LOAD_INSTANCE(state, vkGetPhysicalDeviceSurfaceFormatsKHR) &&
       MAG_VK_LOAD_INSTANCE(state, vkGetPhysicalDeviceSurfacePresentModesKHR) &&
       MAG_VK_LOAD_INSTANCE(state, vkGetPhysicalDeviceMemoryProperties) &&
+      MAG_VK_LOAD_INSTANCE(state, vkGetPhysicalDeviceProperties2) &&
       MAG_VK_LOAD_INSTANCE(state, vkCreateDevice) &&
       MAG_VK_LOAD_INSTANCE(state, vkGetDeviceProcAddr);
 }
@@ -193,6 +208,7 @@ static BOOL magGraphicsVulkanLoadDeviceFunctions(MAGVULKANSTATE* state)
       MAG_VK_LOAD_DEVICE(state, vkEndCommandBuffer) &&
       MAG_VK_LOAD_DEVICE(state, vkQueueSubmit) &&
       MAG_VK_LOAD_DEVICE(state, vkQueuePresentKHR) &&
+      MAG_VK_LOAD_DEVICE(state, vkQueueWaitIdle) &&
       MAG_VK_LOAD_DEVICE(state, vkDeviceWaitIdle) &&
       MAG_VK_LOAD_DEVICE(state, vkCreateBuffer) &&
       MAG_VK_LOAD_DEVICE(state, vkDestroyBuffer) &&
@@ -280,6 +296,10 @@ static BOOL magGraphicsVulkanSelectPhysicalDevice(MAGVULKANSTATE* state)
 
     for (deviceIndex = 0; deviceIndex < deviceCount; ++deviceIndex)
     {
+      VkPhysicalDeviceIDProperties id =
+        { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+      VkPhysicalDeviceProperties2 properties =
+        { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &id };
       VkQueueFamilyProperties* queues;
       UINT queueCount = 0;
       UINT queueIndex;
@@ -288,6 +308,15 @@ static BOOL magGraphicsVulkanSelectPhysicalDevice(MAGVULKANSTATE* state)
             state,
             devices[deviceIndex],
             VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+      {
+        continue;
+      }
+      state->vkGetPhysicalDeviceProperties2(devices[deviceIndex], &properties);
+      if (!id.deviceLUIDValid ||
+          0 != memcmp(
+            id.deviceLUID,
+            &state->presentation.hardware.adapterLuid,
+            VK_LUID_SIZE))
       {
         continue;
       }
@@ -443,7 +472,7 @@ static BOOL magGraphicsVulkanCreateUploadBuffer(
     return TRUE;
 }
 
-static void magGraphicsVulkanDestroySwapchainResources(MAGVULKANSTATE* state)
+static void magGraphicsVulkanDestroyUploadResources(MAGVULKANSTATE* state)
 {
     UINT i;
 
@@ -469,6 +498,39 @@ static void magGraphicsVulkanDestroySwapchainResources(MAGVULKANSTATE* state)
         state->vkFreeMemory(state->device, state->frames[i].uploadMemory, NULL);
         state->frames[i].uploadMemory = VK_NULL_HANDLE;
       }
+    }
+}
+
+static BOOL magGraphicsVulkanCreateUploadResources(
+  MAGVULKANSTATE* state,
+  SIZE reservoirSize)
+{
+    VkDeviceSize byteCount;
+    UINT i;
+
+    if (!state || reservoirSize.cx < 1 || reservoirSize.cy < 1)
+    {
+      return FALSE;
+    }
+
+    byteCount = (VkDeviceSize)(UINT)reservoirSize.cx *
+      (VkDeviceSize)(UINT)reservoirSize.cy * 4U;
+    for (i = 0; i < MAG_VK_FRAMES_IN_FLIGHT; ++i)
+    {
+      if (!magGraphicsVulkanCreateUploadBuffer(state, &state->frames[i], byteCount))
+      {
+        magGraphicsVulkanDestroyUploadResources(state);
+        return FALSE;
+      }
+    }
+    return TRUE;
+}
+
+static void magGraphicsVulkanDestroySwapchainResources(MAGVULKANSTATE* state)
+{
+    if (!state->device)
+    {
+      return;
     }
 
     if (state->swapchain)
@@ -501,14 +563,22 @@ static BOOL magGraphicsVulkanCreateSwapchainResources(
 {
     VkSurfaceCapabilitiesKHR caps;
     VkSurfaceFormatKHR* formats = NULL;
+    VkPresentModeKHR* presentModes = NULL;
     VkSurfaceFormatKHR surfaceFormat;
     VkSwapchainCreateInfoKHR swapInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    VkExtent2D extent;
+    VkSwapchainKHR candidateSwapchain = VK_NULL_HANDLE;
+    VkImage* candidateImages = NULL;
+    VkBool32* candidateInitialized = NULL;
+    VkFence* candidateFences = NULL;
     UINT formatCount = 0;
+    UINT presentModeCount = 0;
     UINT imageCount;
     UINT i;
     BOOL foundBgra = FALSE;
-    VkDeviceSize uploadSize;
+    BOOL success = FALSE;
 
     if (VK_SUCCESS != state->vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
           state->physicalDevice,
@@ -522,7 +592,7 @@ static BOOL magGraphicsVulkanCreateSwapchainResources(
           NULL) ||
         !formatCount)
     {
-      return FALSE;
+      goto cleanup;
     }
 
     formats = (VkSurfaceFormatKHR*)HeapAlloc(
@@ -540,7 +610,7 @@ static BOOL magGraphicsVulkanCreateSwapchainResources(
       {
         HeapFree(GetProcessHeap(), 0, formats);
       }
-      return FALSE;
+      goto cleanup;
     }
 
     surfaceFormat = formats[0];
@@ -564,44 +634,100 @@ static BOOL magGraphicsVulkanCreateSwapchainResources(
       }
     }
     HeapFree(GetProcessHeap(), 0, formats);
+    formats = NULL;
     if (!foundBgra)
     {
-      return FALSE;
+      goto cleanup;
     }
 
     if (UINT32_MAX != caps.currentExtent.width)
     {
-      state->extent = caps.currentExtent;
+      extent = caps.currentExtent;
     }
     else
     {
-      state->extent.width = CLAMP((UINT)clientSize.cx, caps.minImageExtent.width, caps.maxImageExtent.width);
-      state->extent.height = CLAMP((UINT)clientSize.cy, caps.minImageExtent.height, caps.maxImageExtent.height);
+      extent.width = CLAMP((UINT)clientSize.cx, caps.minImageExtent.width, caps.maxImageExtent.width);
+      extent.height = CLAMP((UINT)clientSize.cy, caps.minImageExtent.height, caps.maxImageExtent.height);
     }
-    if (!state->extent.width || !state->extent.height)
+    if (!extent.width || !extent.height)
     {
-      return FALSE;
+      goto cleanup;
     }
 
-    imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount && imageCount > caps.maxImageCount)
+    imageCount = state->presentation.bufferCount;
+    if (imageCount < caps.minImageCount ||
+        (caps.maxImageCount && imageCount > caps.maxImageCount))
     {
-      imageCount = caps.maxImageCount;
+      goto cleanup;
     }
 
+    if (MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == state->presentation.alphaMode)
+    {
+      compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    }
     if (!(caps.supportedCompositeAlpha & compositeAlpha))
     {
-      const VkCompositeAlphaFlagBitsKHR candidates[] =
+      goto cleanup;
+    }
+
+    if (VK_SUCCESS != state->vkGetPhysicalDeviceSurfacePresentModesKHR(
+          state->physicalDevice,
+          state->surface,
+          &presentModeCount,
+          NULL) || !presentModeCount)
+    {
+      goto cleanup;
+    }
+    presentModes = (VkPresentModeKHR*)HeapAlloc(
+      GetProcessHeap(),
+      0,
+      (SIZE_T)presentModeCount * sizeof(*presentModes));
+    if (!presentModes ||
+        VK_SUCCESS != state->vkGetPhysicalDeviceSurfacePresentModesKHR(
+          state->physicalDevice,
+          state->surface,
+          &presentModeCount,
+          presentModes))
+    {
+      goto cleanup;
+    }
+    if (0 == state->presentation.syncInterval)
+    {
+      const VkPresentModeKHR preferred[] =
       {
-        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
-        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
-        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+        VK_PRESENT_MODE_MAILBOX_KHR,
+        VK_PRESENT_MODE_IMMEDIATE_KHR,
+        VK_PRESENT_MODE_FIFO_RELAXED_KHR,
+        VK_PRESENT_MODE_FIFO_KHR,
       };
-      for (i = 0; i < ARRAYSIZE(candidates); ++i)
+      UINT preferenceCount = state->presentation.allowTearing
+        ? ARRAYSIZE(preferred)
+        : 1U;
+      UINT preference;
+
+      for (preference = 0; preference < preferenceCount; ++preference)
       {
-        if (caps.supportedCompositeAlpha & candidates[i])
+        for (i = 0; i < presentModeCount; ++i)
         {
-          compositeAlpha = candidates[i];
+          if (presentModes[i] == preferred[preference])
+          {
+            presentMode = preferred[preference];
+            preference = preferenceCount;
+            break;
+          }
+        }
+      }
+    }
+    else
+    {
+      /* MAILBOX preserves vertical synchronization while replacing queued
+         stale frames with the newest transition frame.  FIFO remains the
+         mandatory fallback when MAILBOX is unavailable. */
+      for (i = 0; i < presentModeCount; ++i)
+      {
+        if (VK_PRESENT_MODE_MAILBOX_KHR == presentModes[i])
+        {
+          presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
           break;
         }
       }
@@ -611,67 +737,103 @@ static BOOL magGraphicsVulkanCreateSwapchainResources(
     swapInfo.minImageCount = imageCount;
     swapInfo.imageFormat = surfaceFormat.format;
     swapInfo.imageColorSpace = surfaceFormat.colorSpace;
-    swapInfo.imageExtent = state->extent;
+    swapInfo.imageExtent = extent;
     swapInfo.imageArrayLayers = 1;
     swapInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     swapInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapInfo.preTransform = caps.currentTransform;
     swapInfo.compositeAlpha = compositeAlpha;
-    swapInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    swapInfo.presentMode = presentMode;
     swapInfo.clipped = VK_TRUE;
+    swapInfo.oldSwapchain = state->swapchain;
     if (VK_SUCCESS != state->vkCreateSwapchainKHR(
           state->device,
           &swapInfo,
           NULL,
-          &state->swapchain))
+          &candidateSwapchain))
     {
-      return FALSE;
+      goto cleanup;
     }
-    state->swapchainFormat = surfaceFormat.format;
 
     if (VK_SUCCESS != state->vkGetSwapchainImagesKHR(
           state->device,
-          state->swapchain,
-          &state->imageCount,
-          NULL) || !state->imageCount)
+          candidateSwapchain,
+          &imageCount,
+          NULL) || !imageCount)
     {
-      magGraphicsVulkanDestroySwapchainResources(state);
-      return FALSE;
+      goto cleanup;
     }
 
-    state->images = (VkImage*)HeapAlloc(
+    candidateImages = (VkImage*)HeapAlloc(
       GetProcessHeap(),
       0,
-      (SIZE_T)state->imageCount * sizeof(*state->images));
-    state->imageInitialized = (VkBool32*)HeapAlloc(
+      (SIZE_T)imageCount * sizeof(*candidateImages));
+    candidateInitialized = (VkBool32*)HeapAlloc(
       GetProcessHeap(),
       HEAP_ZERO_MEMORY,
-      (SIZE_T)state->imageCount * sizeof(*state->imageInitialized));
-    state->imageFences = (VkFence*)HeapAlloc(
+      (SIZE_T)imageCount * sizeof(*candidateInitialized));
+    candidateFences = (VkFence*)HeapAlloc(
       GetProcessHeap(),
       HEAP_ZERO_MEMORY,
-      (SIZE_T)state->imageCount * sizeof(*state->imageFences));
-    if (!state->images || !state->imageInitialized || !state->imageFences ||
+      (SIZE_T)imageCount * sizeof(*candidateFences));
+    if (!candidateImages || !candidateInitialized || !candidateFences ||
         VK_SUCCESS != state->vkGetSwapchainImagesKHR(
           state->device,
-          state->swapchain,
-          &state->imageCount,
-          state->images))
+          candidateSwapchain,
+          &imageCount,
+          candidateImages))
     {
-      magGraphicsVulkanDestroySwapchainResources(state);
-      return FALSE;
+      goto cleanup;
     }
 
-    uploadSize = (VkDeviceSize)state->extent.width * state->extent.height * 4U;
-    for (i = 0; i < MAG_VK_FRAMES_IN_FLIGHT; ++i)
+    /* The old chain stays valid until the replacement is completely built.
+       Queue retirement happens only after candidate creation, so a failure can
+       never expose an HWND with no presentable images. */
+    if (state->swapchain && VK_SUCCESS != state->vkQueueWaitIdle(state->queue))
     {
-      if (!magGraphicsVulkanCreateUploadBuffer(state, &state->frames[i], uploadSize))
-      {
-        magGraphicsVulkanDestroySwapchainResources(state);
-        return FALSE;
-      }
+      goto cleanup;
     }
-    return TRUE;
+    magGraphicsVulkanDestroySwapchainResources(state);
+    state->swapchain = candidateSwapchain;
+    candidateSwapchain = VK_NULL_HANDLE;
+    state->images = candidateImages;
+    candidateImages = NULL;
+    state->imageInitialized = candidateInitialized;
+    candidateInitialized = NULL;
+    state->imageFences = candidateFences;
+    candidateFences = NULL;
+    state->imageCount = imageCount;
+    state->extent = extent;
+    state->swapchainFormat = surfaceFormat.format;
+    ++state->resourceGeneration;
+    success = TRUE;
+
+cleanup:
+    if (formats)
+    {
+      HeapFree(GetProcessHeap(), 0, formats);
+    }
+    if (presentModes)
+    {
+      HeapFree(GetProcessHeap(), 0, presentModes);
+    }
+    if (candidateImages)
+    {
+      HeapFree(GetProcessHeap(), 0, candidateImages);
+    }
+    if (candidateInitialized)
+    {
+      HeapFree(GetProcessHeap(), 0, candidateInitialized);
+    }
+    if (candidateFences)
+    {
+      HeapFree(GetProcessHeap(), 0, candidateFences);
+    }
+    if (candidateSwapchain)
+    {
+      state->vkDestroySwapchainKHR(state->device, candidateSwapchain, NULL);
+    }
+    return success;
 }
 
 static BOOL magGraphicsVulkanCreateSyncResources(MAGVULKANSTATE* state)
@@ -733,7 +895,11 @@ static BOOL magGraphicsVulkanCreateSyncResources(MAGVULKANSTATE* state)
 
 static void magGraphicsVulkanDestroy(HWND hWnd, void* opaqueState);
 
-static BOOL magGraphicsVulkanCreate(HWND hWnd, SIZE clientSize, void** stateOut)
+static BOOL magGraphicsVulkanCreate(
+  HWND hWnd,
+  SIZE clientSize,
+  const struct MAGPRESENTATIONSETTINGS* presentation,
+  void** stateOut)
 {
     MAGVULKANSTATE* state;
     const LPCSTR extensions[] =
@@ -744,8 +910,9 @@ static BOOL magGraphicsVulkanCreate(HWND hWnd, SIZE clientSize, void** stateOut)
     VkApplicationInfo applicationInfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
     VkInstanceCreateInfo instanceInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     VkWin32SurfaceCreateInfoKHR surfaceInfo = { VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
+    SIZE reservoirSize;
 
-    if (!stateOut || clientSize.cx < 1 || clientSize.cy < 1)
+    if (!stateOut || !presentation || clientSize.cx < 1 || clientSize.cy < 1)
     {
       return FALSE;
     }
@@ -757,12 +924,14 @@ static BOOL magGraphicsVulkanCreate(HWND hWnd, SIZE clientSize, void** stateOut)
       magGraphicsVulkanDestroy(hWnd, state);
       return FALSE;
     }
+    state->presentation = *presentation;
+    reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
 
     applicationInfo.pApplicationName = "mag";
     applicationInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
     applicationInfo.pEngineName = "mag";
     applicationInfo.engineVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    applicationInfo.apiVersion = VK_API_VERSION_1_0;
+    applicationInfo.apiVersion = VK_API_VERSION_1_1;
     instanceInfo.pApplicationInfo = &applicationInfo;
     instanceInfo.enabledExtensionCount = ARRAYSIZE(extensions);
     instanceInfo.ppEnabledExtensionNames = extensions;
@@ -783,7 +952,12 @@ static BOOL magGraphicsVulkanCreate(HWND hWnd, SIZE clientSize, void** stateOut)
         !magGraphicsVulkanSelectPhysicalDevice(state) ||
         !magGraphicsVulkanCreateDevice(state) ||
         !magGraphicsVulkanCreateSyncResources(state) ||
-        !magGraphicsVulkanCreateSwapchainResources(state, clientSize))
+        !magGraphicsVulkanCreateUploadResources(state, reservoirSize) ||
+        !magGraphicsVulkanCreateSwapchainResources(state, clientSize) ||
+        !magGraphicsReserveCpuCompositor(
+          &state->compositor,
+          (UINT)reservoirSize.cx,
+          (UINT)reservoirSize.cy))
     {
       magGraphicsVulkanDestroy(hWnd, state);
       return FALSE;
@@ -811,6 +985,7 @@ static void magGraphicsVulkanDestroy(HWND hWnd, void* opaqueState)
     if (state->device && state->vkDestroySwapchainKHR)
     {
       magGraphicsVulkanDestroySwapchainResources(state);
+      magGraphicsVulkanDestroyUploadResources(state);
     }
     if (state->device)
     {
@@ -869,11 +1044,6 @@ static BOOL magGraphicsVulkanResize(HWND hWnd, void* opaqueState, SIZE clientSiz
       return TRUE;
     }
 
-    if (VK_SUCCESS != state->vkDeviceWaitIdle(state->device))
-    {
-      return FALSE;
-    }
-    magGraphicsVulkanDestroySwapchainResources(state);
     return magGraphicsVulkanCreateSwapchainResources(state, clientSize);
 }
 
@@ -993,7 +1163,8 @@ static BOOL magGraphicsVulkanRender(
   HWND hWnd,
   void* opaqueState,
   const MAGPIXELBUFFER* sourceFrame,
-  const MAGUIDRAWLIST* ui)
+  const MAGUIDRAWLIST* ui,
+  const MAGPRESENTINTENT* intent)
 {
     MAGVULKANSTATE* state = (MAGVULKANSTATE*)opaqueState;
     MAGVKFRAME* frame;
@@ -1003,6 +1174,8 @@ static BOOL magGraphicsVulkanRender(
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     UINT imageIndex;
     VkResult result;
+
+    UNREFERENCED_PARAMETER(intent);
 
     UNREFERENCED_PARAMETER(hWnd);
     if (!state || !sourceFrame ||
@@ -1091,6 +1264,12 @@ static HANDLE magGraphicsVulkanGetFrameWaitHandle(void* state)
     return NULL;
 }
 
+static UINT64 magGraphicsVulkanGetResourceGeneration(void* opaqueState)
+{
+    MAGVULKANSTATE* state = (MAGVULKANSTATE*)opaqueState;
+    return state ? state->resourceGeneration + state->compositor.generation : 0;
+}
+
 const MAGGRAPHICSBACKEND g_magGraphicsVulkanBackend =
 {
   GRAPHICS_API_VULKAN,
@@ -1103,4 +1282,7 @@ const MAGGRAPHICSBACKEND g_magGraphicsVulkanBackend =
   magGraphicsVulkanSetPresentationEnabled,
   magGraphicsVulkanRender,
   magGraphicsVulkanGetFrameWaitHandle,
+  magGraphicsVulkanGetResourceGeneration,
+  NULL,
+  NULL,
 };

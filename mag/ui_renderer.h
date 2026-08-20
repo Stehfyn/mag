@@ -28,6 +28,7 @@ BOOL magUiRendererComposeWithoutText(
   const MAGUIDRAWLIST* ui,
   LPMAGPIXELBUFFER output);
 const MAGGLYPHATLAS* magUiRendererGetGlyphAtlas(const MAGUIRENDERER* renderer);
+UINT64 magUiRendererGetSurfaceGeneration(const MAGUIRENDERER* renderer);
 
 #ifdef __cplusplus
 }

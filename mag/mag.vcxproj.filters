@@ -18,6 +18,9 @@
     <ClCompile Include="main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="presentation.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="mag.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -45,7 +48,13 @@
     <ClCompile Include="graphics_gdi.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="graphics_layered.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="graphics_opengl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_presentation_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics_vulkan.c">
@@ -80,6 +89,9 @@
     <ClInclude Include="mag.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="presentation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="wingdix.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -90,6 +102,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="graphics_dcomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="graphics_layered.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="graphics_presentation_manager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="d3dkmtx.h">

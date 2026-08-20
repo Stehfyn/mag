@@ -12,6 +12,85 @@ static const MAGGRAPHICSBACKEND* const g_graphicsBackends[] =
 
 C_ASSERT(ARRAYSIZE(g_graphicsBackends) == GRAPHICS_API_COUNT);
 
+typedef struct MAGRESERVOIRMEASURE
+{
+  LONG width;
+  LONG height;
+  LONG left;
+  LONG top;
+  LONG right;
+  LONG bottom;
+  BOOL haveBounds;
+} MAGRESERVOIRMEASURE;
+
+static BOOL CALLBACK magGraphicsMeasureMonitor(HMONITOR monitor, HDC hDC, LPRECT rect, LPARAM context)
+{
+    MAGRESERVOIRMEASURE* measure = (MAGRESERVOIRMEASURE*)context;
+
+    UNREFERENCED_PARAMETER(monitor);
+    UNREFERENCED_PARAMETER(hDC);
+    if (measure && rect)
+    {
+      measure->width = max(measure->width, rect->right - rect->left);
+      measure->height = max(measure->height, rect->bottom - rect->top);
+      if (!measure->haveBounds)
+      {
+        measure->left = rect->left;
+        measure->top = rect->top;
+        measure->right = rect->right;
+        measure->bottom = rect->bottom;
+        measure->haveBounds = TRUE;
+      }
+      else
+      {
+        measure->left = min(measure->left, rect->left);
+        measure->top = min(measure->top, rect->top);
+        measure->right = max(measure->right, rect->right);
+        measure->bottom = max(measure->bottom, rect->bottom);
+      }
+    }
+    return TRUE;
+}
+
+SIZE magGraphicsChooseReservoirSize(HWND hWnd, SIZE minimumSize)
+{
+    MAGRESERVOIRMEASURE measure = { 0 };
+    SIZE result;
+
+    UNREFERENCED_PARAMETER(hWnd);
+    EnumDisplayMonitors(NULL, NULL, magGraphicsMeasureMonitor, (LPARAM)&measure);
+    if (measure.haveBounds)
+    {
+      measure.width = max(measure.width, measure.right - measure.left);
+      measure.height = max(measure.height, measure.bottom - measure.top);
+    }
+    result.cx = max(max(1, minimumSize.cx), measure.width);
+    result.cy = max(max(1, minimumSize.cy), measure.height);
+    return result;
+}
+
+BOOL magGraphicsIsInputDesktop(void)
+{
+    HDESK inputDesktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    HDESK currentDesktop = GetThreadDesktop(GetCurrentThreadId());
+    TCHAR inputName[128] = { 0 };
+    TCHAR currentName[128] = { 0 };
+    DWORD required;
+    BOOL matches = FALSE;
+
+    if (inputDesktop && currentDesktop &&
+        GetUserObjectInformation(inputDesktop, UOI_NAME, inputName, sizeof(inputName), &required) &&
+        GetUserObjectInformation(currentDesktop, UOI_NAME, currentName, sizeof(currentName), &required))
+    {
+      matches = 0 == lstrcmpi(inputName, currentName);
+    }
+    if (inputDesktop)
+    {
+      CloseDesktop(inputDesktop);
+    }
+    return matches;
+}
+
 BOOL magGraphicsSetPresentationEnabledNoop(HWND hWnd, void* state, BOOL enabled)
 {
     UNREFERENCED_PARAMETER(hWnd);
@@ -79,25 +158,21 @@ static void magGraphicsCpuStrokeRect(
     }
 }
 
-BOOL magGraphicsComposeFrame(
+BOOL magGraphicsReserveCpuCompositor(
   LPMAGCPUCOMPOSITOR compositor,
-  const MAGPIXELBUFFER* frame,
-  const MAGUIDRAWLIST* ui,
-  LPMAGPIXELBUFFER output)
+  UINT width,
+  UINT height)
 {
     SIZE_T required;
     BYTE* pixels;
-    UINT y;
-    UINT i;
 
-    if (!compositor || !frame || !frame->pixels || !frame->width || !frame->height || !output ||
-        frame->width > MAXUINT / 4U)
+    if (!compositor || !width || !height || width > MAXUINT / 4U)
     {
       return FALSE;
     }
 
-    required = (SIZE_T)frame->width * 4U * frame->height;
-    if (required / frame->height != (SIZE_T)frame->width * 4U)
+    required = (SIZE_T)width * 4U * height;
+    if (required / height != (SIZE_T)width * 4U)
     {
       return FALSE;
     }
@@ -113,6 +188,24 @@ BOOL magGraphicsComposeFrame(
       }
       compositor->pixels = pixels;
       compositor->capacity = required;
+      ++compositor->generation;
+    }
+    return TRUE;
+}
+
+BOOL magGraphicsComposeFrame(
+  LPMAGCPUCOMPOSITOR compositor,
+  const MAGPIXELBUFFER* frame,
+  const MAGUIDRAWLIST* ui,
+  LPMAGPIXELBUFFER output)
+{
+    UINT y;
+    UINT i;
+
+    if (!compositor || !frame || !frame->pixels || !frame->width || !frame->height || !output ||
+        !magGraphicsReserveCpuCompositor(compositor, frame->width, frame->height))
+    {
+      return FALSE;
     }
 
     output->pixels = compositor->pixels;

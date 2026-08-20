@@ -31,6 +31,9 @@ struct MAGUIRENDERER
   BYTE*         pixels;
   UINT          width;
   UINT          height;
+  UINT          capacityWidth;
+  UINT          capacityHeight;
+  UINT64        surfaceGeneration;
   HFONT         hFont;
   MAGCPUCOMPOSITOR baseCompositor;
 
@@ -64,6 +67,9 @@ static BOOL magUiCreateSurface(MAGUIRENDERER* renderer, SIZE clientSize)
 {
     BITMAPINFO bmi = { 0 };
     void* pixels = NULL;
+    SIZE reservoirSize;
+    HBITMAP newBitmap;
+    HBITMAP replacedBitmap;
 
     if (clientSize.cx < 1 || clientSize.cy < 1)
     {
@@ -79,43 +85,62 @@ static BOOL magUiCreateSurface(MAGUIRENDERER* renderer, SIZE clientSize)
       }
     }
 
-    if (renderer->hBitmap)
+    renderer->width = (UINT)clientSize.cx;
+    renderer->height = (UINT)clientSize.cy;
+    if (renderer->hBitmap &&
+        renderer->width <= renderer->capacityWidth &&
+        renderer->height <= renderer->capacityHeight)
     {
-      SelectBitmap(renderer->hDC, renderer->hBitmapOld);
-      DeleteBitmap(renderer->hBitmap);
-      renderer->hBitmap = NULL;
-      renderer->pixels = NULL;
+      return TRUE;
     }
 
+    reservoirSize = magGraphicsChooseReservoirSize(NULL, clientSize);
+    reservoirSize.cx = max(reservoirSize.cx, (LONG)renderer->capacityWidth);
+    reservoirSize.cy = max(reservoirSize.cy, (LONG)renderer->capacityHeight);
+
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-    bmi.bmiHeader.biWidth = clientSize.cx;
-    bmi.bmiHeader.biHeight = -clientSize.cy;
+    bmi.bmiHeader.biWidth = reservoirSize.cx;
+    bmi.bmiHeader.biHeight = -reservoirSize.cy;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
-    renderer->hBitmap = CreateDIBSection(
+    newBitmap = CreateDIBSection(
       renderer->hDC,
       &bmi,
       DIB_RGB_COLORS,
       &pixels,
       NULL,
       0);
-    if (!renderer->hBitmap || !pixels)
+    if (!newBitmap || !pixels)
     {
+      if (newBitmap)
+      {
+        DeleteBitmap(newBitmap);
+      }
       return FALSE;
     }
 
-    renderer->hBitmapOld = SelectBitmap(renderer->hDC, renderer->hBitmap);
+    replacedBitmap = SelectBitmap(renderer->hDC, newBitmap);
+    if (!replacedBitmap)
+    {
+      DeleteBitmap(newBitmap);
+      return FALSE;
+    }
+
     if (!renderer->hBitmapOld)
     {
+      renderer->hBitmapOld = replacedBitmap;
+    }
+    else if (renderer->hBitmap)
+    {
       DeleteBitmap(renderer->hBitmap);
-      renderer->hBitmap = NULL;
-      return FALSE;
     }
 
+    renderer->hBitmap = newBitmap;
     renderer->pixels = (BYTE*)pixels;
-    renderer->width = (UINT)clientSize.cx;
-    renderer->height = (UINT)clientSize.cy;
+    renderer->capacityWidth = (UINT)reservoirSize.cx;
+    renderer->capacityHeight = (UINT)reservoirSize.cy;
+    ++renderer->surfaceGeneration;
     return TRUE;
 }
 
@@ -360,7 +385,7 @@ static void magUiDrawAtlasText(MAGUIRENDERER* renderer, const MAGUIDRAWCOMMAND* 
           }
 
           pixel = renderer->pixels +
-            (SIZE_T)targetY * renderer->width * 4U +
+            (SIZE_T)targetY * renderer->capacityWidth * 4U +
             (SIZE_T)targetX * 4U;
           pixel[0] = (BYTE)((blue * alpha + pixel[0] * inverseAlpha + 127U) / 255U);
           pixel[1] = (BYTE)((green * alpha + pixel[1] * inverseAlpha + 127U) / 255U);
@@ -444,6 +469,10 @@ BOOL magUiRendererCreate(
       TEXT("Segoe UI"));
 
     if (!renderer->hFont || !magUiCreateSurface(renderer, clientSize) ||
+        !magGraphicsReserveCpuCompositor(
+          &renderer->baseCompositor,
+          renderer->capacityWidth,
+          renderer->capacityHeight) ||
         ((UI_GRAPHICS_API_DIRECT2D == uiApi ||
           TEXT_RENDERER_DIRECTWRITE == textRenderer ||
           TEXT_RENDERER_GPU_GLYPH_ATLAS == textRenderer) &&
@@ -534,7 +563,13 @@ static BOOL magUiRendererComposeInternal(
     {
       return FALSE;
     }
-    CopyMemory(renderer->pixels, base.pixels, (SIZE_T)base.stride * base.height);
+    for (i = 0; i < base.height; ++i)
+    {
+      CopyMemory(
+        renderer->pixels + (SIZE_T)i * renderer->capacityWidth * 4U,
+        base.pixels + (SIZE_T)i * base.stride,
+        (SIZE_T)base.width * 4U);
+    }
 
     if (UI_GRAPHICS_API_DIRECT2D == renderer->uiApi || TEXT_RENDERER_DIRECTWRITE == renderer->textRenderer)
     {
@@ -620,7 +655,7 @@ static BOOL magUiRendererComposeInternal(
     output->pixels = renderer->pixels;
     output->width = renderer->width;
     output->height = renderer->height;
-    output->stride = renderer->width * 4U;
+    output->stride = renderer->capacityWidth * 4U;
     output->rowOrder = MAG_ROW_ORDER_TOP_DOWN;
     output->alphaMode = MAG_ALPHA_MODE_IGNORE;
     return TRUE;
@@ -647,4 +682,11 @@ BOOL magUiRendererComposeWithoutText(
 const MAGGLYPHATLAS* magUiRendererGetGlyphAtlas(const MAGUIRENDERER* renderer)
 {
     return renderer && renderer->atlas.alpha ? &renderer->atlas : NULL;
+}
+
+UINT64 magUiRendererGetSurfaceGeneration(const MAGUIRENDERER* renderer)
+{
+    return renderer
+      ? renderer->surfaceGeneration + renderer->baseCompositor.generation
+      : 0;
 }

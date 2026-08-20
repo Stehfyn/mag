@@ -2,6 +2,7 @@
 #include "render.h"
 
 #define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM
+#define MAIN_TEST_DESKTOP_PREFIX TEXT("mag-test-")
 
 typedef struct MAINVBLANKTHREAD
 {
@@ -13,6 +14,64 @@ typedef struct MAINVBLANKTHREAD
 DWORD WINAPI main_VBlankThreadProc(LPVOID lpParameter);
 BOOL main_StartVBlankThread(HWND hWnd, LPMAINVBLANKTHREAD lpThread);
 void main_StopVBlankThread(LPMAINVBLANKTHREAD lpThread);
+BOOL main_BeginIsolatedTestDesktop(HDESK* originalDesktop, HDESK* testDesktop);
+void main_EndIsolatedTestDesktop(HDESK originalDesktop, HDESK testDesktop);
+
+BOOL main_BeginIsolatedTestDesktop(HDESK* originalDesktop, HDESK* testDesktop)
+{
+    TCHAR desktopName[64];
+    HDESK createdDesktop;
+
+    if (!originalDesktop || !testDesktop)
+    {
+      return FALSE;
+    }
+    *originalDesktop = GetThreadDesktop(GetCurrentThreadId());
+    *testDesktop = NULL;
+    if (!*originalDesktop)
+    {
+      return FALSE;
+    }
+
+    _sntprintf_s(
+      desktopName,
+      ARRAYSIZE(desktopName),
+      _TRUNCATE,
+      TEXT("%s%lu-%I64u"),
+      MAIN_TEST_DESKTOP_PREFIX,
+      GetCurrentProcessId(),
+      GetTickCount64());
+    createdDesktop = CreateDesktop(
+      desktopName,
+      NULL,
+      NULL,
+      0,
+      DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS,
+      NULL);
+    if (!createdDesktop)
+    {
+      return FALSE;
+    }
+    if (!SetThreadDesktop(createdDesktop))
+    {
+      CloseDesktop(createdDesktop);
+      return FALSE;
+    }
+    *testDesktop = createdDesktop;
+    return TRUE;
+}
+
+void main_EndIsolatedTestDesktop(HDESK originalDesktop, HDESK testDesktop)
+{
+    if (originalDesktop)
+    {
+      SetThreadDesktop(originalDesktop);
+    }
+    if (testDesktop)
+    {
+      CloseDesktop(testDesktop);
+    }
+}
 
 BOOL main_PumpMessages(HWND hWnd, int* lpExitCode)
 {
@@ -173,12 +232,23 @@ _tWinMain(
     MAINVBLANKTHREAD vblankThread;
     BOOL fMessageDrivenRender = FALSE;
     const BOOL fGraphicsSmoke = NULL != _tcsstr(lpCmdLine, TEXT("--graphics-smoke"));
+    HDESK originalDesktop = NULL;
+    HDESK testDesktop = NULL;
 
     UNREFERENCED_PARAMETER(hPrevInstance);
+
+    if (fGraphicsSmoke && !main_BeginIsolatedTestDesktop(&originalDesktop, &testDesktop))
+    {
+      return ERROR_ACCESS_DENIED;
+    }
 
     hWnd = magInitInstance(hInstance, fGraphicsSmoke ? SW_HIDE : nShowCmd);
     if (!hWnd)
     {
+      if (fGraphicsSmoke)
+      {
+        main_EndIsolatedTestDesktop(originalDesktop, testDesktop);
+      }
       return FALSE;
     }
 
@@ -186,8 +256,26 @@ _tWinMain(
     {
       exitCode = renderRunGraphicsSmoke(hWnd);
       DestroyWindow(hWnd);
+      main_EndIsolatedTestDesktop(originalDesktop, testDesktop);
       return exitCode;
     }
+
+    /* Never expose an uninitialized redirection surface.  The first content
+       frame is prepared while the HWND is hidden, then the already-populated
+       surface is revealed and refreshed for the visible geometry. */
+    if (!renderSubmit(hWnd))
+    {
+      DestroyWindow(hWnd);
+      return ERROR_OPEN_FAILED;
+    }
+    ShowWindow(hWnd, nShowCmd);
+    if (!renderSubmit(hWnd))
+    {
+      ShowWindow(hWnd, SW_HIDE);
+      DestroyWindow(hWnd);
+      return ERROR_WRITE_FAULT;
+    }
+    DwmFlush();
 
     if (main_StartVBlankThread(hWnd, &vblankThread))
     {

@@ -1,14 +1,17 @@
 #include "framework.h"
 #include "graphics.h"
 #include "graphics_dcomp.h"
+#include "graphics_presentation_manager.h"
+#include "presentation.h"
 
+#include <d3d11on12.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 
 #pragma comment(lib, "d3d12")
 #pragma comment(lib, "dxgi")
 
-#define MAG_D3D12_BUFFER_COUNT 2
+#define MAG_D3D12_MAX_BUFFER_COUNT 16
 
 typedef struct MAGD3D12FRAME
 {
@@ -23,25 +26,51 @@ typedef struct MAGD3D12STATE
 {
   IDXGIFactory4*        factory;
   MAGDCOMPPRESENTER*    composition;
+  MAGPRESENTATIONMANAGERPRESENTER* presentationManager;
   ID3D12Device*         device;
   ID3D12CommandQueue*   queue;
+  ID3D11Device*         on12Device11;
+  ID3D11DeviceContext*  on12Context11;
+  ID3D11On12Device2*    on12Device;
   IDXGISwapChain3*      swapChain;
   ID3D12GraphicsCommandList* commandList;
   ID3D12Fence*          fence;
   HANDLE                fenceEvent;
   HANDLE                frameWaitHandle;
-  MAGD3D12FRAME         frames[MAG_D3D12_BUFFER_COUNT];
+  MAGD3D12FRAME         frames[MAG_D3D12_MAX_BUFFER_COUNT];
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT uploadFootprint;
   UINT64                nextFenceValue;
   MAGCPUCOMPOSITOR      compositor;
   UINT                  width;
   UINT                  height;
+  UINT                  capacityWidth;
+  UINT                  capacityHeight;
+  UINT64                resourceGeneration;
+  UINT                  bufferCount;
+  UINT                  syncInterval;
+  UINT                  presentFlags;
   BOOL                  warp;
+  BOOL                  compositionHost;
+  BOOL                  presentationManagerHost;
+  BOOL                  presentationEnabled;
 } MAGD3D12STATE;
 
 static BOOL magGraphicsD3D12IsAvailable(LPTSTR reason, UINT reasonCount)
 {
     HMODULE module = LoadLibrary(TEXT("d3d12.dll"));
+
+    if (!magGraphicsIsInputDesktop())
+    {
+      if (module)
+      {
+        FreeLibrary(module);
+      }
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("Direct3D 12 composition presentation is unavailable on the private non-input test desktop."), reasonCount);
+      }
+      return FALSE;
+    }
 
     if (module)
     {
@@ -99,7 +128,7 @@ static void magGraphicsD3D12ReleaseFrameResources(MAGD3D12STATE* state)
 {
     UINT i;
 
-    for (i = 0; i < MAG_D3D12_BUFFER_COUNT; ++i)
+    for (i = 0; i < state->bufferCount; ++i)
     {
       if (state->frames[i].upload && state->frames[i].mappedUpload)
       {
@@ -178,13 +207,14 @@ static BOOL magGraphicsD3D12CreateFrameResources(MAGD3D12STATE* state, SIZE clie
       &rowSize,
       &uploadSize);
 
-    for (i = 0; i < MAG_D3D12_BUFFER_COUNT; ++i)
+    for (i = 0; i < state->bufferCount; ++i)
     {
-      if (FAILED(IDXGISwapChain3_GetBuffer(
-            state->swapChain,
-            i,
-            &IID_ID3D12Resource,
-            (void**)&state->frames[i].backBuffer)) ||
+      if ((!state->presentationManagerHost &&
+           FAILED(IDXGISwapChain3_GetBuffer(
+             state->swapChain,
+             i,
+             &IID_ID3D12Resource,
+             (void**)&state->frames[i].backBuffer))) ||
           !magGraphicsD3D12CreateUploadBuffer(state, &state->frames[i], uploadSize))
       {
         magGraphicsD3D12ReleaseFrameResources(state);
@@ -192,53 +222,37 @@ static BOOL magGraphicsD3D12CreateFrameResources(MAGD3D12STATE* state, SIZE clie
       }
     }
 
-    state->width = (UINT)clientSize.cx;
-    state->height = (UINT)clientSize.cy;
+    state->capacityWidth = (UINT)clientSize.cx;
+    state->capacityHeight = (UINT)clientSize.cy;
+    ++state->resourceGeneration;
     return TRUE;
 }
 
-static BOOL magGraphicsD3D12SelectDevice(MAGD3D12STATE* state)
+static BOOL magGraphicsD3D12SelectDevice(
+  MAGD3D12STATE* state,
+  const MAGPRESENTATIONSETTINGS* presentation)
 {
     IDXGIAdapter1* adapter = NULL;
-    UINT index;
+    BOOL selected;
 
-    for (index = 0; ; ++index)
+    if (!presentation)
     {
-      DXGI_ADAPTER_DESC1 desc;
-      HRESULT hr;
-
-      if (FAILED(IDXGIFactory4_EnumAdapters1(state->factory, index, &adapter)))
-      {
-        break;
-      }
-
-      IDXGIAdapter1_GetDesc1(adapter, &desc);
-      hr = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-        ? E_FAIL
-        : D3D12CreateDevice(
-            (IUnknown*)adapter,
-            D3D_FEATURE_LEVEL_11_0,
-            &IID_ID3D12Device,
-            (void**)&state->device);
-      IDXGIAdapter1_Release(adapter);
-      adapter = NULL;
-      if (SUCCEEDED(hr))
-      {
-        return TRUE;
-      }
+      return FALSE;
     }
-
-    if (SUCCEEDED(IDXGIFactory4_EnumWarpAdapter(
+    state->warp = MAG_HARDWARE_ADAPTER_WARP == presentation->hardware.mode;
+    selected = state->warp
+      ? SUCCEEDED(IDXGIFactory4_EnumWarpAdapter(
           state->factory,
           &IID_IDXGIAdapter1,
-          (void**)&adapter)) &&
-        SUCCEEDED(D3D12CreateDevice(
+          (void**)&adapter))
+      : magAdapterOpenDxgi(presentation->hardware.adapterLuid, &adapter);
+
+    if (selected && adapter && SUCCEEDED(D3D12CreateDevice(
           (IUnknown*)adapter,
           D3D_FEATURE_LEVEL_11_0,
           &IID_ID3D12Device,
           (void**)&state->device)))
     {
-      state->warp = TRUE;
       IDXGIAdapter1_Release(adapter);
       return TRUE;
     }
@@ -252,16 +266,27 @@ static BOOL magGraphicsD3D12SelectDevice(MAGD3D12STATE* state)
 
 static void magGraphicsD3D12Destroy(HWND hWnd, void* opaqueState);
 
-static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
+static BOOL magGraphicsD3D12Create(
+  HWND hWnd,
+  SIZE clientSize,
+  const struct MAGPRESENTATIONSETTINGS* presentation,
+  void** stateOut)
 {
     MAGD3D12STATE* state;
     D3D12_COMMAND_QUEUE_DESC queueDesc = { 0 };
     DXGI_SWAP_CHAIN_DESC1 swapDesc = { 0 };
     IDXGISwapChain1* swapChain1 = NULL;
+    IDXGIFactory5* factory5 = NULL;
+    SIZE reservoirSize;
     UINT i;
+    BOOL allowTearing = FALSE;
+    BOOL compositionHost;
+    BOOL presentationManagerHost;
     HRESULT hr;
 
-    if (!stateOut || clientSize.cx < 1 || clientSize.cy < 1)
+    if (!stateOut || !presentation || clientSize.cx < 1 || clientSize.cy < 1 ||
+        presentation->bufferCount < 2 ||
+        presentation->bufferCount > MAG_D3D12_MAX_BUFFER_COUNT)
     {
       return FALSE;
     }
@@ -274,9 +299,15 @@ static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
       return FALSE;
     }
     state->nextFenceValue = 1;
+    state->bufferCount = presentation->bufferCount;
+    compositionHost = MAG_HOST_DIRECTCOMPOSITION == presentation->host;
+    presentationManagerHost = MAG_HOST_PRESENTATION_MANAGER == presentation->host;
+    state->compositionHost = compositionHost;
+    state->presentationManagerHost = presentationManagerHost;
+    reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
 
     hr = CreateDXGIFactory1(&IID_IDXGIFactory4, (void**)&state->factory);
-    if (FAILED(hr) || !magGraphicsD3D12SelectDevice(state))
+    if (FAILED(hr) || !magGraphicsD3D12SelectDevice(state, presentation))
     {
       SetLastError(FAILED(hr) ? (DWORD)hr : ERROR_NOT_SUPPORTED);
       magGraphicsD3D12Destroy(hWnd, state);
@@ -295,23 +326,112 @@ static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
       return FALSE;
     }
 
-    swapDesc.Width = (UINT)clientSize.cx;
-    swapDesc.Height = (UINT)clientSize.cy;
+    if (presentationManagerHost)
+    {
+      IUnknown* queues[] = { (IUnknown*)state->queue };
+      TCHAR managerReason[256];
+
+      hr = D3D11On12CreateDevice(
+        (IUnknown*)state->device,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+          D3D11_CREATE_DEVICE_SINGLETHREADED |
+          D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+        NULL,
+        0,
+        queues,
+        ARRAYSIZE(queues),
+        0,
+        &state->on12Device11,
+        &state->on12Context11,
+        NULL);
+      if (SUCCEEDED(hr))
+      {
+        hr = ID3D11Device_QueryInterface(
+          state->on12Device11,
+          &IID_ID3D11On12Device2,
+          (void**)&state->on12Device);
+      }
+      if (SUCCEEDED(hr) &&
+          !magPresentationManagerPresenterCreate(
+            hWnd,
+            state->on12Device11,
+            reservoirSize,
+            presentation,
+            &state->presentationManager,
+            managerReason,
+            ARRAYSIZE(managerReason)))
+      {
+        hr = E_FAIL;
+      }
+      if (FAILED(hr))
+      {
+        SetLastError((DWORD)hr);
+        magGraphicsD3D12Destroy(hWnd, state);
+        return FALSE;
+      }
+      state->capacityWidth = (UINT)reservoirSize.cx;
+      state->capacityHeight = (UINT)reservoirSize.cy;
+      state->syncInterval = presentation->syncInterval;
+      state->presentFlags = 0;
+      state->presentationEnabled = TRUE;
+    }
+    else
+    {
+    swapDesc.Width = (UINT)reservoirSize.cx;
+    swapDesc.Height = (UINT)reservoirSize.cy;
     swapDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     swapDesc.SampleDesc.Count = 1;
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapDesc.BufferCount = MAG_D3D12_BUFFER_COUNT;
+    swapDesc.BufferCount = state->bufferCount;
     swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     swapDesc.Scaling = DXGI_SCALING_STRETCH;
-    swapDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    swapDesc.AlphaMode = compositionHost &&
+      MAG_LAYER_ALPHA_OPAQUE != presentation->alphaMode
+      ? DXGI_ALPHA_MODE_PREMULTIPLIED
+      : DXGI_ALPHA_MODE_IGNORE;
     swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
-    hr = IDXGIFactory4_CreateSwapChainForComposition(
-      state->factory,
-      (IUnknown*)state->queue,
-      &swapDesc,
-      NULL,
-      &swapChain1);
+    if (presentation->allowTearing && 0 == presentation->syncInterval &&
+        SUCCEEDED(IDXGIFactory4_QueryInterface(
+          state->factory,
+          &IID_IDXGIFactory5,
+          (void**)&factory5)))
+    {
+      if (FAILED(IDXGIFactory5_CheckFeatureSupport(
+            factory5,
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+            &allowTearing,
+            sizeof(allowTearing))))
+      {
+        allowTearing = FALSE;
+      }
+      IDXGIFactory5_Release(factory5);
+      if (allowTearing)
+      {
+        swapDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+      }
+    }
+
+    if (compositionHost)
+    {
+      hr = IDXGIFactory4_CreateSwapChainForComposition(
+        state->factory,
+        (IUnknown*)state->queue,
+        &swapDesc,
+        NULL,
+        &swapChain1);
+    }
+    else
+    {
+      hr = IDXGIFactory4_CreateSwapChainForHwnd(
+        state->factory,
+        (IUnknown*)state->queue,
+        hWnd,
+        &swapDesc,
+        NULL,
+        NULL,
+        &swapChain1);
+    }
     if (SUCCEEDED(hr))
     {
       hr = IDXGISwapChain1_QueryInterface(
@@ -327,19 +447,30 @@ static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
       return FALSE;
     }
 
-    if (!magDCompPresenterCreate(
-          hWnd,
-          (IUnknown*)state->swapChain,
-          &state->composition))
+    if (FAILED(IDXGISwapChain2_SetSourceSize(
+          (IDXGISwapChain2*)state->swapChain,
+          (UINT)clientSize.cx,
+          (UINT)clientSize.cy)) ||
+        (compositionHost &&
+         !magDCompPresenterCreate(
+           hWnd,
+           (IUnknown*)state->swapChain,
+           &state->composition)))
     {
       magGraphicsD3D12Destroy(hWnd, state);
       return FALSE;
     }
 
-    IDXGISwapChain2_SetMaximumFrameLatency((IDXGISwapChain2*)state->swapChain, 1);
+    IDXGISwapChain2_SetMaximumFrameLatency(
+      (IDXGISwapChain2*)state->swapChain,
+      presentation->maximumFrameLatency);
     state->frameWaitHandle = IDXGISwapChain2_GetFrameLatencyWaitableObject((IDXGISwapChain2*)state->swapChain);
+    state->syncInterval = presentation->syncInterval;
+    state->presentFlags = allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    state->presentationEnabled = TRUE;
+    }
 
-    for (i = 0; i < MAG_D3D12_BUFFER_COUNT; ++i)
+    for (i = 0; i < state->bufferCount; ++i)
     {
       if (FAILED(ID3D12Device_CreateCommandAllocator(
             state->device,
@@ -375,7 +506,11 @@ static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
     }
 
     state->fenceEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!state->fenceEvent || !magGraphicsD3D12CreateFrameResources(state, clientSize))
+    if (!state->fenceEvent || !magGraphicsD3D12CreateFrameResources(state, reservoirSize) ||
+        !magGraphicsReserveCpuCompositor(
+          &state->compositor,
+          (UINT)reservoirSize.cx,
+          (UINT)reservoirSize.cy))
     {
       if (ERROR_SUCCESS == GetLastError())
       {
@@ -385,6 +520,8 @@ static BOOL magGraphicsD3D12Create(HWND hWnd, SIZE clientSize, void** stateOut)
       return FALSE;
     }
 
+    state->width = (UINT)clientSize.cx;
+    state->height = (UINT)clientSize.cy;
     *stateOut = state;
     return TRUE;
 }
@@ -404,6 +541,8 @@ static void magGraphicsD3D12Destroy(HWND hWnd, void* opaqueState)
     {
       magGraphicsD3D12WaitIdle(state);
     }
+    magPresentationManagerPresenterDestroy(state->presentationManager);
+    state->presentationManager = NULL;
     magDCompPresenterDestroy(state->composition);
     state->composition = NULL;
     if (state->swapChain)
@@ -415,7 +554,7 @@ static void magGraphicsD3D12Destroy(HWND hWnd, void* opaqueState)
     {
       ID3D12GraphicsCommandList_Release(state->commandList);
     }
-    for (i = 0; i < MAG_D3D12_BUFFER_COUNT; ++i)
+    for (i = 0; i < state->bufferCount; ++i)
     {
       if (state->frames[i].allocator)
       {
@@ -438,6 +577,20 @@ static void magGraphicsD3D12Destroy(HWND hWnd, void* opaqueState)
     {
       IDXGISwapChain3_Release(state->swapChain);
     }
+    if (state->on12Context11)
+    {
+      ID3D11DeviceContext_ClearState(state->on12Context11);
+      ID3D11DeviceContext_Flush(state->on12Context11);
+      ID3D11DeviceContext_Release(state->on12Context11);
+    }
+    if (state->on12Device)
+    {
+      ID3D11On12Device2_Release(state->on12Device);
+    }
+    if (state->on12Device11)
+    {
+      ID3D11Device_Release(state->on12Device11);
+    }
     if (state->queue)
     {
       ID3D12CommandQueue_Release(state->queue);
@@ -459,16 +612,30 @@ static BOOL magGraphicsD3D12Resize(HWND hWnd, void* opaqueState, SIZE clientSize
     MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
     HRESULT hr;
 
-    UNREFERENCED_PARAMETER(hWnd);
     if (!state || clientSize.cx < 1 || clientSize.cy < 1)
     {
       return FALSE;
     }
-    if ((UINT)clientSize.cx == state->width && (UINT)clientSize.cy == state->height)
+    state->width = (UINT)clientSize.cx;
+    state->height = (UINT)clientSize.cy;
+    if (state->presentationManagerHost)
     {
-      return TRUE;
+      return magPresentationManagerPresenterResize(
+        state->presentationManager,
+        clientSize);
+    }
+    if (state->width <= state->capacityWidth && state->height <= state->capacityHeight)
+    {
+      return SUCCEEDED(IDXGISwapChain2_SetSourceSize(
+        (IDXGISwapChain2*)state->swapChain,
+        state->width,
+        state->height));
     }
 
+    {
+    SIZE reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
+    reservoirSize.cx = max(reservoirSize.cx, (LONG)state->capacityWidth);
+    reservoirSize.cy = max(reservoirSize.cy, (LONG)state->capacityHeight);
     if (!magGraphicsD3D12WaitIdle(state))
     {
       return FALSE;
@@ -476,12 +643,19 @@ static BOOL magGraphicsD3D12Resize(HWND hWnd, void* opaqueState, SIZE clientSize
     magGraphicsD3D12ReleaseFrameResources(state);
     hr = IDXGISwapChain3_ResizeBuffers(
       state->swapChain,
-      MAG_D3D12_BUFFER_COUNT,
-      (UINT)clientSize.cx,
-      (UINT)clientSize.cy,
+      state->bufferCount,
+      (UINT)reservoirSize.cx,
+      (UINT)reservoirSize.cy,
       DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
-    return SUCCEEDED(hr) && magGraphicsD3D12CreateFrameResources(state, clientSize);
+      DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT |
+        (state->presentFlags ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0));
+    return SUCCEEDED(hr) &&
+      magGraphicsD3D12CreateFrameResources(state, reservoirSize) &&
+      SUCCEEDED(IDXGISwapChain2_SetSourceSize(
+        (IDXGISwapChain2*)state->swapChain,
+        state->width,
+        state->height));
+    }
 }
 
 static BOOL magGraphicsD3D12SetPresentationEnabled(HWND hWnd, void* opaqueState, BOOL enabled)
@@ -489,14 +663,32 @@ static BOOL magGraphicsD3D12SetPresentationEnabled(HWND hWnd, void* opaqueState,
     MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
 
     UNREFERENCED_PARAMETER(hWnd);
-    return state && magDCompPresenterSetEnabled(state->composition, enabled);
+    if (!state)
+    {
+      return FALSE;
+    }
+    if (state->presentationManagerHost &&
+        !magPresentationManagerPresenterSetEnabled(
+          state->presentationManager,
+          enabled))
+    {
+      return FALSE;
+    }
+    if (state->compositionHost &&
+        !magDCompPresenterSetEnabled(state->composition, enabled))
+    {
+      return FALSE;
+    }
+    state->presentationEnabled = enabled;
+    return TRUE;
 }
 
 static BOOL magGraphicsD3D12Render(
   HWND hWnd,
   void* opaqueState,
   const MAGPIXELBUFFER* frame,
-  const MAGUIDRAWLIST* ui)
+  const MAGUIDRAWLIST* ui,
+  const MAGPRESENTINTENT* intent)
 {
     MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
     MAGPIXELBUFFER composed;
@@ -504,11 +696,14 @@ static BOOL magGraphicsD3D12Render(
     D3D12_RESOURCE_BARRIER barriers[2] = { 0 };
     D3D12_TEXTURE_COPY_LOCATION destination = { 0 };
     D3D12_TEXTURE_COPY_LOCATION source = { 0 };
+    D3D12_BOX sourceBox;
     ID3D12CommandList* commandLists[1];
     UINT frameIndex;
     UINT y;
     UINT64 fenceValue;
     HRESULT hr;
+    ID3D11Texture2D* presentationTexture = NULL;
+    ID3D12Resource* presentationResource = NULL;
 
     UNREFERENCED_PARAMETER(hWnd);
     if (!state || !frame || frame->width != state->width || frame->height != state->height ||
@@ -517,7 +712,31 @@ static BOOL magGraphicsD3D12Render(
       return FALSE;
     }
 
-    frameIndex = IDXGISwapChain3_GetCurrentBackBufferIndex(state->swapChain);
+    if (state->presentationManagerHost)
+    {
+      if (!magPresentationManagerPresenterAcquire(
+            state->presentationManager,
+            !intent || intent->synchronize,
+            &presentationTexture,
+            &frameIndex) ||
+          FAILED(ID3D11On12Device2_UnwrapUnderlyingResource(
+            state->on12Device,
+            (ID3D11Resource*)presentationTexture,
+            state->queue,
+            &IID_ID3D12Resource,
+            (void**)&presentationResource)))
+      {
+        if (presentationTexture)
+        {
+          ID3D11Texture2D_Release(presentationTexture);
+        }
+        return FALSE;
+      }
+    }
+    else
+    {
+      frameIndex = IDXGISwapChain3_GetCurrentBackBufferIndex(state->swapChain);
+    }
     current = &state->frames[frameIndex];
     if (!magGraphicsD3D12WaitForFence(state, current->fenceValue))
     {
@@ -530,7 +749,7 @@ static BOOL magGraphicsD3D12Render(
         current->mappedUpload + state->uploadFootprint.Offset +
           (SIZE_T)y * state->uploadFootprint.Footprint.RowPitch,
         composed.pixels + (SIZE_T)y * composed.stride,
-        composed.stride);
+        (SIZE_T)composed.width * 4U);
     }
 
     if (FAILED(ID3D12CommandAllocator_Reset(current->allocator)) ||
@@ -540,20 +759,34 @@ static BOOL magGraphicsD3D12Render(
     }
 
     barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barriers[0].Transition.pResource = current->backBuffer;
+    barriers[0].Transition.pResource = state->presentationManagerHost
+      ? presentationResource
+      : current->backBuffer;
     barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    barriers[0].Transition.StateBefore = state->presentationManagerHost
+      ? D3D12_RESOURCE_STATE_COMMON
+      : D3D12_RESOURCE_STATE_PRESENT;
     barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
     barriers[1] = barriers[0];
     barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-    barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    barriers[1].Transition.StateAfter = state->presentationManagerHost
+      ? D3D12_RESOURCE_STATE_COMMON
+      : D3D12_RESOURCE_STATE_PRESENT;
 
-    destination.pResource = current->backBuffer;
+    destination.pResource = state->presentationManagerHost
+      ? presentationResource
+      : current->backBuffer;
     destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     destination.SubresourceIndex = 0;
     source.pResource = current->upload;
     source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     source.PlacedFootprint = state->uploadFootprint;
+    sourceBox.left = 0;
+    sourceBox.top = 0;
+    sourceBox.front = 0;
+    sourceBox.right = state->width;
+    sourceBox.bottom = state->height;
+    sourceBox.back = 1;
 
     ID3D12GraphicsCommandList_ResourceBarrier(state->commandList, 1, &barriers[0]);
     ID3D12GraphicsCommandList_CopyTextureRegion(
@@ -563,7 +796,7 @@ static BOOL magGraphicsD3D12Render(
       0,
       0,
       &source,
-      NULL);
+      &sourceBox);
     ID3D12GraphicsCommandList_ResourceBarrier(state->commandList, 1, &barriers[1]);
     if (FAILED(ID3D12GraphicsCommandList_Close(state->commandList)))
     {
@@ -572,7 +805,61 @@ static BOOL magGraphicsD3D12Render(
 
     commandLists[0] = (ID3D12CommandList*)state->commandList;
     ID3D12CommandQueue_ExecuteCommandLists(state->queue, 1, commandLists);
-    hr = IDXGISwapChain3_Present(state->swapChain, 1, 0);
+    if (state->presentationManagerHost)
+    {
+      fenceValue = state->nextFenceValue++;
+      if (FAILED(ID3D12CommandQueue_Signal(state->queue, state->fence, fenceValue)) ||
+          FAILED(ID3D11On12Device2_ReturnUnderlyingResource(
+            state->on12Device,
+            (ID3D11Resource*)presentationTexture,
+            1,
+            &fenceValue,
+            &state->fence)))
+      {
+        ID3D12Resource_Release(presentationResource);
+        ID3D11Texture2D_Release(presentationTexture);
+        return FALSE;
+      }
+      current->fenceValue = fenceValue;
+      ID3D12Resource_Release(presentationResource);
+      ID3D11Texture2D_Release(presentationTexture);
+      return magPresentationManagerPresenterPresent(
+        state->presentationManager,
+        frameIndex,
+        (SIZE){ (LONG)state->width, (LONG)state->height },
+        intent);
+    }
+    if (intent && intent->restartSequence)
+    {
+      HRESULT first = IDXGISwapChain3_Present(
+        state->swapChain,
+        0,
+        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT | DXGI_PRESENT_RESTART);
+      hr = IDXGISwapChain3_Present(
+        state->swapChain,
+        intent->synchronize ? 1 : 0,
+        intent->synchronize
+          ? DXGI_PRESENT_DO_NOT_SEQUENCE
+          : state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT);
+      if (FAILED(first) && DXGI_ERROR_WAS_STILL_DRAWING != first)
+      {
+        return FALSE;
+      }
+    }
+    else if (intent && !intent->synchronize)
+    {
+      hr = IDXGISwapChain3_Present(
+        state->swapChain,
+        0,
+        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT);
+    }
+    else
+    {
+      hr = IDXGISwapChain3_Present(
+        state->swapChain,
+        state->syncInterval,
+        state->presentFlags);
+    }
     if (FAILED(hr))
     {
       return FALSE;
@@ -590,7 +877,89 @@ static BOOL magGraphicsD3D12Render(
 static HANDLE magGraphicsD3D12GetFrameWaitHandle(void* opaqueState)
 {
     MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
-    return state ? state->frameWaitHandle : NULL;
+    if (!state)
+    {
+      return NULL;
+    }
+    return state->presentationManagerHost
+      ? magPresentationManagerPresenterGetFrameWaitHandle(
+          state->presentationManager)
+      : state->frameWaitHandle;
+}
+
+static UINT64 magGraphicsD3D12GetResourceGeneration(void* opaqueState)
+{
+    MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
+    return state
+      ? state->resourceGeneration + state->compositor.generation +
+        magPresentationManagerPresenterGetResourceGeneration(
+          state->presentationManager)
+      : 0;
+}
+
+static BOOL magGraphicsD3D12GetNextEstimatedFrameTime(
+  void* opaqueState,
+  LONGLONG* frameTime)
+{
+    MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
+    if (!state)
+    {
+      return FALSE;
+    }
+    return state->presentationManagerHost
+      ? magPresentationManagerPresenterGetNextEstimatedFrameTime(
+          state->presentationManager,
+          frameTime)
+      : magDCompPresenterGetNextEstimatedFrameTime(
+          state->composition,
+          frameTime);
+}
+
+static BOOL magGraphicsD3D12GetObservedPresentationTarget(
+  void* opaqueState,
+  UINT* target)
+{
+    MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
+    IDXGISwapChainMedia* media = NULL;
+    DXGI_FRAME_STATISTICS_MEDIA statistics = { 0 };
+    BOOL observed = FALSE;
+
+    if (state && state->presentationManagerHost)
+    {
+      return magPresentationManagerPresenterGetObservedTarget(
+        state->presentationManager,
+        target);
+    }
+    if (!state || !state->swapChain || !target ||
+        FAILED(IDXGISwapChain3_QueryInterface(
+          state->swapChain,
+          &IID_IDXGISwapChainMedia,
+          (void**)&media)))
+    {
+      return FALSE;
+    }
+    if (SUCCEEDED(IDXGISwapChainMedia_GetFrameStatisticsMedia(media, &statistics)))
+    {
+      switch (statistics.CompositionMode)
+      {
+      case DXGI_FRAME_PRESENTATION_MODE_COMPOSED:
+        *target = MAG_PRESENT_COMPOSED_FLIP;
+        observed = TRUE;
+        break;
+      case DXGI_FRAME_PRESENTATION_MODE_OVERLAY:
+        *target = MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP;
+        observed = TRUE;
+        break;
+      case DXGI_FRAME_PRESENTATION_MODE_NONE:
+        *target = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
+        observed = TRUE;
+        break;
+      default:
+        break;
+      }
+    }
+    IDXGISwapChainMedia_Release(media);
+    return observed;
 }
 
 const MAGGRAPHICSBACKEND g_magGraphicsD3D12Backend =
@@ -605,4 +974,7 @@ const MAGGRAPHICSBACKEND g_magGraphicsD3D12Backend =
   magGraphicsD3D12SetPresentationEnabled,
   magGraphicsD3D12Render,
   magGraphicsD3D12GetFrameWaitHandle,
+  magGraphicsD3D12GetResourceGeneration,
+  magGraphicsD3D12GetNextEstimatedFrameTime,
+  magGraphicsD3D12GetObservedPresentationTarget,
 };
