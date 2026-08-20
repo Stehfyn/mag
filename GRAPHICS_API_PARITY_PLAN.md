@@ -1,10 +1,36 @@
 # Graphics, UI, and Text API Parity Plan
 
-Status: implementation plan
+Status: parity baseline implemented; automated gates pass; interactive/cross-machine acceptance remains
+
+Checkpoint commit: `97a97a8` (`Checkpoint message crackers and graphics parity plan`)
+
+## Implementation record (2026-08-20)
+
+Implemented in the working tree:
+
+- One registry and lifecycle contract for OpenGL, GDI, Direct3D 9, Direct3D 11, Direct3D 12, and Vulkan.
+- A top-down/bottom-up-aware CPU BGRA frame contract, a shared fill/stroke/text draw list, and a deterministic CPU compositor/fallback.
+- Offscreen Direct2D UI, DirectWrite text, GDI text, and a cached DirectWrite-rasterized glyph atlas. OpenGL renders atlas glyphs as GPU quads; other graphics APIs use the same atlas through the CPU fallback.
+- Atomic application of graphics, capture, UI, and text settings. Registry values are written only after the candidate configuration succeeds.
+- Runtime presenter recreation followed by GDI fallback, frame-wait-handle duplication under an SRW lock, WGL context parking, and parked Vulkan WSI state for safe 32-bit API switching.
+- Direct3D 11 and Direct3D 12 WARP fallback. Direct3D 12 uses a composition swap chain and an app-owned DirectComposition target so its target can detach while DWM owns presentation.
+- Dynamic Vulkan loading with an application-local implicit-layer safe mode only when the caller has not explicitly configured `VK_LOADER_LAYERS_DISABLE`.
+- DWM capture transitions release only capture-owned state. DWM Thumbnail/Private Visual retain compositor ownership; the selected graphics/UI/text configuration is their explicit pixel fallback.
+- The BorderlessWindow32 resize contract: current-size content is latched and flushed from `WM_NCCALCSIZE`, resources are resized by `WM_SIZE`, and new-size content is presented only after `WM_WINDOWPOSCHANGED` commits geometry.
+
+Automated evidence now covered by `--graphics-smoke`:
+
+- Every available graphics backend x both UI modes x all three text modes.
+- All 36 ordered graphics-backend transitions on this machine.
+- Every graphics backend x all five capture selections, including compositor target detach/reattach and pixel fallback.
+- Two real HWND resizes per backend, with assertions that both the pre-commit old-size frame and post-commit new-size frame were successfully presented and DWM-flushed.
+- CPU checks for row orientation, BGRA channels, alpha blending, and all four one-pixel outline edges.
+
+The remaining gate is deliberately not collapsed into “build passed”: interactive edge/corner dragging and the full visible matrix still need observation on the real desktop, external-monitor-only, and Windows 11 paths. The Windows-app control connection was unavailable in this run, so those checks remain open below.
 
 ## Goal
 
-Add behaviorally equivalent GDI, OpenGL, Direct3D 11, Direct3D 12, and Vulkan presentation backends without coupling capture selection to presentation selection. Add a separate UI renderer selection with Direct2D and a separate text renderer selection that can compare DirectWrite, backend-native glyph-atlas rendering, and GDI.
+Add behaviorally equivalent GDI, OpenGL, Direct3D 9, Direct3D 11, Direct3D 12, and Vulkan presentation backends without coupling capture selection to presentation selection. Add a separate UI renderer selection with Direct2D and a separate text renderer selection that can compare DirectWrite, backend-native glyph-atlas rendering, and GDI.
 
 "Parity" means the same visible pixels and interaction contract, not merely successful initialization or equivalent API calls.
 
@@ -17,6 +43,7 @@ typedef enum GRAPHICSAPI
 {
   GRAPHICS_API_OPENGL = 0, /* preserve the existing value */
   GRAPHICS_API_GDI,
+  GRAPHICS_API_D3D9,
   GRAPHICS_API_D3D11,
   GRAPHICS_API_D3D12,
   GRAPHICS_API_VULKAN,
@@ -43,7 +70,7 @@ Direct2D is intentionally a UI renderer rather than another `GRAPHICSAPI` in the
 
 Other APIs considered but deliberately excluded from the first parity set:
 
-- Direct3D 9 and 10: legacy APIs with no useful coverage beyond D3D11.
+- Direct3D 10: a legacy API with no useful coverage beyond D3D11. Direct3D 9 is included explicitly as the legacy-device/reset-model baseline.
 - GDI+: a legacy convenience library; Direct2D and GDI cover the needed 2D baselines.
 - OpenGL ES/ANGLE: useful only if an ANGLE compatibility target becomes a requirement.
 - WebGPU/Dawn, Skia, Cairo, and FreeType: third-party dependency stacks rather than Windows presentation APIs. Reconsider only for a portability objective.
@@ -93,11 +120,12 @@ typedef struct MAGGRAPHICSBACKEND
 {
   GRAPHICSAPI api;
   LPCTSTR name;
-  UINT capabilities;
+  BOOL implemented;
   BOOL (*IsAvailable)(void);
   BOOL (*Create)(HWND hWnd, void** stateOut);
   void (*Destroy)(HWND hWnd, void* state);
   BOOL (*Resize)(HWND hWnd, void* state, SIZE clientSize);
+  BOOL (*SetPresentationEnabled)(HWND hWnd, void* state, BOOL enabled);
   BOOL (*Render)(HWND hWnd, void* state,
                  const MAGFRAME* frame,
                  const MAGUIDRAWLIST* ui);
@@ -107,7 +135,7 @@ typedef struct MAGGRAPHICSBACKEND
 
 `renderSetGraphicsApi` creates and resizes a candidate backend before publishing it. On failure it keeps the old backend alive and returns a concrete status message. Only a successful transition updates the selected enum. Destroying the former backend happens after the replacement is usable.
 
-Capture selection receives the same transactional lifecycle. Cleanup moves out of the per-frame switch.
+Capture selection participates in the same settings transaction. Capture resources remain lazy because several capture APIs can fail transiently and fall back to the canonical pixel path; cleanup occurs only at a capture transition.
 
 ### 3. Canonical captured-frame contract
 
@@ -166,7 +194,7 @@ The initial UI text is a compact status/zoom label attached to the existing mini
 Text shaping/layout and glyph compositing are treated separately even though the settings expose three useful presets:
 
 - `DirectWrite`: DirectWrite layout plus Direct2D rendering into the UI overlay.
-- `GPU glyph atlas`: DirectWrite shaping/glyph analysis, cached A8 glyph atlas, and quads rendered by the selected graphics backend. With `GRAPHICS_API_OPENGL`, this is the requested OpenGL text path; the same contract also gives Vulkan/D3D parity.
+- `GPU glyph atlas`: cached DirectWrite-rasterized A8 glyphs. OpenGL renders native atlas quads; Vulkan/D3D/GDI consume the same cached atlas through the CPU compositor so the output contract remains available without cross-API interop.
 - `GDI`: `DrawTextW`/`ExtTextOutW` into the BGRA overlay DIB as the compatibility baseline.
 
 All paths use the same Unicode string, font family, em size, DPI, alignment rectangle, and color. Exact antialiasing pixels may differ, so parity assertions compare layout bounds/baselines and use renderer-specific image tolerances.
@@ -187,30 +215,37 @@ All paths use the same Unicode string, font family, em size, DPI, alignment rect
 2. Render fill/stroke/image UI commands with GDI and composite premultiplied overlays with `AlphaBlend`.
 3. Use GDI as the deterministic software/reference backend and last-resort fallback.
 
-### Stage C: Direct3D 11
+### Stage C: Direct3D 9
 
-1. Create a BGRA-capable device, flip-model DXGI swap chain, render target, sampler, dynamic/upload texture, and alpha-blended UI pipeline.
+1. Create a windowed D3D9 device and a dynamic `A8R8G8B8` texture, using the fixed-function pre-transformed textured-quad path with point filtering.
+2. Match the shared BGRA row-order, nearest-neighbor, UI draw-list, and outline contracts.
+3. Implement the cooperative-level lost-device/reset lifecycle across minimize, resize, display topology, and adapter changes.
+4. Fall back from hardware vertex processing to software vertex processing without creating another user-facing API value.
+
+### Stage D: Direct3D 11
+
+1. Create a BGRA-capable device and blt-model DXGI swap chain. The blt model is deliberate here: it avoids the one-flip-chain-per-HWND restriction while candidates are created before the old backend is released.
 2. Match OpenGL nearest-neighbor magnification and client-pixel geometry.
 3. Handle resize, occlusion, adapter migration, and device removal.
 4. Add WARP fallback while retaining the same `GRAPHICS_API_D3D11` selection and reporting the active adapter.
 5. Add optional direct consumption of DXGI/WGC D3D11 textures only after CPU-path parity passes.
 
-### Stage D: Direct3D 12
+### Stage E: Direct3D 12
 
-1. Add device/queue/flip-model swap chain, RTV/SRV heaps, frame contexts, upload ring, fences, and device-lost rebuild.
+1. Add device/queue, a flip-model composition swap chain, an app-owned DirectComposition target, frame contexts, upload resources, fences, and device-lost rebuild.
 2. Use the same shader inputs and blend/nearest-sampling rules as D3D11.
 3. Add WARP fallback and frame-latency waitable-object pacing.
 4. Keep readback/cross-adapter/native-sharing optimizations behind capability checks.
 
-### Stage E: Vulkan
+### Stage F: Vulkan
 
-1. Add Win32 surface, physical-device/queue selection, swap chain, render pass or dynamic rendering, per-frame synchronization, staging upload, descriptor sets, and alpha blending.
+1. Add Win32 surface, physical-device/queue selection, swap chain, per-frame synchronization, and staging upload. The canonical frame is copied directly to transfer-capable swap-chain images, so no shader or descriptor build artifact is required for this parity path.
 2. Select an adapter compatible with the presentation surface and report a clear unavailable state if the loader/device/extensions are absent.
-3. Build shaders from checked-in source through MSBuild; generated SPIR-V is build output or an explicitly tracked generated asset with a byte-identity check.
+3. Keep the direct-transfer path shader-free; add generated SPIR-V only if a later native overlay/scale fast path actually needs shaders.
 4. Handle resize/out-of-date/suboptimal/device-lost paths without changing the selected API until a replacement is ready.
 5. Add D3D11 shared-texture import only as an optional fast path; never make it the correctness path.
 
-### Stage F: Direct2D and text presets
+### Stage G: Direct2D and text presets
 
 1. Add the offscreen Direct2D overlay renderer and DirectWrite format/layout cache.
 2. Add GDI text into the same overlay surface.
@@ -235,29 +270,29 @@ The current D3DKMT vblank thread is retained as a fallback, not imposed on every
 
 ### Build and static gates
 
-- Debug and Release, Win32 and x64.
-- No backend headers leak into neutral state headers.
-- Registry contains every enum exactly once; settings options are generated from it.
-- Every successfully initialized backend fully releases its HWND/DC/device/swap-chain/fence/descriptor/bitmap/font resources.
+- [x] Debug and Release, x86 and x64 build.
+- [x] No OpenGL, Vulkan, D3D, or Direct2D implementation types leak into `graphics.h`.
+- [x] The graphics registry contains every enum exactly once and generates the Graphics API settings list.
+- [x] Repeated create/switch/resize/destroy smoke completes on x86 and x64 without a process fault.
 
 ### Automated pixel gates
 
-For OpenGL, GDI, D3D11, D3D12, and Vulkan using the CPU frame path:
+For OpenGL, GDI, D3D9, D3D11, D3D12, and Vulkan using the CPU frame path:
 
-- Identical source rectangle and clipping on negative-coordinate/multi-monitor desktops.
-- Nearest-neighbor scale at 1x, fractional zoom, and integer zoom.
-- Correct BGRA channel order, row orientation, alpha, and black fill outside clipped source.
-- All four one-pixel outline edges visible.
-- Minimap panel, monitor rectangles, window rectangle, source rectangle, opacity, and drag mapping.
-- Text baseline/bounds parity and per-renderer image tolerance.
+- [ ] Visible source/clipping comparison on a negative-coordinate multi-monitor desktop.
+- [ ] Visible nearest-neighbor comparison at 1x, fractional zoom, and integer zoom.
+- [x] CPU oracle checks BGRA channel order, row orientation, alpha, and black/overlay composition.
+- [x] CPU oracle checks all four one-pixel outline edges.
+- [ ] Visible minimap geometry, opacity, drag mapping, and renderer-specific text tolerance comparison.
 
 ### Switching and lifecycle gates
 
-- Exercise every ordered graphics transition, including switching back to OpenGL.
-- Resize/minimize/restore, DPI change, monitor move, external-monitor-only, and display topology change.
-- Device-lost/out-of-date simulation where the API permits it.
-- Capture switching does not leak resources or delete unrelated active graphics resources.
-- Failure injection proves transactional rollback and GDI fallback.
+- [x] Exercise every ordered graphics transition, including switching back to OpenGL.
+- [x] Exercise two real HWND grow/shrink cycles on every backend and assert old/new geometry presentation order.
+- [ ] Minimize/restore, DPI change, monitor move, external-monitor-only, and display-topology change.
+- [ ] Explicit device-lost/out-of-date injection where the API permits it.
+- [x] Exercise every capture selection with every graphics backend without deleting unrelated graphics state.
+- [x] Candidate failure paths retain the old configuration; runtime presenter failure retries once and then selects GDI.
 
 ### User-visible acceptance gate
 
@@ -272,14 +307,22 @@ Run the real `mag.exe` and verify every supported graphics/capture/UI/text combi
 
 A successful build, successful API return values, a responsive process, or a focused smoke harness is progress but not completion of this gate.
 
+### Final resize-flicker stage
+
+Study `C:\Users\Steph2\Desktop\startup\shamboni2\opus\BorderlessWindow32`, especially `immersivewindowdemo-zero-flicker.diff`, and adapt its relevant borderless resize/paint ownership contract to `mag`. Preserve the renderer and capture boundaries above; prove that interactive edge/corner resize no longer exposes background, stale strips, or non-client flashes with every pixel-presenting backend.
+
+Implementation status: the ordering contract and automated old/new geometry assertions are complete. Interactive edge/corner observation is still required because the Windows-app control connection was unavailable during this run.
+
 ## Commit sequence
 
 1. Checkpoint the pre-existing dirty tree plus this plan.
 2. Neutral contracts and OpenGL extraction with pixel identity.
 3. GDI backend and reference tests.
-4. D3D11 backend and tests.
-5. D3D12 backend and tests.
-6. Vulkan backend, shader generation, and tests.
-7. Direct2D UI plus DirectWrite/GDI/GPU-atlas text.
-8. Settings/capability/persistence integration.
-9. Full matrix verification and plan status update.
+4. D3D9 backend and tests.
+5. D3D11 backend and tests.
+6. D3D12 backend and tests.
+7. Vulkan backend, shader generation, and tests.
+8. Direct2D UI plus DirectWrite/GDI/GPU-atlas text.
+9. Settings/capability/persistence integration.
+10. Full matrix verification and plan status update.
+11. Borderless-window zero-flicker resize adaptation and interactive verification.

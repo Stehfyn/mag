@@ -43,12 +43,31 @@ DWORD WINAPI main_VBlankThreadProc(LPVOID lpParameter)
 
     while (WAIT_OBJECT_0 != WaitForSingleObject(lpThread->hStopEvent, 0))
     {
+      HANDLE frameWaitHandle;
+
       if (!IsWindow(lpThread->hWnd))
       {
         break;
       }
 
-      if (!D3DKMTWaitForVerticalBlank(lpThread->hWnd))
+      frameWaitHandle = renderDuplicateFrameWaitHandle(lpThread->hWnd);
+      if (frameWaitHandle)
+      {
+        HANDLE handles[] = { lpThread->hStopEvent, frameWaitHandle };
+        const DWORD waitResult = WaitForMultipleObjects(ARRAYSIZE(handles), handles, FALSE, 1000);
+
+        CloseHandle(frameWaitHandle);
+
+        if (WAIT_OBJECT_0 == waitResult)
+        {
+          break;
+        }
+        if (WAIT_OBJECT_0 + 1 != waitResult)
+        {
+          continue;
+        }
+      }
+      else if (!D3DKMTWaitForVerticalBlank(lpThread->hWnd))
       {
         if (WAIT_OBJECT_0 == WaitForSingleObject(lpThread->hStopEvent, MAIN_RENDER_INTERVAL_MS))
         {
@@ -153,14 +172,21 @@ _tWinMain(
     int exitCode = 0;
     MAINVBLANKTHREAD vblankThread;
     BOOL fMessageDrivenRender = FALSE;
+    const BOOL fGraphicsSmoke = NULL != _tcsstr(lpCmdLine, TEXT("--graphics-smoke"));
 
     UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
 
-    hWnd = magInitInstance(hInstance, nShowCmd);
+    hWnd = magInitInstance(hInstance, fGraphicsSmoke ? SW_HIDE : nShowCmd);
     if (!hWnd)
     {
       return FALSE;
+    }
+
+    if (fGraphicsSmoke)
+    {
+      exitCode = renderRunGraphicsSmoke(hWnd);
+      DestroyWindow(hWnd);
+      return exitCode;
     }
 
     if (main_StartVBlankThread(hWnd, &vblankThread))

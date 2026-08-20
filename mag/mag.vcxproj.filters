@@ -27,6 +27,30 @@
     <ClCompile Include="dwmapix.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="graphics.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_dcomp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_d3d11.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_d3d12.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_d3d9.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_gdi.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_opengl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_vulkan.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="d3dkmtx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -37,6 +61,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="render.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ui_renderer.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="winuserx.c">
@@ -59,6 +86,12 @@
     <ClInclude Include="dwmapix.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="graphics_dcomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="d3dkmtx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -66,6 +99,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="render.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ui_renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="winuserx.h">

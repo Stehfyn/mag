@@ -2,20 +2,15 @@
 
 #include "framework.h"
 #include "dwmprivate.h"
+#include "graphics.h"
+#include "ui_renderer.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
-#include <gl/GL.h>
 
 #define CHANNELS (4)
 #define BITS_PER_PIXEL (CHANNELS << 3) // 8 bits = 2^3 
 #define SURFACE_BYTES(rc) (CHANNELS * RECTWIDTH((rc)) * RECTHEIGHT((rc)))
-
-typedef enum GRAPHICSAPI
-{
-  GRAPHICS_API_OPENGL = 0,
-  GRAPHICS_API_COUNT
-} GRAPHICSAPI;
 
 typedef enum CAPTUREAPI
 {
@@ -79,7 +74,7 @@ typedef struct DWMPRIVATEVISUALCAPTURE
   DWMPRIVATECAPTURESTATE* state;
 } DWMPRIVATEVISUALCAPTURE, *LPDWMPRIVATEVISUALCAPTURE;
 
-typedef struct SHAREDWGLDATA
+typedef struct MAGSTATE
 {
   BOOL             fTrackCursor;
   BOOL             fWinRtInitialized;
@@ -93,7 +88,15 @@ typedef struct SHAREDWGLDATA
   BOOL             fRenderMessageDriven;
   MAGVIEWMODE      viewMode;
   GRAPHICSAPI      graphicsApi;
+  UIGRAPHICSAPI    uiGraphicsApi;
+  TEXTRENDERER     textRenderer;
   CAPTUREAPI       captureApi;
+  CAPTUREAPI       activeCaptureApi;
+  SRWLOCK          graphicsLock;
+  const MAGGRAPHICSBACKEND* graphicsBackend;
+  void*            graphicsState;
+  void*            parkedOpenGlState;
+  void*            parkedVulkanState;
   POINT            pt;
   POINT            ptSourceOrigin;
   POINT            ptMiniMapDragOffset;
@@ -102,9 +105,17 @@ typedef struct SHAREDWGLDATA
   RECT             rc;
   DISPLAYINFO      di;
   BITMAPINFOHEADER bi;
-  HDC              hDC;
-  HGLRC            hRC;
-  HPBUFFERARB      pb;
+  MAGPIXELBUFFER   frame;
+  MAGUIDRAWLIST    uiDrawList;
+  MAGUIRENDERER*   uiRenderer;
+  MAGPIXELBUFFER   presentationFrame;
+  SIZE             presentedContentSize;
+  BOOL             fPresentedContentValid;
+  BOOL             fInResizePresent;
+  BOOL             fGraphicsPresentationEnabled;
+  BOOL             fResizeContractViolation;
+  UINT             resizePrecommitCount;
+  UINT             resizeCommitCount;
   FLOAT            fScale;
   HDC              hCaptureDC;
   HDC              hDesktopDC;
@@ -114,24 +125,48 @@ typedef struct SHAREDWGLDATA
   WGCMONITORCAPTURE wgcMonitors[MAX_ENUM_MONITORS];
   DWMTHUMBNAILCAPTURE dwmThumbnail;
   DWMPRIVATEVISUALCAPTURE dwmPrivate;
-  GLclampf         cfClearColor[CHANNELS];
-  GLclampf         cfOutlineColor[CHANNELS];
+  FLOAT            outlineColor[CHANNELS];
   FLOAT            fTexScaler;
-  GLuint           glScreenTexture;
-  GLubyte*         glScreenData;
 
-} SHAREDWGLDATA, *LPSHAREDWGLDATA;
+} MAGSTATE, *LPMAGSTATE;
 
 void renderInit(HWND hWnd);
 
 void renderCleanup(HWND hWnd);
 
-void renderResizeCapture(HWND hWnd);
+BOOL renderResizeCapture(HWND hWnd);
+BOOL renderPrepareWindowResize(HWND hWnd, SIZE proposedClientSize);
+BOOL renderPresentCommittedGeometry(HWND hWnd);
+
+BOOL renderSetGraphicsApi(HWND hWnd, GRAPHICSAPI api, LPTSTR reason, UINT reasonCount);
+BOOL renderApplyPresentationSettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount);
+BOOL renderApplySettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  CAPTUREAPI captureApi,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount);
+BOOL renderSetUiRendering(
+  HWND hWnd,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount);
 
 void renderSetMessageDriven(HWND hWnd, BOOL fMessageDriven);
+HANDLE renderDuplicateFrameWaitHandle(HWND hWnd);
 
 void renderRender(HWND hWnd);
-void renderSubmit(HWND hWnd);
+BOOL renderSubmit(HWND hWnd);
+int renderRunGraphicsSmoke(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
 

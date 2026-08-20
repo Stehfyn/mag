@@ -69,6 +69,10 @@ typedef struct SETTINGSOPTION
   BOOL    fImplemented;
 } SETTINGSOPTION;
 
+#pragma comment(lib, "Advapi32")
+
+#define MAG_SETTINGS_REGISTRY_KEY TEXT("Software\\mag")
+
 void mag_ShowPopupMenu(HWND hWnd, int x, int y);
 void mag_ShowHelpMenu(HWND hWnd, int x, int y);
 void mag_ShowSettingsDialog(HWND hWnd);
@@ -79,10 +83,14 @@ void mag_UpdateLensWindowPosition(HWND hWnd);
 BOOL mag_IsLensMode(HWND hWnd);
 void mag_AddTrayIcon(HWND hWnd);
 void mag_DeleteTrayIcon(HWND hWnd);
+void mag_AddGraphicsOptions(HWND hDlg, int idCtl, GRAPHICSAPI selectedApi);
+BOOL mag_GetSelectedGraphicsOption(HWND hDlg, int idCtl, UINT* selectedId, BOOL* fImplemented);
 void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT selectedId);
 BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented);
 void mag_UpdateSettingsDialogState(HWND hDlg);
-void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
+void mag_LoadSettings(LPMAGSTATE lpsd);
+void mag_SaveSettings(const LPMAGSTATE lpsd);
+void mag_GetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture);
 static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam);
 static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNotify);
 static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
@@ -122,11 +130,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos);
 LRESULT CALLBACK mag_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 ATOM mag_RegisterClassEx(HINSTANCE hInstance);
 
-static const SETTINGSOPTION g_graphicsApiOptions[] =
-{
-  { GRAPHICS_API_OPENGL, TEXT("OpenGL"), TRUE },
-};
-
 static const SETTINGSOPTION g_captureApiOptions[] =
 {
   { CAPTURE_API_GDI_BITBLT, TEXT("GDI BitBlt"), TRUE },
@@ -136,7 +139,96 @@ static const SETTINGSOPTION g_captureApiOptions[] =
   { CAPTURE_API_DWM_PRIVATE_VISUAL, TEXT("DWM Private Visual"), TRUE },
 };
 
-void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
+static const SETTINGSOPTION g_uiGraphicsApiOptions[] =
+{
+  { UI_GRAPHICS_API_NATIVE, TEXT("Native draw list"), TRUE },
+  { UI_GRAPHICS_API_DIRECT2D, TEXT("Direct2D"), TRUE },
+};
+
+static const SETTINGSOPTION g_textRendererOptions[] =
+{
+  { TEXT_RENDERER_DIRECTWRITE, TEXT("DirectWrite"), TRUE },
+  { TEXT_RENDERER_GPU_GLYPH_ATLAS, TEXT("Glyph atlas (OpenGL GPU / CPU)"), TRUE },
+  { TEXT_RENDERER_GDI, TEXT("GDI"), TRUE },
+};
+
+static BOOL mag_ReadSettingDword(LPCTSTR valueName, DWORD* value)
+{
+    DWORD size = sizeof(*value);
+
+    return ERROR_SUCCESS == RegGetValue(
+      HKEY_CURRENT_USER,
+      MAG_SETTINGS_REGISTRY_KEY,
+      valueName,
+      RRF_RT_REG_DWORD,
+      NULL,
+      value,
+      &size);
+}
+
+void mag_LoadSettings(LPMAGSTATE lpsd)
+{
+    DWORD value;
+
+    if (mag_ReadSettingDword(TEXT("GraphicsApi"), &value) && value < GRAPHICS_API_COUNT)
+    {
+      lpsd->graphicsApi = (GRAPHICSAPI)value;
+    }
+    if (mag_ReadSettingDword(TEXT("CaptureApi"), &value) && value < CAPTURE_API_COUNT)
+    {
+      lpsd->captureApi = (CAPTUREAPI)value;
+    }
+    if (mag_ReadSettingDword(TEXT("UiGraphicsApi"), &value) && value < UI_GRAPHICS_API_COUNT)
+    {
+      lpsd->uiGraphicsApi = (UIGRAPHICSAPI)value;
+    }
+    if (mag_ReadSettingDword(TEXT("TextRenderer"), &value) && value < TEXT_RENDERER_COUNT)
+    {
+      lpsd->textRenderer = (TEXTRENDERER)value;
+    }
+    if (mag_ReadSettingDword(TEXT("MouseRelativeZoom"), &value))
+    {
+      lpsd->fMouseRelativeZoom = 0 != value;
+    }
+}
+
+void mag_SaveSettings(const LPMAGSTATE lpsd)
+{
+    HKEY key;
+    DWORD disposition;
+
+    if (!lpsd || ERROR_SUCCESS != RegCreateKeyEx(
+          HKEY_CURRENT_USER,
+          MAG_SETTINGS_REGISTRY_KEY,
+          0,
+          NULL,
+          REG_OPTION_NON_VOLATILE,
+          KEY_SET_VALUE,
+          NULL,
+          &key,
+          &disposition))
+    {
+      return;
+    }
+
+    {
+      const DWORD graphicsApi = lpsd->graphicsApi;
+      const DWORD captureApi = lpsd->captureApi;
+      const DWORD uiApi = lpsd->uiGraphicsApi;
+      const DWORD textRenderer = lpsd->textRenderer;
+      const DWORD mouseRelativeZoom = lpsd->fMouseRelativeZoom;
+
+      RegSetValueEx(key, TEXT("GraphicsApi"), 0, REG_DWORD, (const BYTE*)&graphicsApi, sizeof(graphicsApi));
+      RegSetValueEx(key, TEXT("CaptureApi"), 0, REG_DWORD, (const BYTE*)&captureApi, sizeof(captureApi));
+      RegSetValueEx(key, TEXT("UiGraphicsApi"), 0, REG_DWORD, (const BYTE*)&uiApi, sizeof(uiApi));
+      RegSetValueEx(key, TEXT("TextRenderer"), 0, REG_DWORD, (const BYTE*)&textRenderer, sizeof(textRenderer));
+      RegSetValueEx(key, TEXT("MouseRelativeZoom"), 0, REG_DWORD, (const BYTE*)&mouseRelativeZoom, sizeof(mouseRelativeZoom));
+    }
+    RegCloseKey(key);
+    UNREFERENCED_PARAMETER(disposition);
+}
+
+void mag_GetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture)
 {
     *lprcCapture = lpsd->di.rc;
 
@@ -151,7 +243,7 @@ void mag_GetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
 
 void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const MAGVIEWMODE viewMode = lpsd ? lpsd->viewMode : MAG_VIEW_WINDOW;
     UINT checkedPosition = 0;
     
@@ -189,7 +281,7 @@ void mag_ShowPopupMenu(HWND hWnd, int x, int y)
 
 void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (!lpsd || viewMode >= MAG_VIEW_COUNT)
     {
@@ -215,7 +307,7 @@ void mag_SetViewMode(HWND hWnd, MAGVIEWMODE viewMode)
 
 void mag_UpdateViewWindowStyle(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DWORD dwExStyle;
 
     if (!lpsd)
@@ -240,7 +332,7 @@ void mag_UpdateViewWindowStyle(HWND hWnd)
 
 void mag_UpdateWindowOutlineColor(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     COLORREF accentColor;
 
     if (!lpsd)
@@ -249,15 +341,15 @@ void mag_UpdateWindowOutlineColor(HWND hWnd)
     }
 
     accentColor = GetSysColor(COLOR_HIGHLIGHT);
-    lpsd->cfOutlineColor[0] = GetRValue(accentColor) / 255.0f;
-    lpsd->cfOutlineColor[1] = GetGValue(accentColor) / 255.0f;
-    lpsd->cfOutlineColor[2] = GetBValue(accentColor) / 255.0f;
-    lpsd->cfOutlineColor[3] = 1.0f;
+    lpsd->outlineColor[0] = GetRValue(accentColor) / 255.0f;
+    lpsd->outlineColor[1] = GetGValue(accentColor) / 255.0f;
+    lpsd->outlineColor[2] = GetBValue(accentColor) / 255.0f;
+    lpsd->outlineColor[3] = 1.0f;
 }
 
 void mag_UpdateLensWindowPosition(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     POINT cursor;
     POINT ptClientOrigin = { 0, 0 };
     RECT rcWindow;
@@ -338,7 +430,7 @@ void mag_UpdateLensWindowPosition(HWND hWnd)
 
 BOOL mag_IsLensMode(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     return lpsd && MAG_VIEW_LENS == lpsd->viewMode;
 }
@@ -417,6 +509,61 @@ void mag_AddSettingsOptions(HWND hDlg, int idCtl, const SETTINGSOPTION* options,
     }
 }
 
+void mag_AddGraphicsOptions(HWND hDlg, int idCtl, GRAPHICSAPI selectedApi)
+{
+    HWND hCtl = GetDlgItem(hDlg, idCtl);
+    UINT i;
+
+    for (i = 0; i < magGraphicsGetBackendCount(); ++i)
+    {
+      const MAGGRAPHICSBACKEND* backend = magGraphicsGetBackendAt(i);
+      const LRESULT item = SendMessage(hCtl, CB_ADDSTRING, 0, (LPARAM)backend->name);
+
+      if (CB_ERR != item && CB_ERRSPACE != item)
+      {
+        SendMessage(hCtl, CB_SETITEMDATA, (WPARAM)item, (LPARAM)backend->api);
+        if (backend->api == selectedApi)
+        {
+          SendMessage(hCtl, CB_SETCURSEL, (WPARAM)item, 0);
+        }
+      }
+    }
+
+    if (CB_ERR == SendMessage(hCtl, CB_GETCURSEL, 0, 0) && magGraphicsGetBackendCount())
+    {
+      SendMessage(hCtl, CB_SETCURSEL, 0, 0);
+    }
+}
+
+BOOL mag_GetSelectedGraphicsOption(HWND hDlg, int idCtl, UINT* selectedId, BOOL* fImplemented)
+{
+    const LRESULT selectedItem = SendDlgItemMessage(hDlg, idCtl, CB_GETCURSEL, 0, 0);
+    LRESULT api;
+    const MAGGRAPHICSBACKEND* backend;
+    TCHAR reason[2];
+
+    if (CB_ERR == selectedItem)
+    {
+      return FALSE;
+    }
+
+    api = SendDlgItemMessage(hDlg, idCtl, CB_GETITEMDATA, (WPARAM)selectedItem, 0);
+    if (CB_ERR == api || api < 0 || (UINT)api >= GRAPHICS_API_COUNT)
+    {
+      return FALSE;
+    }
+
+    backend = magGraphicsGetBackend((GRAPHICSAPI)api);
+    if (!backend)
+    {
+      return FALSE;
+    }
+
+    *selectedId = (UINT)api;
+    *fImplemented = backend->implemented && backend->IsAvailable(reason, ARRAYSIZE(reason));
+    return TRUE;
+}
+
 BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* options, UINT count, UINT* selectedId, BOOL* fImplemented)
 {
     const LRESULT selectedItem = SendDlgItemMessage(hDlg, idCtl, CB_GETCURSEL, 0, 0);
@@ -440,24 +587,41 @@ BOOL mag_GetSelectedSettingsOption(HWND hDlg, int idCtl, const SETTINGSOPTION* o
 
 void mag_UpdateSettingsDialogState(HWND hDlg)
 {
-    UINT selectedId;
+    UINT graphicsId = GRAPHICS_API_OPENGL;
+    UINT captureId = CAPTURE_API_GDI_BITBLT;
+    UINT uiId = UI_GRAPHICS_API_NATIVE;
+    UINT textId = TEXT_RENDERER_DIRECTWRITE;
     BOOL fGraphicsImplemented = FALSE;
     BOOL fCaptureImplemented = FALSE;
+    BOOL fUiImplemented = FALSE;
+    BOOL fTextImplemented = FALSE;
     BOOL fValid;
 
     fValid =
-      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), &selectedId, &fGraphicsImplemented) &&
-      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &selectedId, &fCaptureImplemented);
+      mag_GetSelectedGraphicsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, &graphicsId, &fGraphicsImplemented) &&
+      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &captureId, &fCaptureImplemented) &&
+      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), &uiId, &fUiImplemented) &&
+      mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), &textId, &fTextImplemented);
 
-    EnableWindow(GetDlgItem(hDlg, IDOK), fValid && fGraphicsImplemented && fCaptureImplemented);
+    EnableWindow(
+      GetDlgItem(hDlg, IDOK),
+      fValid && fGraphicsImplemented && fCaptureImplemented && fUiImplemented && fTextImplemented);
 
     if (!fValid)
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Select a graphics API and capture API."));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Select graphics, capture, UI, and text renderers."));
     }
-    else if (!fGraphicsImplemented || !fCaptureImplemented)
+    else if (!fGraphicsImplemented || !fCaptureImplemented || !fUiImplemented || !fTextImplemented)
     {
-      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("Planned APIs are listed but cannot be applied yet."));
+      SetDlgItemText(hDlg, IDC_SETTINGS_STATUS, TEXT("The selected renderer is unavailable on this system."));
+    }
+    else if (CAPTURE_API_DWM_THUMBNAIL == captureId ||
+             CAPTURE_API_DWM_PRIVATE_VISUAL == captureId)
+    {
+      SetDlgItemText(
+        hDlg,
+        IDC_SETTINGS_STATUS,
+        TEXT("DWM owns this visual; Graphics, UI, and text selections are its pixel fallback."));
     }
     else
     {
@@ -468,19 +632,25 @@ void mag_UpdateSettingsDialogState(HWND hDlg)
 static BOOL mag_Settings_OnInitDialog(HWND hDlg, HWND hwndFocus, LPARAM lParam)
 {
     HWND hOwner = (HWND)lParam;
-    LPSHAREDWGLDATA lpsd;
+    LPMAGSTATE lpsd;
     UINT graphicsApi;
     UINT captureApi;
+    UINT uiApi;
+    UINT textRenderer;
 
     UNREFERENCED_PARAMETER(hwndFocus);
 
     SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)hOwner);
-    lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
+    lpsd = (LPMAGSTATE)GetWindowLongPtr(hOwner, GWLP_USERDATA);
     graphicsApi = (lpsd && lpsd->graphicsApi < GRAPHICS_API_COUNT) ? lpsd->graphicsApi : GRAPHICS_API_OPENGL;
     captureApi = (lpsd && lpsd->captureApi < CAPTURE_API_COUNT) ? lpsd->captureApi : CAPTURE_API_GDI_BITBLT;
+    uiApi = (lpsd && lpsd->uiGraphicsApi < UI_GRAPHICS_API_COUNT) ? lpsd->uiGraphicsApi : UI_GRAPHICS_API_NATIVE;
+    textRenderer = (lpsd && lpsd->textRenderer < TEXT_RENDERER_COUNT) ? lpsd->textRenderer : TEXT_RENDERER_DIRECTWRITE;
 
-    mag_AddSettingsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), graphicsApi);
+    mag_AddGraphicsOptions(hDlg, IDC_SETTINGS_GRAPHICS_API, (GRAPHICSAPI)graphicsApi);
     mag_AddSettingsOptions(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), captureApi);
+    mag_AddSettingsOptions(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), uiApi);
+    mag_AddSettingsOptions(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), textRenderer);
     SendDlgItemMessage(
       hDlg,
       IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,
@@ -501,34 +671,56 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
     case IDOK:
       {
         HWND hOwner = (HWND)GetWindowLongPtr(hDlg, DWLP_USER);
-        LPSHAREDWGLDATA lpsd;
+        LPMAGSTATE lpsd;
         UINT graphicsApi = GRAPHICS_API_OPENGL;
         UINT captureApi = CAPTURE_API_GDI_BITBLT;
+        UINT uiApi = UI_GRAPHICS_API_NATIVE;
+        UINT textRenderer = TEXT_RENDERER_DIRECTWRITE;
         BOOL fGraphicsImplemented = FALSE;
         BOOL fCaptureImplemented = FALSE;
+        BOOL fUiImplemented = FALSE;
+        BOOL fTextImplemented = FALSE;
         BOOL fMouseRelativeZoom = BST_CHECKED == SendDlgItemMessage(hDlg, IDC_SETTINGS_MOUSE_RELATIVE_ZOOM, BM_GETCHECK, 0, 0);
 
-        if (!mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, g_graphicsApiOptions, ARRAYSIZE(g_graphicsApiOptions), &graphicsApi, &fGraphicsImplemented) ||
+        if (!mag_GetSelectedGraphicsOption(hDlg, IDC_SETTINGS_GRAPHICS_API, &graphicsApi, &fGraphicsImplemented) ||
           !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_CAPTURE_API, g_captureApiOptions, ARRAYSIZE(g_captureApiOptions), &captureApi, &fCaptureImplemented) ||
+          !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_UI_API, g_uiGraphicsApiOptions, ARRAYSIZE(g_uiGraphicsApiOptions), &uiApi, &fUiImplemented) ||
+          !mag_GetSelectedSettingsOption(hDlg, IDC_SETTINGS_TEXT_RENDERER, g_textRendererOptions, ARRAYSIZE(g_textRendererOptions), &textRenderer, &fTextImplemented) ||
           !fGraphicsImplemented ||
-          !fCaptureImplemented)
+          !fCaptureImplemented ||
+          !fUiImplemented ||
+          !fTextImplemented)
         {
-          MessageBox(hDlg, TEXT("That backend is listed for planning but is not implemented yet."), TEXT("Settings"), MB_OK | MB_ICONINFORMATION);
+          MessageBox(hDlg, TEXT("The selected renderer is unavailable on this system."), TEXT("Settings"), MB_OK | MB_ICONINFORMATION);
           mag_UpdateSettingsDialogState(hDlg);
           return;
         }
 
-        lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hOwner, GWLP_USERDATA);
+        lpsd = (LPMAGSTATE)GetWindowLongPtr(hOwner, GWLP_USERDATA);
         if (lpsd)
         {
-          if (graphicsApi < GRAPHICS_API_COUNT)
+          if (graphicsApi < GRAPHICS_API_COUNT &&
+              uiApi < UI_GRAPHICS_API_COUNT &&
+              textRenderer < TEXT_RENDERER_COUNT)
           {
-            lpsd->graphicsApi = (GRAPHICSAPI)graphicsApi;
-          }
+            TCHAR reason[256];
 
-          if (captureApi < CAPTURE_API_COUNT)
-          {
-            lpsd->captureApi = (CAPTUREAPI)captureApi;
+            if (!renderApplySettings(
+                  hOwner,
+                  (GRAPHICSAPI)graphicsApi,
+                  (CAPTUREAPI)captureApi,
+                  (UIGRAPHICSAPI)uiApi,
+                  (TEXTRENDERER)textRenderer,
+                  reason,
+                  ARRAYSIZE(reason)))
+            {
+              MessageBox(
+                hDlg,
+                reason[0] ? reason : TEXT("The selected graphics API could not be applied."),
+                TEXT("Settings"),
+                MB_OK | MB_ICONERROR);
+              return;
+            }
           }
 
           lpsd->fMouseRelativeZoom = fMouseRelativeZoom;
@@ -537,6 +729,7 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
             lpsd->fUseSourceOrigin = FALSE;
           }
 
+          mag_SaveSettings(lpsd);
           renderRender(hOwner);
         }
 
@@ -545,6 +738,8 @@ static void mag_Settings_OnCommand(HWND hDlg, int id, HWND hwndCtl, UINT codeNot
       }
     case IDC_SETTINGS_GRAPHICS_API:
     case IDC_SETTINGS_CAPTURE_API:
+    case IDC_SETTINGS_UI_API:
+    case IDC_SETTINGS_TEXT_RENDERER:
       {
         if (CBN_SELCHANGE == codeNotify)
         {
@@ -574,7 +769,7 @@ static INT_PTR CALLBACK mag_SettingsDlgProc(HWND hDlg, UINT message, WPARAM wPar
 
 LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(lpCreateStruct);
 
@@ -584,9 +779,12 @@ LRESULT mag_OnCreate(HWND hWnd, LPCREATESTRUCT lpCreateStruct)
     mag_UpdateWindowOutlineColor(hWnd);
 
     lpsd->graphicsApi = GRAPHICS_API_OPENGL;
+    lpsd->uiGraphicsApi = UI_GRAPHICS_API_NATIVE;
+    lpsd->textRenderer = TEXT_RENDERER_DIRECTWRITE;
     lpsd->captureApi = CAPTURE_API_GDI_BITBLT;
     lpsd->viewMode = MAG_VIEW_WINDOW;
     lpsd->fMouseRelativeZoom = FALSE;
+    mag_LoadSettings(lpsd);
 
     renderInit(hWnd);
     render_minimapNotifyActivity(hWnd);
@@ -629,7 +827,7 @@ void mag_SetTaskbarIcon(HWND hWnd)
 
 void mag_OnDestroy(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     mag_DeleteTrayIcon(hWnd);
     renderCleanup(hWnd);
@@ -688,6 +886,9 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
 {
     if (fCalcValidRects)
     {
+      UINT result = WVR_VALIDRECTS;
+      SIZE proposedClientSize;
+
       if (IsMaximized(hWnd))
       {
         MONITORINFO mi = { sizeof(MONITORINFO) };
@@ -696,16 +897,24 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
             MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), (LPMONITORINFO)&mi))
         {
           lpcsp->rgrc[0] = mi.rcWork;
-
-          return 0;
+          result = 0;
         }
       }
+      else
+      {
+        lpcsp->rgrc[0].bottom += 1;
+      }
 
-      mag_OnTimer(hWnd, 0);
-      
-      lpcsp->rgrc[0].bottom += 1;
-
-      return WVR_VALIDRECTS;
+      /*
+       * The proposed rectangle is not committed yet.  Latch content for the
+       * current client size before DWM switches geometry; the replacement
+       * frame is submitted from WM_WINDOWPOSCHANGED after WM_SIZE has resized
+       * all renderer resources.
+       */
+      proposedClientSize.cx = RECTWIDTH(lpcsp->rgrc[0]);
+      proposedClientSize.cy = RECTHEIGHT(lpcsp->rgrc[0]);
+      renderPrepareWindowResize(hWnd, proposedClientSize);
+      return result;
     }
 
     return 0;
@@ -847,7 +1056,7 @@ void mag_OnCommand(HWND hWnd, int id, HWND hwndCtl, UINT codeNotify)
 
 void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(fDown);
 
@@ -886,7 +1095,7 @@ void mag_OnKeyUp(HWND hWnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
 
 void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(idEvent);
 
@@ -898,7 +1107,7 @@ void mag_OnTimer(HWND hWnd, UINT_PTR idEvent)
 
 void mag_OnRender(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (!lpsd || !IsWindowEnabled(hWnd))
     {
@@ -927,7 +1136,7 @@ void mag_OnRender(HWND hWnd)
 
 void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     POINT ptClient = { xPos, yPos };
 
     UNREFERENCED_PARAMETER(fwKeys);
@@ -1040,7 +1249,7 @@ void mag_OnLButtonDown(HWND hWnd, BOOL fDoubleClick, int x, int y, UINT keyFlags
 
 void mag_OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     UNREFERENCED_PARAMETER(x);
     UNREFERENCED_PARAMETER(y);
@@ -1103,7 +1312,7 @@ void mag_OnSysColorChange(HWND hWnd)
 
 void mag_NotifyMiniMapCursorActivity(HWND hWnd, POINT ptScreen)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (!lpsd)
     {
@@ -1129,9 +1338,19 @@ void mag_OnCaptureChanged(HWND hWnd, HWND hwndNewCapture)
 
 void mag_OnSize(HWND hWnd, UINT state, int cx, int cy)
 {
-    UNREFERENCED_PARAMETER(state);
     UNREFERENCED_PARAMETER(cx);
     UNREFERENCED_PARAMETER(cy);
+
+    if (SIZE_MINIMIZED == state)
+    {
+      LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+      if (lpsd)
+      {
+        lpsd->fPresentedContentValid = FALSE;
+      }
+      return;
+    }
 
     renderResizeCapture(hWnd);
 }
@@ -1152,7 +1371,7 @@ void mag_OnExitMenuLoop(HWND hWnd,BOOL fIsShortcutMenu)
 
 void mag_OnEnterSizeMove(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd)
     {
@@ -1165,7 +1384,7 @@ void mag_OnEnterSizeMove(HWND hWnd)
 
 void mag_OnExitSizeMove(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd)
     {
@@ -1178,7 +1397,7 @@ void mag_OnExitSizeMove(HWND hWnd)
 
 void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const BOOL fMoved = !(lpwndpos->flags & SWP_NOMOVE);
     const BOOL fSized = !(lpwndpos->flags & SWP_NOSIZE);
     const BOOL fActualMove = fMoved && !fSized;
@@ -1208,7 +1427,7 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     DefWindowProc(hWnd, WM_WINDOWPOSCHANGED, 0, (LPARAM)lpwndpos);
     
     if (lpsd &&
-        lpsd->hDC &&
+        lpsd->graphicsBackend &&
         lpsd->hCaptureDC &&
         (fMoved || fSized))
     {
@@ -1238,7 +1457,14 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
       {
         lpsd->fUseSourceOrigin = FALSE;
       }
-      renderRender(hWnd);
+      if (fSized)
+      {
+        renderPresentCommittedGeometry(hWnd);
+      }
+      else
+      {
+        renderRender(hWnd);
+      }
     }
 }
 
@@ -1335,7 +1561,7 @@ HWND magInitInstance(HINSTANCE hInstance, int nCmdShow)
       NULL,
       NULL,
       hInstance,
-      VirtualAlloc(NULL, sizeof(SHAREDWGLDATA), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+      VirtualAlloc(NULL, sizeof(MAGSTATE), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
 
     if (!hWnd)
     {

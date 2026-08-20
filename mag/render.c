@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include <roapi.h>
+#include <strsafe.h>
 #include <windows.graphics.capture.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
@@ -9,7 +10,6 @@
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "runtimeobject")
 
-#define WGLCHECK(Func) do { if (!(Func)) { __debugbreak(); } } while (0)
 #define SAFERELEASE(Obj) do { if ((Obj)) { IUnknown_Release((IUnknown*)(Obj)); (Obj) = NULL; } } while (0)
 
 typedef __x_ABI_CWindows_CFoundation_CIClosable WGCCLOSABLE;
@@ -95,74 +95,68 @@ typedef struct MINIMAPLAYOUT
 #define IDirect3DDxgiInterfaceAccess_GetInterface(This, iid, p) ((This)->lpVtbl->GetInterface((This), (iid), (p)))
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
-void render_wglInit(HWND hWnd);
-void render_wglInitPBuffer(HWND hWnd);
-void render_wglCreateResources(HWND hWnd);
 void render_gdiCreateResources(HWND hWnd);
-void render_wglResizeSurface(HWND hWnd);
+void render_gdiDeleteResources(HWND hWnd);
 void render_gdiResizeSurface(HWND hWnd);
-void render_wglRender(HWND hWnd);
-void render_wglDrawMiniMap(HWND hWnd);
-void render_wglClientVertex(LPSHAREDWGLDATA lpsd, FLOAT x, FLOAT y);
-void render_wglFillClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
-void render_wglStrokeClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a);
+void render_buildUiDrawList(HWND hWnd, LPMAGUIDRAWLIST list);
+BOOL render_presentPixelFrame(HWND hWnd);
+BOOL render_tryPresentPixelFrame(HWND hWnd);
+BOOL render_recreateGraphicsBackend(HWND hWnd);
+BOOL render_stampPresentedContent(HWND hWnd);
 void render_gdiCaptureScreen(HWND hWnd);
 void render_updateSurfaceInfo(HWND hWnd);
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd);
 void render_gdiDeleteCaptureBitmap(HWND hWnd);
 void render_dxgiDeleteResources(HWND hWnd);
 void render_dxgiDeleteOutputResources(LPDXGIOUTPUTCAPTURE lpOutput);
-LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor);
-LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPSHAREDWGLDATA lpsd);
+LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPMAGSTATE lpsd, HMONITOR hMonitor);
+LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPMAGSTATE lpsd);
 BOOL render_dxgiCreateDuplicationForMonitor(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput);
 BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput);
 BOOL render_dxgiEnsureStagingTexture(LPDXGIOUTPUTCAPTURE lpOutput, UINT width, UINT height);
 BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
-void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
-BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
+void render_dxgiCopyMappedPixelsToRect(LPMAGSTATE lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
+BOOL render_mapSourceRectToDestination(LPMAGSTATE lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
-BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture);
-FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd);
-BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd);
+BOOL render_minimapGetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture);
+FLOAT render_minimapGetOpacity(LPMAGSTATE lpsd);
+BOOL render_minimapHasVisibleState(LPMAGSTATE lpsd);
 BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout);
 void render_minimapMapSourceRectToClient(const MINIMAPLAYOUT* lpLayout, const RECT* lprcSource, RECT* lprcClient);
 POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptClient);
 BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient);
-BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
+BOOL render_dxgiCaptureIntersection(LPMAGSTATE lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_dxgiCaptureScreen(HWND hWnd);
 void render_wgcCloseObject(IUnknown* object);
 HRESULT render_wgcGetActivationFactory(PCWSTR pszRuntimeClass, REFIID riid, void** ppv);
 BOOL render_wgcEnsureWinRt(HWND hWnd);
 void render_wgcDeleteMonitorResources(LPWGCMONITORCAPTURE lpCapture);
 void render_wgcDeleteResources(HWND hWnd);
-LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor);
-LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPSHAREDWGLDATA lpsd);
+LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPMAGSTATE lpsd, HMONITOR hMonitor);
+LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPMAGSTATE lpsd);
 BOOL render_wgcCreateItemForMonitor(HMONITOR hMonitor, WGCITEM** lplpItem);
 BOOL render_wgcCreateCaptureForMonitor(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture);
 BOOL render_wgcEnsureCapture(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture);
 BOOL render_wgcEnsureStagingTexture(LPWGCMONITORCAPTURE lpCapture, UINT width, UINT height);
 BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture);
-BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
+BOOL render_wgcCaptureIntersection(LPMAGSTATE lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection);
 void render_wgcCaptureScreen(HWND hWnd);
 void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource);
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
 void render_dwmThumbnailDeleteResources(HWND hWnd);
 BOOL render_dwmThumbnailEnsureResources(HWND hWnd);
-void render_dwmThumbnailCaptureScreen(HWND hWnd);
+BOOL render_dwmThumbnailCaptureScreen(HWND hWnd);
 void render_dwmPrivateDeleteResources(HWND hWnd);
 BOOL render_dwmPrivateEnsureResources(HWND hWnd);
-BOOL render_dwmPrivateAppendDrawCommand(
+UINT render_dwmPrivateTranslateDrawCommands(
+  const MAGUIDRAWLIST* ui,
   DWMPRIVATEDRAWCOMMAND* lpCommands,
-  UINT* lpcCommands,
-  DWMPRIVATEDRAWCOMMANDTYPE type,
-  const RECT* lprc,
-  FLOAT r,
-  FLOAT g,
-  FLOAT b,
-  FLOAT a,
-  UINT thickness);
-UINT render_dwmPrivateBuildDrawCommands(HWND hWnd, DWMPRIVATEDRAWCOMMAND* lpCommands);
-void render_dwmPrivateCaptureScreen(HWND hWnd);
+  UINT commandCapacity);
+BOOL render_dwmPrivateCaptureScreen(HWND hWnd);
+BOOL render_transitionCaptureApi(HWND hWnd, CAPTUREAPI captureApi);
+BOOL render_captureUsesCompositor(CAPTUREAPI captureApi);
+BOOL render_setGraphicsPresentationEnabled(HWND hWnd, BOOL enabled);
+BOOL render_presentDwmFallback(HWND hWnd);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
 {
@@ -178,7 +172,7 @@ LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG 
 
 void render_updateSurfaceInfo(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     RECT rc = { 0 };
     LONG width;
@@ -199,11 +193,16 @@ void render_updateSurfaceInfo(HWND hWnd)
     lpsd->bi.biBitCount = BITS_PER_PIXEL;
     lpsd->bi.biCompression = BI_RGB;
     lpsd->bi.biSizeImage = width * height * CHANNELS;
+    lpsd->frame.width = (UINT)width;
+    lpsd->frame.height = (UINT)height;
+    lpsd->frame.stride = (UINT)width * CHANNELS;
+    lpsd->frame.rowOrder = MAG_ROW_ORDER_TOP_DOWN;
+    lpsd->frame.alphaMode = MAG_ALPHA_MODE_IGNORE;
 }
 
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     BITMAPINFO bmi = { 0 };
     VOID* bits = NULL;
 
@@ -213,6 +212,7 @@ BOOL render_gdiCreateCaptureBitmap(HWND hWnd)
     }
 
     bmi.bmiHeader = lpsd->bi;
+    bmi.bmiHeader.biHeight = -bmi.bmiHeader.biHeight;
     lpsd->hBitmapBg = CreateDIBSection(lpsd->hDesktopDC, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
 
     if (!lpsd->hBitmapBg || !bits)
@@ -223,7 +223,7 @@ BOOL render_gdiCreateCaptureBitmap(HWND hWnd)
         lpsd->hBitmapBg = NULL;
       }
 
-      lpsd->glScreenData = NULL;
+      lpsd->frame.pixels = NULL;
       return FALSE;
     }
 
@@ -232,17 +232,17 @@ BOOL render_gdiCreateCaptureBitmap(HWND hWnd)
     {
       DeleteBitmap(lpsd->hBitmapBg);
       lpsd->hBitmapBg = NULL;
-      lpsd->glScreenData = NULL;
+      lpsd->frame.pixels = NULL;
       return FALSE;
     }
 
-    lpsd->glScreenData = (GLubyte*)bits;
+    lpsd->frame.pixels = (BYTE*)bits;
     return TRUE;
 }
 
 void render_gdiDeleteCaptureBitmap(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd->hCaptureDC && lpsd->hBitmapOld)
     {
@@ -256,7 +256,7 @@ void render_gdiDeleteCaptureBitmap(HWND hWnd)
       lpsd->hBitmapBg = NULL;
     }
 
-    lpsd->glScreenData = NULL;
+    lpsd->frame.pixels = NULL;
 }
 
 void render_dxgiDeleteOutputResources(LPDXGIOUTPUTCAPTURE lpOutput)
@@ -271,7 +271,7 @@ void render_dxgiDeleteOutputResources(LPDXGIOUTPUTCAPTURE lpOutput)
 
 void render_dxgiDeleteResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     UINT i;
 
     for (i = 0; i < ARRAYSIZE(lpsd->dxgiOutputs); ++i)
@@ -280,7 +280,7 @@ void render_dxgiDeleteResources(HWND hWnd)
     }
 }
 
-LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor)
+LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPMAGSTATE lpsd, HMONITOR hMonitor)
 {
     UINT i;
 
@@ -295,7 +295,7 @@ LPDXGIOUTPUTCAPTURE render_dxgiFindOutputCapture(LPSHAREDWGLDATA lpsd, HMONITOR 
     return NULL;
 }
 
-LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPSHAREDWGLDATA lpsd)
+LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPMAGSTATE lpsd)
 {
     UINT i;
 
@@ -312,7 +312,7 @@ LPDXGIOUTPUTCAPTURE render_dxgiFindFreeOutputCapture(LPSHAREDWGLDATA lpsd)
 
 BOOL render_dxgiCreateDuplicationForMonitor(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPDXGIOUTPUTCAPTURE lpOutput = render_dxgiFindFreeOutputCapture(lpsd);
     IDXGIFactory1* factory = NULL;
     IDXGIAdapter1* adapter = NULL;
@@ -414,7 +414,7 @@ BOOL render_dxgiCreateDuplicationForMonitor(HWND hWnd, HMONITOR hMonitor, LPDXGI
 
 BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPTURE* lplpOutput)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPDXGIOUTPUTCAPTURE lpOutput = render_dxgiFindOutputCapture(lpsd, hMonitor);
 
     if (lpOutput && lpOutput->dxgiDuplication)
@@ -497,7 +497,7 @@ BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput)
     return lpOutput->fHasFrame;
 }
 
-void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst)
+void render_dxgiCopyMappedPixelsToRect(LPMAGSTATE lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst)
 {
     const UINT dstWidth = (UINT)RECTWIDTH((*lprcDst));
     const UINT dstHeight = (UINT)RECTHEIGHT((*lprcDst));
@@ -515,7 +515,7 @@ void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UI
     {
       const UINT srcY = min((UINT)(((ULONGLONG)y * srcHeight) / dstHeight), srcHeight - 1);
       const UINT dstY = (UINT)lprcDst->top + y;
-      BYTE* dstRow = ((BYTE*)lpsd->glScreenData) + ((screenHeight - 1 - dstY) * screenPitch) + ((UINT)lprcDst->left * CHANNELS);
+      BYTE* dstRow = lpsd->frame.pixels + (dstY * screenPitch) + ((UINT)lprcDst->left * CHANNELS);
       const BYTE* srcRow = src + (srcY * srcPitch);
 
       if (srcWidth == dstWidth)
@@ -535,7 +535,7 @@ void render_dxgiCopyMappedPixelsToRect(LPSHAREDWGLDATA lpsd, const BYTE* src, UI
     }
 }
 
-BOOL render_mapSourceRectToDestination(LPSHAREDWGLDATA lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst)
+BOOL render_mapSourceRectToDestination(LPMAGSTATE lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst)
 {
     const LONG sourceWidth = RECTWIDTH((*lprcSource));
     const LONG sourceHeight = RECTHEIGHT((*lprcSource));
@@ -572,7 +572,7 @@ BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedS
            lprcSource->bottom != lprcClippedSource->bottom;
 }
 
-BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
+BOOL render_minimapGetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture)
 {
     *lprcCapture = lpsd->di.rc;
 
@@ -589,7 +589,7 @@ BOOL render_minimapGetCaptureRect(LPSHAREDWGLDATA lpsd, RECT* lprcCapture)
 
 void render_minimapNotifyActivity(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd)
     {
@@ -597,7 +597,7 @@ void render_minimapNotifyActivity(HWND hWnd)
     }
 }
 
-BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd)
+BOOL render_minimapHasVisibleState(LPMAGSTATE lpsd)
 {
     if (MAG_VIEW_LENS == lpsd->viewMode)
     {
@@ -608,7 +608,7 @@ BOOL render_minimapHasVisibleState(LPSHAREDWGLDATA lpsd)
            (!lpsd->fTrackCursor && lpsd->fUseSourceOrigin && lpsd->fSourceOriginPinned);
 }
 
-FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd)
+FLOAT render_minimapGetOpacity(LPMAGSTATE lpsd)
 {
     const DWORD now = GetTickCount();
     const DWORD elapsed = now - lpsd->dwMiniMapLastActivity;
@@ -643,7 +643,7 @@ FLOAT render_minimapGetOpacity(LPSHAREDWGLDATA lpsd)
 
 BOOL render_minimapComputeLayout(HWND hWnd, MINIMAPLAYOUT* lpLayout)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const LONG clientWidth = lpsd->bi.biWidth;
     const LONG clientHeight = lpsd->bi.biHeight;
     const LONG maxWidth = min(MINIMAP_MAX_WIDTH, clientWidth - (MINIMAP_MARGIN * 2));
@@ -714,6 +714,122 @@ POINT render_minimapClientPointToSource(const MINIMAPLAYOUT* lpLayout, POINT ptC
     return ptSource;
 }
 
+static MAGCOLORF render_uiColor(FLOAT r, FLOAT g, FLOAT b, FLOAT a)
+{
+    MAGCOLORF color = { r, g, b, a };
+    return color;
+}
+
+void render_buildUiDrawList(HWND hWnd, LPMAGUIDRAWLIST list)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MINIMAPLAYOUT layout;
+    RECT rcSource;
+    RECT rcClippedSource;
+    RECT rcWindow;
+    RECT rcClippedWindow;
+    RECT rcWindowClient;
+    RECT rcPanel;
+    RECT rcVisibleClient;
+    RECT rcLabel;
+    TCHAR label[MAG_UI_MAX_TEXT_LENGTH];
+    FLOAT opacity;
+    UINT i;
+
+    magUiDrawListReset(list);
+    if (!lpsd || !list)
+    {
+      return;
+    }
+
+    if (render_minimapComputeLayout(hWnd, &layout))
+    {
+      opacity = render_minimapGetOpacity(lpsd);
+      if (opacity > MINIMAP_MIN_ALPHA)
+      {
+        render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
+        rcPanel = layout.rcMap;
+        InflateRect(&rcPanel, 4, 4);
+        rcLabel = layout.rcMap;
+        rcLabel.top -= 20;
+        rcLabel.bottom = layout.rcMap.top - 4;
+        rcPanel.top = rcLabel.top - 4;
+
+        magUiDrawListAppendFill(list, &rcPanel, render_uiColor(0.02f, 0.025f, 0.03f, 0.72f * opacity));
+        magUiDrawListAppendFill(list, &layout.rcMap, render_uiColor(0.11f, 0.12f, 0.13f, 0.78f * opacity));
+
+        for (i = 0; i < lpsd->di.numMonitors; ++i)
+        {
+          RECT rcMonitor;
+
+          render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
+          magUiDrawListAppendFill(list, &rcMonitor, render_uiColor(0.18f, 0.19f, 0.20f, 0.58f * opacity));
+        }
+
+        for (i = 0; i < lpsd->di.numMonitors; ++i)
+        {
+          RECT rcMonitor;
+
+          render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
+          magUiDrawListAppendStroke(list, &rcMonitor, render_uiColor(0.55f, 0.58f, 0.62f, 0.70f * opacity), 1.0f);
+        }
+
+        magUiDrawListAppendStroke(list, &layout.rcMap, render_uiColor(0.78f, 0.82f, 0.88f, 0.88f * opacity), 1.0f);
+
+        if (GetWindowRect(hWnd, &rcWindow) &&
+            IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
+        {
+          render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
+          magUiDrawListAppendFill(list, &rcWindowClient, render_uiColor(0.38f, 0.40f, 0.43f, 0.10f * opacity));
+          magUiDrawListAppendStroke(list, &rcWindowClient, render_uiColor(0.48f, 0.50f, 0.54f, 0.92f * opacity), 1.5f);
+        }
+
+        if (!IsRectEmpty(&rcClippedSource))
+        {
+          render_minimapMapSourceRectToClient(&layout, &rcClippedSource, &rcVisibleClient);
+          magUiDrawListAppendFill(list, &rcVisibleClient, render_uiColor(0.86f, 0.92f, 1.0f, 0.12f * opacity));
+          magUiDrawListAppendStroke(list, &rcVisibleClient, render_uiColor(0.90f, 0.96f, 1.0f, 0.96f * opacity), 2.0f);
+        }
+
+        StringCchPrintf(
+          label,
+          ARRAYSIZE(label),
+          TEXT("%.2fx  %s"),
+          lpsd->fTexScaler,
+          lpsd->graphicsBackend ? lpsd->graphicsBackend->name : TEXT("No renderer"));
+        magUiDrawListAppendText(
+          list,
+          &rcLabel,
+          render_uiColor(0.90f, 0.94f, 1.0f, 0.96f * opacity),
+          12.0f,
+          label);
+      }
+    }
+
+    if (lpsd->bi.biWidth >= 2 && lpsd->bi.biHeight >= 2)
+    {
+      const RECT edges[] =
+      {
+        { 0, 0, lpsd->bi.biWidth, 1 },
+        { 0, lpsd->bi.biHeight - 2, lpsd->bi.biWidth, lpsd->bi.biHeight - 1 },
+        { 0, 1, 1, lpsd->bi.biHeight - 2 },
+        { lpsd->bi.biWidth - 1, 1, lpsd->bi.biWidth, lpsd->bi.biHeight - 2 },
+      };
+      const MAGCOLORF outline =
+      {
+        lpsd->outlineColor[0],
+        lpsd->outlineColor[1],
+        lpsd->outlineColor[2],
+        lpsd->outlineColor[3],
+      };
+
+      for (i = 0; i < ARRAYSIZE(edges); ++i)
+      {
+        magUiDrawListAppendFill(list, &edges[i], outline);
+      }
+    }
+}
+
 BOOL render_minimapHitTest(HWND hWnd, POINT ptClient)
 {
     MINIMAPLAYOUT layout;
@@ -723,7 +839,7 @@ BOOL render_minimapHitTest(HWND hWnd, POINT ptClient)
 
 BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     MINIMAPLAYOUT layout;
     RECT rcSource;
     RECT rcClippedSource;
@@ -766,7 +882,7 @@ BOOL render_minimapSetSourceFromPoint(HWND hWnd, POINT ptClient)
 
 BOOL render_minimapBeginDrag(HWND hWnd, POINT ptClient)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     MINIMAPLAYOUT layout;
     RECT rcSource;
     RECT rcClippedSource;
@@ -801,7 +917,7 @@ BOOL render_minimapBeginDrag(HWND hWnd, POINT ptClient)
 
 BOOL render_minimapDrag(HWND hWnd, POINT ptClient)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (!lpsd->fMiniMapDragging)
     {
@@ -813,12 +929,12 @@ BOOL render_minimapDrag(HWND hWnd, POINT ptClient)
 
 void render_minimapEndDrag(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     lpsd->fMiniMapDragging = FALSE;
 }
 
-BOOL render_dxgiCaptureIntersection(LPSHAREDWGLDATA lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection)
+BOOL render_dxgiCaptureIntersection(LPMAGSTATE lpsd, LPDXGIOUTPUTCAPTURE lpOutput, const RECT* lprcSource, const RECT* lprcIntersection)
 {
     const UINT srcPartWidth = (UINT)RECTWIDTH((*lprcIntersection));
     const UINT srcPartHeight = (UINT)RECTHEIGHT((*lprcIntersection));
@@ -900,7 +1016,7 @@ HRESULT render_wgcGetActivationFactory(PCWSTR pszRuntimeClass, REFIID riid, void
 
 BOOL render_wgcEnsureWinRt(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     HRESULT hr;
 
     if (lpsd->fWinRtInitialized)
@@ -936,7 +1052,7 @@ void render_wgcDeleteMonitorResources(LPWGCMONITORCAPTURE lpCapture)
 
 void render_wgcDeleteResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     UINT i;
 
     for (i = 0; i < ARRAYSIZE(lpsd->wgcMonitors); ++i)
@@ -945,7 +1061,7 @@ void render_wgcDeleteResources(HWND hWnd)
     }
 }
 
-LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPSHAREDWGLDATA lpsd, HMONITOR hMonitor)
+LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPMAGSTATE lpsd, HMONITOR hMonitor)
 {
     UINT i;
 
@@ -960,7 +1076,7 @@ LPWGCMONITORCAPTURE render_wgcFindMonitorCapture(LPSHAREDWGLDATA lpsd, HMONITOR 
     return NULL;
 }
 
-LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPSHAREDWGLDATA lpsd)
+LPWGCMONITORCAPTURE render_wgcFindFreeMonitorCapture(LPMAGSTATE lpsd)
 {
     UINT i;
 
@@ -1002,7 +1118,7 @@ BOOL render_wgcCreateItemForMonitor(HMONITOR hMonitor, WGCITEM** lplpItem)
 
 BOOL render_wgcCreateCaptureForMonitor(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPWGCMONITORCAPTURE lpCapture = render_wgcFindFreeMonitorCapture(lpsd);
     IDXGIFactory1* factory = NULL;
     IDXGIAdapter1* adapter = NULL;
@@ -1184,7 +1300,7 @@ BOOL render_wgcCreateCaptureForMonitor(HWND hWnd, HMONITOR hMonitor, LPWGCMONITO
 
 BOOL render_wgcEnsureCapture(HWND hWnd, HMONITOR hMonitor, LPWGCMONITORCAPTURE* lplpCapture)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     LPWGCMONITORCAPTURE lpCapture = render_wgcFindMonitorCapture(lpsd, hMonitor);
 
     if (lpCapture && lpCapture->wgcFramePool && lpCapture->wgcSession)
@@ -1294,7 +1410,7 @@ BOOL render_wgcUpdateFrame(LPWGCMONITORCAPTURE lpCapture)
     return lpCapture->fHasFrame;
 }
 
-BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection)
+BOOL render_wgcCaptureIntersection(LPMAGSTATE lpsd, LPWGCMONITORCAPTURE lpCapture, const RECT* lprcSource, const RECT* lprcIntersection)
 {
     RECT rcDst;
     D3D11_BOX box;
@@ -1360,7 +1476,7 @@ BOOL render_wgcCaptureIntersection(LPSHAREDWGLDATA lpsd, LPWGCMONITORCAPTURE lpC
 
 void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const LONG cw = lpsd->bi.biWidth;
     const LONG ch = lpsd->bi.biHeight;
     POINT tl = { 0, 0 };
@@ -1480,9 +1596,49 @@ void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
     render_computeSourceRects(hWnd, lprcSource, &rcClippedSource);
 }
 
+BOOL render_captureUsesCompositor(CAPTUREAPI captureApi)
+{
+    return CAPTURE_API_DWM_THUMBNAIL == captureApi ||
+      CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi;
+}
+
+BOOL render_setGraphicsPresentationEnabled(HWND hWnd, BOOL enabled)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    BOOL result = FALSE;
+
+    if (!lpsd)
+    {
+      return FALSE;
+    }
+
+    AcquireSRWLockExclusive(&lpsd->graphicsLock);
+    if (lpsd->graphicsBackend && lpsd->graphicsState &&
+        lpsd->graphicsBackend->SetPresentationEnabled)
+    {
+      result = lpsd->graphicsBackend->SetPresentationEnabled(
+        hWnd,
+        lpsd->graphicsState,
+        enabled);
+      if (result)
+      {
+        lpsd->fGraphicsPresentationEnabled = enabled;
+      }
+    }
+    ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+    return result;
+}
+
+BOOL render_presentDwmFallback(HWND hWnd)
+{
+    render_setGraphicsPresentationEnabled(hWnd, TRUE);
+    render_gdiCaptureScreen(hWnd);
+    return render_presentPixelFrame(hWnd);
+}
+
 void render_dwmThumbnailDeleteResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd->dwmThumbnail.hThumbnail)
     {
@@ -1495,7 +1651,7 @@ void render_dwmThumbnailDeleteResources(HWND hWnd)
 
 BOOL render_dwmThumbnailEnsureResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     HWND hwndSource = GetDesktopWindow();
 
     if (lpsd->dwmThumbnail.hThumbnail && lpsd->dwmThumbnail.hwndSource == hwndSource)
@@ -1516,28 +1672,25 @@ BOOL render_dwmThumbnailEnsureResources(HWND hWnd)
     return TRUE;
 }
 
-void render_dwmThumbnailCaptureScreen(HWND hWnd)
+BOOL render_dwmThumbnailCaptureScreen(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DWM_THUMBNAIL_PROPERTIES props = { 0 };
     RECT rcSource;
     RECT rcClippedSource;
     RECT rcVirtual = lpsd->di.rc;
 
-    if (!render_dwmThumbnailEnsureResources(hWnd))
+    if (!render_setGraphicsPresentationEnabled(hWnd, FALSE) ||
+        !render_dwmThumbnailEnsureResources(hWnd))
     {
-      render_gdiCaptureScreen(hWnd);
-      render_wglRender(hWnd);
-      return;
+      return render_presentDwmFallback(hWnd);
     }
 
     render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
     if (IsRectEmpty(&rcClippedSource) || render_sourceRectIsClipped(&rcSource, &rcClippedSource))
     {
       render_dwmThumbnailDeleteResources(hWnd);
-      render_gdiCaptureScreen(hWnd);
-      render_wglRender(hWnd);
-      return;
+      return render_presentDwmFallback(hWnd);
     }
 
     if (IsRectEmpty(&rcVirtual))
@@ -1558,17 +1711,15 @@ void render_dwmThumbnailCaptureScreen(HWND hWnd)
     if (FAILED(DwmUpdateThumbnailProperties(lpsd->dwmThumbnail.hThumbnail, &props)))
     {
       render_dwmThumbnailDeleteResources(hWnd);
-      render_gdiCaptureScreen(hWnd);
-      render_wglRender(hWnd);
-      return;
+      return render_presentDwmFallback(hWnd);
     }
 
-    DwmFlush();
+    return SUCCEEDED(DwmFlush());
 }
 
 void render_dwmPrivateDeleteResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     DwmPrivateCaptureDestroy(lpsd->dwmPrivate.state);
     lpsd->dwmPrivate.state = NULL;
@@ -1576,136 +1727,49 @@ void render_dwmPrivateDeleteResources(HWND hWnd)
 
 BOOL render_dwmPrivateEnsureResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     return lpsd->dwmPrivate.state ||
       DwmPrivateCaptureCreate(hWnd, &lpsd->dwmPrivate.state);
 }
 
-BOOL render_dwmPrivateAppendDrawCommand(
+UINT render_dwmPrivateTranslateDrawCommands(
+  const MAGUIDRAWLIST* ui,
   DWMPRIVATEDRAWCOMMAND* lpCommands,
-  UINT* lpcCommands,
-  DWMPRIVATEDRAWCOMMANDTYPE type,
-  const RECT* lprc,
-  FLOAT r,
-  FLOAT g,
-  FLOAT b,
-  FLOAT a,
-  UINT thickness)
+  UINT commandCapacity)
 {
-    DWMPRIVATEDRAWCOMMAND* lpCommand;
+    UINT i;
+    UINT count = 0;
 
-    if (*lpcCommands >= DWM_PRIVATE_MAX_DRAW_COMMANDS)
+    for (i = 0; ui && i < ui->count && count < commandCapacity; ++i)
     {
-      return FALSE;
+      const MAGUIDRAWCOMMAND* source = &ui->commands[i];
+      DWMPRIVATEDRAWCOMMAND* destination;
+
+      if (MAG_UI_DRAW_TEXT == source->type)
+      {
+        continue;
+      }
+
+      destination = &lpCommands[count++];
+
+      destination->type = MAG_UI_DRAW_STROKE_RECT == source->type
+        ? DWM_PRIVATE_DRAW_STROKE
+        : DWM_PRIVATE_DRAW_FILL;
+      destination->rc = source->rect;
+      destination->color[0] = source->color.r;
+      destination->color[1] = source->color.g;
+      destination->color[2] = source->color.b;
+      destination->color[3] = source->color.a;
+      destination->thickness = max(1U, (UINT)(source->thickness + 0.5f));
     }
 
-    lpCommand = &lpCommands[(*lpcCommands)++];
-    lpCommand->type = type;
-    lpCommand->rc = *lprc;
-    lpCommand->color[0] = r;
-    lpCommand->color[1] = g;
-    lpCommand->color[2] = b;
-    lpCommand->color[3] = a;
-    lpCommand->thickness = thickness;
-    return TRUE;
+    return count;
 }
 
-UINT render_dwmPrivateBuildDrawCommands(HWND hWnd, DWMPRIVATEDRAWCOMMAND* lpCommands)
+BOOL render_dwmPrivateCaptureScreen(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    MINIMAPLAYOUT layout;
-    FLOAT opacity = 0.0f;
-    UINT commandCount = 0;
-
-    if (render_minimapComputeLayout(hWnd, &layout))
-    {
-      opacity = render_minimapGetOpacity(lpsd);
-    }
-
-    if (opacity > MINIMAP_MIN_ALPHA)
-    {
-      RECT rcSource;
-      RECT rcClippedSource;
-      RECT rcWindow;
-      RECT rcClippedWindow;
-      RECT rcWindowClient;
-      RECT rcPanel = layout.rcMap;
-      RECT rcVisibleClient;
-      UINT i;
-
-      render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
-      InflateRect(&rcPanel, 4, 4);
-
-      render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_FILL, &rcPanel, 0.02f, 0.025f, 0.03f, 0.72f * opacity, 0);
-      render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_FILL, &layout.rcMap, 0.11f, 0.12f, 0.13f, 0.78f * opacity, 0);
-
-      for (i = 0; i < lpsd->di.numMonitors; ++i)
-      {
-        RECT rcMonitor;
-
-        render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_FILL, &rcMonitor, 0.18f, 0.19f, 0.20f, 0.58f * opacity, 0);
-      }
-
-      for (i = 0; i < lpsd->di.numMonitors; ++i)
-      {
-        RECT rcMonitor;
-
-        render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_STROKE, &rcMonitor, 0.55f, 0.58f, 0.62f, 0.70f * opacity, 1);
-      }
-
-      render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_STROKE, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f * opacity, 1);
-
-      if (GetWindowRect(hWnd, &rcWindow) &&
-          IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
-      {
-        render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_FILL, &rcWindowClient, 0.38f, 0.40f, 0.43f, 0.10f * opacity, 0);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_STROKE, &rcWindowClient, 0.48f, 0.50f, 0.54f, 0.92f * opacity, 2);
-      }
-
-      if (!IsRectEmpty(&rcClippedSource))
-      {
-        render_minimapMapSourceRectToClient(&layout, &rcClippedSource, &rcVisibleClient);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_FILL, &rcVisibleClient, 0.86f, 0.92f, 1.0f, 0.12f * opacity, 0);
-        render_dwmPrivateAppendDrawCommand(lpCommands, &commandCount, DWM_PRIVATE_DRAW_STROKE, &rcVisibleClient, 0.90f, 0.96f, 1.0f, 0.96f * opacity, 2);
-      }
-    }
-
-    if (lpsd->bi.biWidth >= 2 && lpsd->bi.biHeight >= 2)
-    {
-      const RECT edges[] =
-      {
-        { 0, 0, lpsd->bi.biWidth, 1 },
-        { 0, lpsd->bi.biHeight - 2, lpsd->bi.biWidth, lpsd->bi.biHeight - 1 },
-        { 0, 1, 1, lpsd->bi.biHeight - 2 },
-        { lpsd->bi.biWidth - 1, 1, lpsd->bi.biWidth, lpsd->bi.biHeight - 2 },
-      };
-      UINT i;
-
-      for (i = 0; i < ARRAYSIZE(edges); ++i)
-      {
-        render_dwmPrivateAppendDrawCommand(
-          lpCommands,
-          &commandCount,
-          DWM_PRIVATE_DRAW_FILL,
-          &edges[i],
-          lpsd->cfOutlineColor[0],
-          lpsd->cfOutlineColor[1],
-          lpsd->cfOutlineColor[2],
-          lpsd->cfOutlineColor[3],
-          0);
-      }
-    }
-
-    return commandCount;
-}
-
-void render_dwmPrivateCaptureScreen(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DWMPRIVATEDRAWCOMMAND drawCommands[DWM_PRIVATE_MAX_DRAW_COMMANDS];
     RECT rcSource;
     RECT rcClippedSource;
@@ -1716,6 +1780,11 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
     const SIZE targetSize = { lpsd->bi.biWidth, lpsd->bi.biHeight };
     UINT drawCommandCount;
 
+    if (!render_setGraphicsPresentationEnabled(hWnd, FALSE))
+    {
+      return render_presentDwmFallback(hWnd);
+    }
+
     render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
     if (!IsRectEmpty(&rcClippedSource) &&
         render_mapSourceRectToDestination(lpsd, &rcSource, &rcClippedSource, &rcDestination))
@@ -1724,7 +1793,11 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
       lprcPrivateDestination = &rcDestination;
     }
 
-    drawCommandCount = render_dwmPrivateBuildDrawCommands(hWnd, drawCommands);
+    render_buildUiDrawList(hWnd, &lpsd->uiDrawList);
+    drawCommandCount = render_dwmPrivateTranslateDrawCommands(
+      &lpsd->uiDrawList,
+      drawCommands,
+      ARRAYSIZE(drawCommands));
     if (!render_minimapGetCaptureRect(lpsd, &rcDesktop) ||
         !render_dwmPrivateEnsureResources(hWnd) ||
         !DwmPrivateCaptureUpdate(
@@ -1737,171 +1810,15 @@ void render_dwmPrivateCaptureScreen(HWND hWnd)
           drawCommandCount))
     {
       render_dwmPrivateDeleteResources(hWnd);
-      render_gdiCaptureScreen(hWnd);
-      render_wglRender(hWnd);
-      return;
+      return render_presentDwmFallback(hWnd);
     }
-}
 
-void render_wglInit(HWND hWnd)
-{
-    PIXELFORMATDESCRIPTOR pfd = { sizeof(pfd) };
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    int pixelFormat;
-
-    pfd.nVersion = 1;
-    pfd.dwFlags =
-      PFD_DRAW_TO_WINDOW |
-      PFD_SUPPORT_OPENGL |
-      PFD_DOUBLEBUFFER |
-      PFD_SUPPORT_COMPOSITION;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cAlphaBits = 8;
-    pfd.iLayerType = PFD_MAIN_PLANE;
-
-    lpsd->hDC = GetDC(hWnd);
-    pixelFormat = ChoosePixelFormat(lpsd->hDC, &pfd);
-    WGLCHECK(pixelFormat);
-    WGLCHECK(SetPixelFormat(lpsd->hDC, pixelFormat, &pfd));
-
-    lpsd->hRC = wglCreateContext(lpsd->hDC);
-    WGLCHECK(lpsd->hRC);
-    WGLCHECK(wglMakeCurrent(lpsd->hDC, lpsd->hRC));
-    wglLoadExtensions();
-
-    render_updateSurfaceInfo(hWnd);
-    render_gdiCreateResources(hWnd);
-    render_wglCreateResources(hWnd);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_BLEND);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_TEXTURE_2D);
-
-    if (wglSwapIntervalEXT)
-    {
-      wglSwapIntervalEXT(1);
-    }
-}
-
-void render_wglInitPBuffer(HWND hWnd)
-{
-    // basic pixel format
-    const PIXELFORMATDESCRIPTOR pfd =
-    {
-      sizeof(PIXELFORMATDESCRIPTOR),
-      1,
-      PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
-      PFD_TYPE_RGBA,
-      32,
-      0, 0, 0, 0, 0, 0,
-      8,
-      0,
-      0,
-      0, 0, 0, 0,
-      24,
-      8,
-      0,
-      PFD_MAIN_PLANE,
-      0,
-      0, 0, 0
-    };
-
-    const int iAttribs[] =
-    {
-      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
-      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-      WGL_COLOR_BITS_ARB, 32,
-      WGL_DEPTH_BITS_ARB, 24,
-      WGL_ALPHA_BITS_ARB, 8,
-      WGL_SWAP_METHOD_ARB, WGL_SWAP_UNDEFINED_ARB,
-      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
-      0
-    };
-
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    
-    wglInit();
-    lpsd->hDC = GetDC(0);
-
-    int pf = ChoosePixelFormat(lpsd->hDC, &pfd);
-    WGLCHECK(SetPixelFormat(lpsd->hDC, pf, &pfd));
-
-    // dummy GL context
-    HGLRC rc = wglCreateContext(lpsd->hDC);
-    WGLCHECK(wglMakeCurrent(lpsd->hDC, rc));
-
-    // choose pbuffer format
-    int iattribs[] = {
-        WGL_DRAW_TO_PBUFFER_ARB, GL_TRUE,
-        WGL_SUPPORT_OPENGL_ARB,  GL_TRUE,
-        WGL_BIND_TO_TEXTURE_RGBA_ARB, GL_TRUE,
-        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-        0
-    };
-
-    int formats[1];
-    UINT count;
-    if (!wglChoosePixelFormatARB(lpsd->hDC, iattribs, NULL, 1, formats, &count))
-      __debugbreak();
-
-    // create pbuffer
-    int pattribs[] = {
-        WGL_TEXTURE_FORMAT_ARB, WGL_TEXTURE_RGBA_ARB,
-        WGL_TEXTURE_TARGET_ARB, WGL_TEXTURE_2D_ARB,
-        0
-    };
-
-    lpsd->pb = wglCreatePbufferARB(lpsd->hDC, formats[0], 256, 256, pattribs);
-    HDC pbdc = wglGetPbufferDCARB(lpsd->pb);
-
-    // render context for pbuffer
-    HGLRC pbrc = wglCreateContext(pbdc);
-    wglMakeCurrent(pbdc, pbrc);
-
-    render_updateSurfaceInfo(hWnd);
-    render_gdiCreateResources(hWnd);
-    render_wglCreateResources(hWnd);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_BLEND);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_TEXTURE_2D);
-
-    wglSwapIntervalEXT(-1);
-}
-
-void render_wglCreateResources(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    
-    glGenTextures(1, &lpsd->glScreenTexture);
-    glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, lpsd->bi.biWidth, lpsd->bi.biHeight, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
-
-    lpsd->fScale = 1.0f;
-    lpsd->fTexScaler = 1.0f;
+    return TRUE;
 }
 
 void render_gdiCreateResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     
     gdiGetDisplayInfo(&lpsd->di);
     lpsd->hDesktopDC = GetDC(NULL); // whole virtual screen (handles negative/secondary monitor coords)
@@ -1910,30 +1827,26 @@ void render_gdiCreateResources(HWND hWnd)
     render_gdiCreateCaptureBitmap(hWnd);
 }
 
-void render_wglResizeSurface(HWND hWnd)
+void render_gdiDeleteResources(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    if (!lpsd->hRC || !lpsd->glScreenTexture)
+    render_gdiDeleteCaptureBitmap(hWnd);
+    if (lpsd->hCaptureDC)
     {
-      return;
+      DeleteDC(lpsd->hCaptureDC);
+      lpsd->hCaptureDC = NULL;
     }
-    
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDeleteTextures(1, &lpsd->glScreenTexture);
-
-    glGenTextures(1, &lpsd->glScreenTexture);
-    glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA, lpsd->bi.biWidth, lpsd->bi.biHeight, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    if (lpsd->hDesktopDC)
+    {
+      ReleaseDC(NULL, lpsd->hDesktopDC);
+      lpsd->hDesktopDC = NULL;
+    }
 }
 
 void render_gdiResizeSurface(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     render_updateSurfaceInfo(hWnd);
 
@@ -1946,201 +1859,11 @@ void render_gdiResizeSurface(HWND hWnd)
     render_gdiCreateCaptureBitmap(hWnd);
 }
 
-void render_wglClientVertex(LPSHAREDWGLDATA lpsd, FLOAT x, FLOAT y)
-{
-    glVertex2f(
-      -1.0f + (2.0f * x / (FLOAT)lpsd->bi.biWidth),
-      1.0f - (2.0f * y / (FLOAT)lpsd->bi.biHeight));
-}
-
-void render_wglFillClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
-{
-    glColor4f(r, g, b, a);
-    glBegin(GL_QUADS);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->top);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->top);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->bottom);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->bottom);
-    glEnd();
-}
-
-void render_wglStrokeClientRect(LPSHAREDWGLDATA lpsd, const RECT* lprc, FLOAT r, FLOAT g, FLOAT b, FLOAT a)
-{
-    glColor4f(r, g, b, a);
-    glBegin(GL_LINE_LOOP);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->top);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->top);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->right, (FLOAT)lprc->bottom);
-    render_wglClientVertex(lpsd, (FLOAT)lprc->left, (FLOAT)lprc->bottom);
-    glEnd();
-}
-
-void render_wglDrawWindowOutline(LPSHAREDWGLDATA lpsd)
-{
-    const LONG width = lpsd->bi.biWidth;
-    const LONG height = lpsd->bi.biHeight;
-    const RECT edges[] =
-    {
-      { 0, 0, width, 1 },
-      { 0, height - 2, width, height - 1 },
-      { 0, 1, 1, height - 2 },
-      { width - 1, 1, width, height - 2 },
-    };
-    UINT i;
-
-    if (width < 2 || height < 2)
-    {
-      return;
-    }
-
-    glDisable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    for (i = 0; i < ARRAYSIZE(edges); ++i)
-    {
-      render_wglFillClientRect(
-        lpsd,
-        &edges[i],
-        lpsd->cfOutlineColor[0],
-        lpsd->cfOutlineColor[1],
-        lpsd->cfOutlineColor[2],
-        lpsd->cfOutlineColor[3]);
-    }
-
-    glDisable(GL_BLEND);
-    glEnable(GL_TEXTURE_2D);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-}
-
-void render_wglDrawMiniMap(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    MINIMAPLAYOUT layout;
-    RECT rcSource;
-    RECT rcClippedSource;
-    RECT rcWindow;
-    RECT rcClippedWindow;
-    RECT rcWindowClient;
-    RECT rcPanel;
-    RECT rcVisibleClient;
-    FLOAT opacity;
-    UINT i;
-
-    if (!render_minimapComputeLayout(hWnd, &layout))
-    {
-      return;
-    }
-
-    opacity = render_minimapGetOpacity(lpsd);
-    if (opacity <= MINIMAP_MIN_ALPHA)
-    {
-      return;
-    }
-
-    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
-
-    rcPanel = layout.rcMap;
-    InflateRect(&rcPanel, 4, 4);
-
-    glDisable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glLineWidth(1.0f);
-
-    render_wglFillClientRect(lpsd, &rcPanel, 0.02f, 0.025f, 0.03f, 0.72f * opacity);
-    render_wglFillClientRect(lpsd, &layout.rcMap, 0.11f, 0.12f, 0.13f, 0.78f * opacity);
-
-    for (i = 0; i < lpsd->di.numMonitors; ++i)
-    {
-      RECT rcMonitor;
-
-      render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-      render_wglFillClientRect(lpsd, &rcMonitor, 0.18f, 0.19f, 0.20f, 0.58f * opacity);
-    }
-
-    for (i = 0; i < lpsd->di.numMonitors; ++i)
-    {
-      RECT rcMonitor;
-
-      render_minimapMapSourceRectToClient(&layout, &lpsd->di.monitors[i].monitorInfoEx.rcMonitor, &rcMonitor);
-      render_wglStrokeClientRect(lpsd, &rcMonitor, 0.55f, 0.58f, 0.62f, 0.70f * opacity);
-    }
-
-    render_wglStrokeClientRect(lpsd, &layout.rcMap, 0.78f, 0.82f, 0.88f, 0.88f * opacity);
-
-    if (GetWindowRect(hWnd, &rcWindow) &&
-        IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
-    {
-      render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
-      render_wglFillClientRect(lpsd, &rcWindowClient, 0.38f, 0.40f, 0.43f, 0.10f * opacity);
-      glLineWidth(1.5f);
-      render_wglStrokeClientRect(lpsd, &rcWindowClient, 0.48f, 0.50f, 0.54f, 0.92f * opacity);
-      glLineWidth(1.0f);
-    }
-
-    if (!IsRectEmpty(&rcClippedSource))
-    {
-      render_minimapMapSourceRectToClient(&layout, &rcClippedSource, &rcVisibleClient);
-      render_wglFillClientRect(lpsd, &rcVisibleClient, 0.86f, 0.92f, 1.0f, 0.12f * opacity);
-      glLineWidth(2.0f);
-      render_wglStrokeClientRect(lpsd, &rcVisibleClient, 0.90f, 0.96f, 1.0f, 0.96f * opacity);
-      glLineWidth(1.0f);
-    }
-
-    glDisable(GL_BLEND);
-    glEnable(GL_TEXTURE_2D);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-}
-
-void render_wglRender(HWND hWnd)
-{
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
-    if (!lpsd->glScreenData || !lpsd->glScreenTexture)
-    {
-      return;
-    }
-
-    glViewport(0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight);
-    glDisable(GL_BLEND);
-    glDisable(GL_TEXTURE_2D);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, lpsd->glScreenTexture);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_PRIORITY, 1);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, lpsd->bi.biWidth, lpsd->bi.biHeight, GL_BGRA, GL_UNSIGNED_BYTE, lpsd->glScreenData);
-
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f);
-    glVertex2f(-1.0f, -1.0f);
-    glTexCoord2f(1.0f, 0.0f);
-    glVertex2f(1.0f, -1.0f);
-    glTexCoord2f(1.0f, 1.0f);
-    glVertex2f(1.0f, 1.0f);
-    glTexCoord2f(0.0f, 1.0f);
-    glVertex2f(-1.0f, 1.0f);
-    glEnd();
-
-    render_wglDrawMiniMap(hWnd);
-    render_wglDrawWindowOutline(lpsd);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-    //glFlush();
-    SwapBuffers(lpsd->hDC);
-    glFinish();
-}
-
 void render_gdiCaptureScreen(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    if (lpsd->hBitmapBg && lpsd->glScreenData)
+    if (lpsd->hBitmapBg && lpsd->frame.pixels)
     {
       const LONG cw = lpsd->bi.biWidth;
       const LONG ch = lpsd->bi.biHeight;
@@ -2192,9 +1915,9 @@ void render_gdiCaptureScreen(HWND hWnd)
 
 void render_dxgiCaptureScreen(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    if (lpsd->glScreenData)
+    if (lpsd->frame.pixels)
     {
       RECT rcSource;
       RECT rcClippedSource;
@@ -2202,7 +1925,7 @@ void render_dxgiCaptureScreen(HWND hWnd)
       BOOL fCapturedAny = FALSE;
 
       render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
-      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+      ZeroMemory(lpsd->frame.pixels, lpsd->bi.biSizeImage);
       if (IsRectEmpty(&rcClippedSource))
       {
         return;
@@ -2245,9 +1968,9 @@ void render_dxgiCaptureScreen(HWND hWnd)
 
 void render_wgcCaptureScreen(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
-    if (lpsd->glScreenData)
+    if (lpsd->frame.pixels)
     {
       RECT rcSource;
       RECT rcClippedSource;
@@ -2255,7 +1978,7 @@ void render_wgcCaptureScreen(HWND hWnd)
       BOOL fCapturedAny = FALSE;
 
       render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
-      ZeroMemory(lpsd->glScreenData, lpsd->bi.biSizeImage);
+      ZeroMemory(lpsd->frame.pixels, lpsd->bi.biSizeImage);
       if (IsRectEmpty(&rcClippedSource))
       {
         return;
@@ -2296,20 +2019,493 @@ void render_wgcCaptureScreen(HWND hWnd)
     }
 }
 
+BOOL renderApplyPresentationSettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MAGGRAPHICSBACKEND* backend = magGraphicsGetBackend(api);
+    void* candidateGraphicsState = NULL;
+    MAGUIRENDERER* candidateUiRenderer = NULL;
+    BOOL graphicsChanged;
+    BOOL uiChanged;
+    BOOL candidateGraphicsIsParked = FALSE;
+    BOOL usedCompatibilityBridge = FALSE;
+    BOOL candidatePresentationEnabled;
+    const MAGGRAPHICSBACKEND* suspendedGraphicsBackend = NULL;
+    void* suspendedGraphicsState = NULL;
+    BOOL suspendedPresentationEnabled = TRUE;
+    SIZE clientSize;
+    const MAGGRAPHICSBACKEND* oldGraphicsBackend = NULL;
+    void* oldGraphicsState = NULL;
+    GRAPHICSAPI bridgePreviousApi = GRAPHICS_API_OPENGL;
+    UIGRAPHICSAPI bridgePreviousUiApi = UI_GRAPHICS_API_NATIVE;
+    TEXTRENDERER bridgePreviousTextRenderer = TEXT_RENDERER_DIRECTWRITE;
+
+    if (reason && reasonCount)
+    {
+      reason[0] = TEXT('\0');
+    }
+
+    if (!lpsd || !backend || !backend->implemented ||
+        uiApi >= UI_GRAPHICS_API_COUNT || textRenderer >= TEXT_RENDERER_COUNT)
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("The selected graphics, UI, or text renderer is invalid."), reasonCount);
+      }
+      return FALSE;
+    }
+
+    if (lpsd->graphicsBackend && lpsd->graphicsApi != api &&
+        GRAPHICS_API_GDI != lpsd->graphicsApi && GRAPHICS_API_GDI != api &&
+        (GRAPHICS_API_VULKAN == lpsd->graphicsApi || GRAPHICS_API_VULKAN == api))
+    {
+      TCHAR bridgeReason[256];
+
+      bridgePreviousApi = lpsd->graphicsApi;
+      bridgePreviousUiApi = lpsd->uiGraphicsApi;
+      bridgePreviousTextRenderer = lpsd->textRenderer;
+      if (!renderApplyPresentationSettings(
+            hWnd,
+            GRAPHICS_API_GDI,
+            bridgePreviousUiApi,
+            bridgePreviousTextRenderer,
+            bridgeReason,
+            ARRAYSIZE(bridgeReason)))
+      {
+        if (reason && reasonCount)
+        {
+          lstrcpyn(
+            reason,
+            bridgeReason[0]
+              ? bridgeReason
+              : TEXT("The compatibility presenter could not prepare the Vulkan transition."),
+            reasonCount);
+        }
+        return FALSE;
+      }
+      usedCompatibilityBridge = TRUE;
+    }
+
+    graphicsChanged = lpsd->graphicsBackend != backend || !lpsd->graphicsState;
+    uiChanged = !lpsd->uiRenderer ||
+      lpsd->uiGraphicsApi != uiApi ||
+      lpsd->textRenderer != textRenderer;
+    if (!graphicsChanged && !uiChanged)
+    {
+      return TRUE;
+    }
+
+    if (graphicsChanged && !backend->IsAvailable(reason, reasonCount))
+    {
+      if (usedCompatibilityBridge)
+      {
+        TCHAR rollbackReason[256];
+        renderApplyPresentationSettings(
+          hWnd,
+          bridgePreviousApi,
+          bridgePreviousUiApi,
+          bridgePreviousTextRenderer,
+          rollbackReason,
+          ARRAYSIZE(rollbackReason));
+      }
+      return FALSE;
+    }
+
+    if (graphicsChanged && lpsd->graphicsBackend && lpsd->graphicsState)
+    {
+      if (!lpsd->graphicsBackend->SetPresentationEnabled(
+            hWnd,
+            lpsd->graphicsState,
+            FALSE))
+      {
+        if (reason && reasonCount)
+        {
+          lstrcpyn(reason, TEXT("The current graphics API could not release its presentation target for the switch."), reasonCount);
+        }
+        return FALSE;
+      }
+      suspendedGraphicsBackend = lpsd->graphicsBackend;
+      suspendedGraphicsState = lpsd->graphicsState;
+      suspendedPresentationEnabled = lpsd->fGraphicsPresentationEnabled;
+    }
+
+    clientSize.cx = max(1, lpsd->bi.biWidth);
+    clientSize.cy = max(1, lpsd->bi.biHeight);
+    candidatePresentationEnabled = !render_captureUsesCompositor(lpsd->captureApi);
+    if (graphicsChanged && GRAPHICS_API_VULKAN == api && lpsd->parkedVulkanState)
+    {
+      candidateGraphicsState = lpsd->parkedVulkanState;
+      if (backend->Resize(hWnd, candidateGraphicsState, clientSize))
+      {
+        candidateGraphicsIsParked = TRUE;
+      }
+      else
+      {
+        backend->Destroy(hWnd, candidateGraphicsState);
+        lpsd->parkedVulkanState = NULL;
+        candidateGraphicsState = NULL;
+      }
+    }
+    if (graphicsChanged && GRAPHICS_API_OPENGL == api && lpsd->parkedOpenGlState)
+    {
+      candidateGraphicsState = lpsd->parkedOpenGlState;
+      if (backend->Resize(hWnd, candidateGraphicsState, clientSize))
+      {
+        candidateGraphicsIsParked = TRUE;
+      }
+      else
+      {
+        backend->Destroy(hWnd, candidateGraphicsState);
+        lpsd->parkedOpenGlState = NULL;
+        candidateGraphicsState = NULL;
+      }
+    }
+
+    if (graphicsChanged && !candidateGraphicsState &&
+        (!backend->Create(hWnd, clientSize, &candidateGraphicsState) || !candidateGraphicsState))
+    {
+      if (reason && reasonCount && !reason[0])
+      {
+        lstrcpyn(reason, TEXT("The selected graphics API could not create its presentation device."), reasonCount);
+      }
+      if (suspendedGraphicsBackend && suspendedGraphicsState)
+      {
+        suspendedGraphicsBackend->SetPresentationEnabled(
+          hWnd,
+          suspendedGraphicsState,
+          suspendedPresentationEnabled);
+      }
+      if (usedCompatibilityBridge)
+      {
+        TCHAR rollbackReason[256];
+        renderApplyPresentationSettings(
+          hWnd,
+          bridgePreviousApi,
+          bridgePreviousUiApi,
+          bridgePreviousTextRenderer,
+          rollbackReason,
+          ARRAYSIZE(rollbackReason));
+      }
+      return FALSE;
+    }
+    if (graphicsChanged &&
+        !backend->SetPresentationEnabled(
+          hWnd,
+          candidateGraphicsState,
+          candidatePresentationEnabled))
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("The selected graphics API could not attach its presentation target."), reasonCount);
+      }
+      if (candidateGraphicsState && !candidateGraphicsIsParked)
+      {
+        backend->Destroy(hWnd, candidateGraphicsState);
+      }
+      if (suspendedGraphicsBackend && suspendedGraphicsState)
+      {
+        suspendedGraphicsBackend->SetPresentationEnabled(
+          hWnd,
+          suspendedGraphicsState,
+          suspendedPresentationEnabled);
+      }
+      if (usedCompatibilityBridge)
+      {
+        TCHAR rollbackReason[256];
+        renderApplyPresentationSettings(
+          hWnd,
+          bridgePreviousApi,
+          bridgePreviousUiApi,
+          bridgePreviousTextRenderer,
+          rollbackReason,
+          ARRAYSIZE(rollbackReason));
+      }
+      return FALSE;
+    }
+    if (uiChanged && !magUiRendererCreate(
+          uiApi,
+          textRenderer,
+          clientSize,
+          &candidateUiRenderer,
+          reason,
+          reasonCount))
+    {
+      if (candidateGraphicsState && !candidateGraphicsIsParked)
+      {
+        backend->Destroy(hWnd, candidateGraphicsState);
+      }
+      if (suspendedGraphicsBackend && suspendedGraphicsState)
+      {
+        suspendedGraphicsBackend->SetPresentationEnabled(
+          hWnd,
+          suspendedGraphicsState,
+          suspendedPresentationEnabled);
+      }
+      if (usedCompatibilityBridge)
+      {
+        TCHAR rollbackReason[256];
+        renderApplyPresentationSettings(
+          hWnd,
+          bridgePreviousApi,
+          bridgePreviousUiApi,
+          bridgePreviousTextRenderer,
+          rollbackReason,
+          ARRAYSIZE(rollbackReason));
+      }
+      return FALSE;
+    }
+
+    if (graphicsChanged)
+    {
+      AcquireSRWLockExclusive(&lpsd->graphicsLock);
+      oldGraphicsBackend = lpsd->graphicsBackend;
+      oldGraphicsState = lpsd->graphicsState;
+      if (candidateGraphicsIsParked)
+      {
+        if (GRAPHICS_API_OPENGL == api)
+        {
+          lpsd->parkedOpenGlState = NULL;
+        }
+        else if (GRAPHICS_API_VULKAN == api)
+        {
+          lpsd->parkedVulkanState = NULL;
+        }
+      }
+      if (oldGraphicsBackend && GRAPHICS_API_OPENGL == oldGraphicsBackend->api)
+      {
+        lpsd->parkedOpenGlState = oldGraphicsState;
+      }
+      else if (oldGraphicsBackend && GRAPHICS_API_VULKAN == oldGraphicsBackend->api)
+      {
+        lpsd->parkedVulkanState = oldGraphicsState;
+      }
+      lpsd->graphicsApi = api;
+      lpsd->graphicsBackend = backend;
+      lpsd->graphicsState = candidateGraphicsState;
+      lpsd->fGraphicsPresentationEnabled = candidatePresentationEnabled;
+      ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+
+      if (oldGraphicsBackend && oldGraphicsState &&
+          GRAPHICS_API_OPENGL != oldGraphicsBackend->api &&
+          GRAPHICS_API_VULKAN != oldGraphicsBackend->api)
+      {
+        oldGraphicsBackend->Destroy(hWnd, oldGraphicsState);
+        DwmFlush();
+      }
+    }
+    if (uiChanged)
+    {
+      magUiRendererDestroy(lpsd->uiRenderer);
+      lpsd->uiRenderer = candidateUiRenderer;
+      lpsd->uiGraphicsApi = uiApi;
+      lpsd->textRenderer = textRenderer;
+    }
+    lpsd->fPresentedContentValid = FALSE;
+    return TRUE;
+}
+
+BOOL renderApplySettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  CAPTUREAPI captureApi,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    CAPTUREAPI oldCaptureApi;
+    GRAPHICSAPI oldGraphicsApi;
+    UIGRAPHICSAPI oldUiApi;
+    TEXTRENDERER oldTextRenderer;
+    BOOL detachCompositor;
+
+    if (!lpsd || captureApi >= CAPTURE_API_COUNT)
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("The selected capture API is invalid."), reasonCount);
+      }
+      return FALSE;
+    }
+
+    oldCaptureApi = lpsd->captureApi;
+    oldGraphicsApi = lpsd->graphicsApi;
+    oldUiApi = lpsd->uiGraphicsApi;
+    oldTextRenderer = lpsd->textRenderer;
+    detachCompositor = (lpsd->graphicsBackend != magGraphicsGetBackend(api) ||
+                        !lpsd->graphicsState) &&
+      (render_captureUsesCompositor(oldCaptureApi) ||
+       render_captureUsesCompositor(captureApi));
+    if (detachCompositor)
+    {
+      if (!render_transitionCaptureApi(hWnd, CAPTURE_API_GDI_BITBLT))
+      {
+        if (reason && reasonCount)
+        {
+          lstrcpyn(reason, TEXT("The current compositor target could not be released."), reasonCount);
+        }
+        return FALSE;
+      }
+    }
+
+    lpsd->captureApi = captureApi;
+    if (!renderApplyPresentationSettings(
+          hWnd,
+          api,
+          uiApi,
+          textRenderer,
+          reason,
+          reasonCount))
+    {
+      lpsd->captureApi = oldCaptureApi;
+      render_transitionCaptureApi(hWnd, oldCaptureApi);
+      return FALSE;
+    }
+
+    if (!render_transitionCaptureApi(hWnd, captureApi))
+    {
+      TCHAR rollbackReason[256];
+
+      lpsd->captureApi = oldCaptureApi;
+      renderApplyPresentationSettings(
+        hWnd,
+        oldGraphicsApi,
+        oldUiApi,
+        oldTextRenderer,
+        rollbackReason,
+        ARRAYSIZE(rollbackReason));
+      render_transitionCaptureApi(hWnd, oldCaptureApi);
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("The selected capture API could not acquire presentation ownership."), reasonCount);
+      }
+      return FALSE;
+    }
+    return TRUE;
+}
+
+BOOL renderSetGraphicsApi(HWND hWnd, GRAPHICSAPI api, LPTSTR reason, UINT reasonCount)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    return lpsd && renderApplySettings(
+      hWnd,
+      api,
+      lpsd->captureApi,
+      lpsd->uiGraphicsApi,
+      lpsd->textRenderer,
+      reason,
+      reasonCount);
+}
+
+BOOL renderSetUiRendering(
+  HWND hWnd,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    return lpsd && renderApplySettings(
+      hWnd,
+      lpsd->graphicsApi,
+      lpsd->captureApi,
+      uiApi,
+      textRenderer,
+      reason,
+      reasonCount);
+}
+
 void renderInit(HWND hWnd)
 {
-    render_wglInit(hWnd);
-    //render_wglInitPBuffer(hWnd);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    TCHAR reason[256];
+
+    InitializeSRWLock(&lpsd->graphicsLock);
+    render_gdiCreateResources(hWnd);
+    lpsd->activeCaptureApi = CAPTURE_API_COUNT;
+    lpsd->fScale = 1.0f;
+    lpsd->fTexScaler = 1.0f;
+
+    if (!renderSetGraphicsApi(hWnd, lpsd->graphicsApi, reason, ARRAYSIZE(reason)))
+    {
+      renderSetGraphicsApi(hWnd, GRAPHICS_API_GDI, reason, ARRAYSIZE(reason));
+    }
+    if (!renderSetUiRendering(
+          hWnd,
+          lpsd->uiGraphicsApi,
+          lpsd->textRenderer,
+          reason,
+          ARRAYSIZE(reason)))
+    {
+      renderSetUiRendering(
+        hWnd,
+        UI_GRAPHICS_API_NATIVE,
+        TEXT_RENDERER_GDI,
+        reason,
+        ARRAYSIZE(reason));
+    }
 }
 
 void renderCleanup(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MAGGRAPHICSBACKEND* graphicsBackend;
+    void* graphicsState;
+    void* parkedOpenGlState;
+    void* parkedVulkanState;
+    void* openGlState;
+    void* vulkanState;
 
     render_dwmPrivateDeleteResources(hWnd);
     render_dwmThumbnailDeleteResources(hWnd);
     render_wgcDeleteResources(hWnd);
     render_dxgiDeleteResources(hWnd);
+
+    magUiRendererDestroy(lpsd->uiRenderer);
+    lpsd->uiRenderer = NULL;
+
+    AcquireSRWLockExclusive(&lpsd->graphicsLock);
+    graphicsBackend = lpsd->graphicsBackend;
+    graphicsState = lpsd->graphicsState;
+    parkedOpenGlState = lpsd->parkedOpenGlState;
+    parkedVulkanState = lpsd->parkedVulkanState;
+    lpsd->graphicsState = NULL;
+    lpsd->graphicsBackend = NULL;
+    lpsd->parkedOpenGlState = NULL;
+    lpsd->parkedVulkanState = NULL;
+    ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+
+    openGlState = graphicsBackend && GRAPHICS_API_OPENGL == graphicsBackend->api
+      ? graphicsState
+      : parkedOpenGlState;
+    vulkanState = graphicsBackend && GRAPHICS_API_VULKAN == graphicsBackend->api
+      ? graphicsState
+      : parkedVulkanState;
+    if (graphicsBackend && graphicsState &&
+        GRAPHICS_API_OPENGL != graphicsBackend->api &&
+        GRAPHICS_API_VULKAN != graphicsBackend->api)
+    {
+      graphicsBackend->Destroy(hWnd, graphicsState);
+    }
+    if (vulkanState)
+    {
+      g_magGraphicsVulkanBackend.Destroy(hWnd, vulkanState);
+    }
+    if (openGlState)
+    {
+      g_magGraphicsOpenGLBackend.Destroy(hWnd, openGlState);
+    }
+
+    render_gdiDeleteResources(hWnd);
 
     if (lpsd->fWinRtInitialized)
     {
@@ -2318,15 +2514,158 @@ void renderCleanup(HWND hWnd)
     }
 }
 
-void renderResizeCapture(HWND hWnd)
+BOOL renderResizeCapture(HWND hWnd)
 {
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcClient;
+    SIZE clientSize;
+    BOOL graphicsResized = TRUE;
+    BOOL uiResized = TRUE;
+
+    if (!lpsd || !GetClientRect(hWnd, &rcClient))
+    {
+      return FALSE;
+    }
+
+    if (RECTWIDTH(rcClient) < 1 || RECTHEIGHT(rcClient) < 1)
+    {
+      lpsd->fPresentedContentValid = FALSE;
+      return TRUE;
+    }
+
     render_gdiResizeSurface(hWnd);
-    render_wglResizeSurface(hWnd);
+    if (!lpsd->frame.pixels)
+    {
+      lpsd->fPresentedContentValid = FALSE;
+      return FALSE;
+    }
+    clientSize.cx = max(1, lpsd->bi.biWidth);
+    clientSize.cy = max(1, lpsd->bi.biHeight);
+
+    AcquireSRWLockExclusive(&lpsd->graphicsLock);
+    if (lpsd->graphicsBackend && lpsd->graphicsState)
+    {
+      graphicsResized = lpsd->graphicsBackend->Resize(hWnd, lpsd->graphicsState, clientSize);
+    }
+    ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+
+    if (!graphicsResized)
+    {
+      graphicsResized = render_recreateGraphicsBackend(hWnd);
+    }
+    if (lpsd->uiRenderer)
+    {
+      uiResized = magUiRendererResize(lpsd->uiRenderer, clientSize);
+      if (!uiResized)
+      {
+        MAGUIRENDERER* replacement = NULL;
+        TCHAR reason[256];
+
+        if (magUiRendererCreate(
+              lpsd->uiGraphicsApi,
+              lpsd->textRenderer,
+              clientSize,
+              &replacement,
+              reason,
+              ARRAYSIZE(reason)))
+        {
+          magUiRendererDestroy(lpsd->uiRenderer);
+          lpsd->uiRenderer = replacement;
+          uiResized = TRUE;
+        }
+      }
+    }
+    lpsd->fPresentedContentValid = FALSE;
+    return graphicsResized && uiResized;
+}
+
+static BOOL render_contentSizeMatches(const LPMAGSTATE lpsd, SIZE size)
+{
+    return lpsd &&
+      lpsd->fPresentedContentValid &&
+      lpsd->presentedContentSize.cx == size.cx &&
+      lpsd->presentedContentSize.cy == size.cy;
+}
+
+BOOL renderPrepareWindowResize(HWND hWnd, SIZE proposedClientSize)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcClient;
+    SIZE currentClientSize;
+    BOOL fPresented = TRUE;
+
+    if (!lpsd || proposedClientSize.cx < 1 || proposedClientSize.cy < 1 ||
+        !GetClientRect(hWnd, &rcClient))
+    {
+      return FALSE;
+    }
+
+    currentClientSize.cx = RECTWIDTH(rcClient);
+    currentClientSize.cy = RECTHEIGHT(rcClient);
+    if (currentClientSize.cx < 1 || currentClientSize.cy < 1 ||
+        (currentClientSize.cx == proposedClientSize.cx &&
+         currentClientSize.cy == proposedClientSize.cy) ||
+        lpsd->fInResizePresent)
+    {
+      return TRUE;
+    }
+
+    if (!render_contentSizeMatches(lpsd, currentClientSize))
+    {
+      lpsd->fInResizePresent = TRUE;
+      fPresented = renderSubmit(hWnd);
+      lpsd->fInResizePresent = FALSE;
+    }
+
+    if (fPresented && SUCCEEDED(DwmFlush()) &&
+        render_contentSizeMatches(lpsd, currentClientSize))
+    {
+      ++lpsd->resizePrecommitCount;
+      return TRUE;
+    }
+
+    lpsd->fResizeContractViolation = TRUE;
+    return FALSE;
+}
+
+BOOL renderPresentCommittedGeometry(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcClient;
+    SIZE clientSize;
+    BOOL fPresented;
+
+    if (!lpsd || !GetClientRect(hWnd, &rcClient))
+    {
+      return FALSE;
+    }
+
+    clientSize.cx = RECTWIDTH(rcClient);
+    clientSize.cy = RECTHEIGHT(rcClient);
+    if (clientSize.cx < 1 || clientSize.cy < 1 ||
+        render_contentSizeMatches(lpsd, clientSize) ||
+        lpsd->fInResizePresent)
+    {
+      return TRUE;
+    }
+
+    lpsd->fInResizePresent = TRUE;
+    fPresented = renderSubmit(hWnd);
+    lpsd->fInResizePresent = FALSE;
+    if (fPresented && SUCCEEDED(DwmFlush()) &&
+        render_contentSizeMatches(lpsd, clientSize))
+    {
+      ++lpsd->resizeCommitCount;
+      return TRUE;
+    }
+
+    lpsd->fResizeContractViolation = TRUE;
+    return FALSE;
 }
 
 void renderSetMessageDriven(HWND hWnd, BOOL fMessageDriven)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (lpsd)
     {
@@ -2336,7 +2675,7 @@ void renderSetMessageDriven(HWND hWnd, BOOL fMessageDriven)
 
 void renderRender(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 
     if (!lpsd)
     {
@@ -2349,50 +2688,591 @@ void renderRender(HWND hWnd)
     }
 }
 
-void renderSubmit(HWND hWnd)
+BOOL render_stampPresentedContent(HWND hWnd)
 {
-    LPSHAREDWGLDATA lpsd = (LPSHAREDWGLDATA)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcClient;
+
+    if (!lpsd || !GetClientRect(hWnd, &rcClient) ||
+        RECTWIDTH(rcClient) < 1 || RECTHEIGHT(rcClient) < 1)
+    {
+      return FALSE;
+    }
+
+    lpsd->presentedContentSize.cx = RECTWIDTH(rcClient);
+    lpsd->presentedContentSize.cy = RECTHEIGHT(rcClient);
+    lpsd->fPresentedContentValid = TRUE;
+    return TRUE;
+}
+
+BOOL renderSubmit(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    BOOL fPresented;
 
     if (!lpsd)
     {
-      return;
+      return FALSE;
     }
 
+    (void)render_transitionCaptureApi(hWnd, lpsd->captureApi);
     switch (lpsd->captureApi)
     {
     case CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE:
-      render_dxgiDeleteResources(hWnd);
-      render_dwmThumbnailDeleteResources(hWnd);
-      render_dwmPrivateDeleteResources(hWnd);
       render_wgcCaptureScreen(hWnd);
       break;
     case CAPTURE_API_DXGI_DESKTOP_DUPLICATION:
-      render_wgcDeleteResources(hWnd);
-      render_dwmThumbnailDeleteResources(hWnd);
-      render_dwmPrivateDeleteResources(hWnd);
       render_dxgiCaptureScreen(hWnd);
       break;
     case CAPTURE_API_DWM_THUMBNAIL:
-      render_wgcDeleteResources(hWnd);
-      render_dxgiDeleteResources(hWnd);
-      render_dwmPrivateDeleteResources(hWnd);
-      render_dwmThumbnailCaptureScreen(hWnd);
-      return;
+      fPresented = render_dwmThumbnailCaptureScreen(hWnd);
+      break;
     case CAPTURE_API_DWM_PRIVATE_VISUAL:
-      render_wgcDeleteResources(hWnd);
-      render_dxgiDeleteResources(hWnd);
-      render_dwmThumbnailDeleteResources(hWnd);
-      render_dwmPrivateCaptureScreen(hWnd);
-      return;
+      fPresented = render_dwmPrivateCaptureScreen(hWnd);
+      break;
     case CAPTURE_API_GDI_BITBLT:
     default:
-      render_wgcDeleteResources(hWnd);
-      render_dxgiDeleteResources(hWnd);
-      render_dwmThumbnailDeleteResources(hWnd);
-      render_dwmPrivateDeleteResources(hWnd);
       render_gdiCaptureScreen(hWnd);
       break;
     }
 
-    render_wglRender(hWnd);
+    if (CAPTURE_API_DWM_THUMBNAIL != lpsd->captureApi &&
+        CAPTURE_API_DWM_PRIVATE_VISUAL != lpsd->captureApi)
+    {
+      fPresented = render_presentPixelFrame(hWnd);
+    }
+
+    if (fPresented)
+    {
+      render_stampPresentedContent(hWnd);
+    }
+    return fPresented;
+}
+
+HANDLE renderDuplicateFrameWaitHandle(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    HANDLE sourceHandle = NULL;
+    HANDLE duplicateHandle = NULL;
+
+    if (!lpsd)
+    {
+      return NULL;
+    }
+
+    AcquireSRWLockShared(&lpsd->graphicsLock);
+    if (lpsd->graphicsBackend && lpsd->graphicsState)
+    {
+      sourceHandle = lpsd->graphicsBackend->GetFrameWaitHandle(lpsd->graphicsState);
+      if (sourceHandle)
+      {
+        DuplicateHandle(
+          GetCurrentProcess(),
+          sourceHandle,
+          GetCurrentProcess(),
+          &duplicateHandle,
+          SYNCHRONIZE,
+          FALSE,
+          0);
+      }
+    }
+    ReleaseSRWLockShared(&lpsd->graphicsLock);
+    return duplicateHandle;
+}
+
+BOOL render_presentPixelFrame(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd)
+    {
+      return FALSE;
+    }
+
+    if (render_tryPresentPixelFrame(hWnd))
+    {
+      render_stampPresentedContent(hWnd);
+      return TRUE;
+    }
+
+    if (render_recreateGraphicsBackend(hWnd) && render_tryPresentPixelFrame(hWnd))
+    {
+      render_stampPresentedContent(hWnd);
+      return TRUE;
+    }
+
+    if (GRAPHICS_API_GDI != lpsd->graphicsApi)
+    {
+      TCHAR reason[256];
+
+      if (renderApplyPresentationSettings(
+            hWnd,
+            GRAPHICS_API_GDI,
+            lpsd->uiGraphicsApi,
+            lpsd->textRenderer,
+            reason,
+            ARRAYSIZE(reason)))
+      {
+        if (render_tryPresentPixelFrame(hWnd))
+        {
+          render_stampPresentedContent(hWnd);
+          return TRUE;
+        }
+      }
+    }
+    return FALSE;
+}
+
+BOOL render_recreateGraphicsBackend(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MAGGRAPHICSBACKEND* backend;
+    void* candidateState = NULL;
+    void* oldState;
+    SIZE clientSize;
+
+    if (!lpsd || !(backend = lpsd->graphicsBackend))
+    {
+      return FALSE;
+    }
+
+    clientSize.cx = max(1, lpsd->bi.biWidth);
+    clientSize.cy = max(1, lpsd->bi.biHeight);
+    if (!backend->Create(hWnd, clientSize, &candidateState) || !candidateState)
+    {
+      return FALSE;
+    }
+    if (!backend->SetPresentationEnabled(
+          hWnd,
+          candidateState,
+          lpsd->fGraphicsPresentationEnabled))
+    {
+      backend->Destroy(hWnd, candidateState);
+      return FALSE;
+    }
+
+    AcquireSRWLockExclusive(&lpsd->graphicsLock);
+    oldState = lpsd->graphicsState;
+    lpsd->graphicsState = candidateState;
+    ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+
+    if (oldState)
+    {
+      backend->Destroy(hWnd, oldState);
+    }
+    return TRUE;
+}
+
+BOOL render_tryPresentPixelFrame(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MAGUIDRAWLIST backendUi;
+
+    if (!lpsd)
+    {
+      return FALSE;
+    }
+
+    render_buildUiDrawList(hWnd, &lpsd->uiDrawList);
+    if (lpsd->graphicsBackend && lpsd->graphicsState)
+    {
+      const MAGPIXELBUFFER* presentationFrame = &lpsd->frame;
+      const MAGUIDRAWLIST* presentationUi = &lpsd->uiDrawList;
+      const BOOL useOpenGlGlyphAtlas =
+        GRAPHICS_API_OPENGL == lpsd->graphicsApi &&
+        TEXT_RENDERER_GPU_GLYPH_ATLAS == lpsd->textRenderer;
+
+      if (lpsd->uiRenderer)
+      {
+        BOOL composed;
+
+        if (useOpenGlGlyphAtlas)
+        {
+          UINT i;
+
+          composed = magUiRendererComposeWithoutText(
+            lpsd->uiRenderer,
+            &lpsd->frame,
+            &lpsd->uiDrawList,
+            &lpsd->presentationFrame);
+          magUiDrawListReset(&backendUi);
+          for (i = 0; i < lpsd->uiDrawList.count; ++i)
+          {
+            if (MAG_UI_DRAW_TEXT == lpsd->uiDrawList.commands[i].type &&
+                backendUi.count < ARRAYSIZE(backendUi.commands))
+            {
+              backendUi.commands[backendUi.count++] = lpsd->uiDrawList.commands[i];
+            }
+          }
+          backendUi.glyphAtlas = magUiRendererGetGlyphAtlas(lpsd->uiRenderer);
+          presentationUi = &backendUi;
+        }
+        else
+        {
+          composed = magUiRendererCompose(
+            lpsd->uiRenderer,
+            &lpsd->frame,
+            &lpsd->uiDrawList,
+            &lpsd->presentationFrame);
+          presentationUi = NULL;
+        }
+
+        if (!composed)
+        {
+          return FALSE;
+        }
+        presentationFrame = &lpsd->presentationFrame;
+      }
+      return lpsd->graphicsBackend->Render(
+        hWnd,
+        lpsd->graphicsState,
+        presentationFrame,
+        presentationUi);
+    }
+    return FALSE;
+}
+
+static void render_fillSmokeFrame(LPMAGSTATE lpsd)
+{
+    UINT y;
+
+    for (y = 0; y < lpsd->frame.height; ++y)
+    {
+      BYTE* row = lpsd->frame.pixels + (SIZE_T)y * lpsd->frame.stride;
+      UINT x;
+
+      for (x = 0; x < lpsd->frame.width; ++x)
+      {
+        row[x * 4U + 0] = (BYTE)((x * 255U) / max(1U, lpsd->frame.width - 1U));
+        row[x * 4U + 1] = (BYTE)((y * 255U) / max(1U, lpsd->frame.height - 1U));
+        row[x * 4U + 2] = (BYTE)(255U - row[x * 4U + 0]);
+        row[x * 4U + 3] = 255;
+      }
+    }
+}
+
+static BOOL render_testCpuCompositor(void)
+{
+    BYTE pixels[4U * 4U * 4U];
+    MAGPIXELBUFFER frame =
+    {
+      pixels,
+      4,
+      4,
+      4U * 4U,
+      MAG_ROW_ORDER_BOTTOM_UP,
+      MAG_ALPHA_MODE_IGNORE,
+    };
+    MAGPIXELBUFFER output;
+    MAGCPUCOMPOSITOR compositor = { 0 };
+    MAGUIDRAWLIST ui;
+    RECT rect = { 0, 0, 4, 4 };
+    MAGCOLORF white = { 1.0f, 1.0f, 1.0f, 1.0f };
+    MAGCOLORF halfRed = { 1.0f, 0.0f, 0.0f, 0.5f };
+    BOOL success = FALSE;
+    UINT x;
+
+    ZeroMemory(pixels, sizeof(pixels));
+    for (x = 0; x < 4; ++x)
+    {
+      pixels[x * 4U + 0] = 255;
+      pixels[(3U * frame.stride) + x * 4U + 2] = 255;
+    }
+    magUiDrawListReset(&ui);
+    if (!magGraphicsComposeFrame(&compositor, &frame, &ui, &output) ||
+        255 != output.pixels[2] ||
+        255 != output.pixels[(3U * output.stride) + 0])
+    {
+      goto cleanup;
+    }
+
+    magUiDrawListReset(&ui);
+    if (!magUiDrawListAppendStroke(&ui, &rect, white, 1.0f) ||
+        !magGraphicsComposeFrame(&compositor, &frame, &ui, &output) ||
+        255 != output.pixels[(0U * output.stride) + (2U * 4U) + 2] ||
+        255 != output.pixels[(3U * output.stride) + (2U * 4U) + 2] ||
+        255 != output.pixels[(2U * output.stride) + (0U * 4U) + 2] ||
+        255 != output.pixels[(2U * output.stride) + (3U * 4U) + 2] ||
+        255 == output.pixels[(1U * output.stride) + (1U * 4U) + 2])
+    {
+      goto cleanup;
+    }
+
+    SetRect(&rect, 1, 1, 3, 3);
+    magUiDrawListReset(&ui);
+    if (!magUiDrawListAppendFill(&ui, &rect, halfRed) ||
+        !magGraphicsComposeFrame(&compositor, &frame, &ui, &output) ||
+        128 != output.pixels[(1U * output.stride) + (1U * 4U) + 2])
+    {
+      goto cleanup;
+    }
+    success = TRUE;
+
+cleanup:
+    magGraphicsDestroyCpuCompositor(&compositor);
+    return success;
+}
+
+static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE desiredClientSize)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    RECT rcWindow;
+    RECT rcClient;
+    UINT attempt;
+    UINT precommitCount;
+    UINT commitCount;
+
+    if (!lpsd)
+    {
+      return FALSE;
+    }
+    precommitCount = lpsd->resizePrecommitCount;
+    commitCount = lpsd->resizeCommitCount;
+
+    for (attempt = 0; attempt < 3; ++attempt)
+    {
+      LONG targetWidth;
+      LONG targetHeight;
+
+      if (!GetWindowRect(hWnd, &rcWindow) || !GetClientRect(hWnd, &rcClient))
+      {
+        return FALSE;
+      }
+      if (RECTWIDTH(rcClient) == desiredClientSize.cx &&
+          RECTHEIGHT(rcClient) == desiredClientSize.cy)
+      {
+        break;
+      }
+
+      targetWidth = desiredClientSize.cx + RECTWIDTH(rcWindow) - RECTWIDTH(rcClient);
+      targetHeight = desiredClientSize.cy + RECTHEIGHT(rcWindow) - RECTHEIGHT(rcClient);
+      if (!SetWindowPos(
+            hWnd,
+            NULL,
+            0,
+            0,
+            targetWidth,
+            targetHeight,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+      {
+        return FALSE;
+      }
+    }
+
+    if (!GetClientRect(hWnd, &rcClient) ||
+        RECTWIDTH(rcClient) != desiredClientSize.cx ||
+        RECTHEIGHT(rcClient) != desiredClientSize.cy ||
+        lpsd->graphicsApi != expectedApi ||
+        lpsd->frame.width != (UINT)desiredClientSize.cx ||
+        lpsd->frame.height != (UINT)desiredClientSize.cy ||
+        lpsd->fResizeContractViolation ||
+        lpsd->resizePrecommitCount <= precommitCount ||
+        lpsd->resizeCommitCount <= commitCount)
+    {
+      return FALSE;
+    }
+
+    render_fillSmokeFrame(lpsd);
+    if (!render_tryPresentPixelFrame(hWnd))
+    {
+      return FALSE;
+    }
+    return render_stampPresentedContent(hWnd);
+}
+
+int renderRunGraphicsSmoke(HWND hWnd)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    const MAGGRAPHICSBACKEND* availableBackends[GRAPHICS_API_COUNT];
+    UINT availableBackendCount = 0;
+    RECT initialClientRect;
+    SIZE initialClientSize;
+    UINT backendIndex;
+
+    if (!lpsd || !lpsd->frame.pixels || !GetClientRect(hWnd, &initialClientRect) ||
+        !render_testCpuCompositor())
+    {
+      return 1;
+    }
+    initialClientSize.cx = RECTWIDTH(initialClientRect);
+    initialClientSize.cy = RECTHEIGHT(initialClientRect);
+
+    for (backendIndex = 0; backendIndex < magGraphicsGetBackendCount(); ++backendIndex)
+    {
+      const MAGGRAPHICSBACKEND* backend = magGraphicsGetBackendAt(backendIndex);
+      TCHAR reason[256];
+      UINT uiApi;
+
+      if (!backend->implemented || !backend->IsAvailable(reason, ARRAYSIZE(reason)))
+      {
+        continue;
+      }
+      availableBackends[availableBackendCount++] = backend;
+
+      for (uiApi = 0; uiApi < UI_GRAPHICS_API_COUNT; ++uiApi)
+      {
+        UINT textRenderer;
+
+        for (textRenderer = 0; textRenderer < TEXT_RENDERER_COUNT; ++textRenderer)
+        {
+          UINT frameIndex;
+
+          if (!renderApplyPresentationSettings(
+                hWnd,
+                backend->api,
+                (UIGRAPHICSAPI)uiApi,
+                (TEXTRENDERER)textRenderer,
+                reason,
+                ARRAYSIZE(reason)))
+          {
+            return 10 + (int)backend->api * 10 + (int)uiApi * 3 + (int)textRenderer;
+          }
+          render_fillSmokeFrame(lpsd);
+          render_minimapNotifyActivity(hWnd);
+
+          for (frameIndex = 0; frameIndex < 3; ++frameIndex)
+          {
+            if (!render_tryPresentPixelFrame(hWnd))
+            {
+              return 100 + (int)backend->api * 10 + (int)uiApi * 3 + (int)textRenderer;
+            }
+          }
+        }
+      }
+
+      {
+        const SIZE resizeSizes[] = { { 337, 251 }, { 509, 347 } };
+        UINT resizeIndex;
+
+        for (resizeIndex = 0; resizeIndex < ARRAYSIZE(resizeSizes); ++resizeIndex)
+        {
+          if (!render_smokeResizeWindow(hWnd, backend->api, resizeSizes[resizeIndex]))
+          {
+            return 160 + (int)backend->api;
+          }
+        }
+      }
+    }
+    for (backendIndex = 0; backendIndex < availableBackendCount; ++backendIndex)
+    {
+      UINT targetIndex;
+
+      for (targetIndex = 0; targetIndex < availableBackendCount; ++targetIndex)
+      {
+        TCHAR reason[256];
+
+        if (!renderApplyPresentationSettings(
+              hWnd,
+              availableBackends[backendIndex]->api,
+              UI_GRAPHICS_API_NATIVE,
+              TEXT_RENDERER_DIRECTWRITE,
+              reason,
+              ARRAYSIZE(reason)))
+        {
+          return 180 + (int)backendIndex * GRAPHICS_API_COUNT + (int)targetIndex;
+        }
+        if (!renderApplyPresentationSettings(
+              hWnd,
+              availableBackends[targetIndex]->api,
+              UI_GRAPHICS_API_NATIVE,
+              TEXT_RENDERER_DIRECTWRITE,
+              reason,
+              ARRAYSIZE(reason)))
+        {
+          return 400 + (int)backendIndex * GRAPHICS_API_COUNT + (int)targetIndex;
+        }
+        render_fillSmokeFrame(lpsd);
+        if (!render_tryPresentPixelFrame(hWnd))
+        {
+          return 220 + (int)backendIndex * GRAPHICS_API_COUNT + (int)targetIndex;
+        }
+      }
+    }
+
+    for (backendIndex = 0; backendIndex < availableBackendCount; ++backendIndex)
+    {
+      TCHAR reason[256];
+      UINT captureApi;
+
+      if (!renderApplySettings(
+            hWnd,
+            availableBackends[backendIndex]->api,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_DIRECT2D,
+            TEXT_RENDERER_DIRECTWRITE,
+            reason,
+            ARRAYSIZE(reason)))
+      {
+        return 500 + (int)backendIndex;
+      }
+
+      for (captureApi = 0; captureApi < CAPTURE_API_COUNT; ++captureApi)
+      {
+        UINT frameIndex;
+
+        if (!renderApplySettings(
+              hWnd,
+              availableBackends[backendIndex]->api,
+              (CAPTUREAPI)captureApi,
+              UI_GRAPHICS_API_DIRECT2D,
+              TEXT_RENDERER_DIRECTWRITE,
+              reason,
+              ARRAYSIZE(reason)))
+        {
+          return 510 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi;
+        }
+        render_fillSmokeFrame(lpsd);
+        render_minimapNotifyActivity(hWnd);
+        for (frameIndex = 0; frameIndex < 3; ++frameIndex)
+        {
+          if (!renderSubmit(hWnd))
+          {
+            return 520 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi;
+          }
+        }
+      }
+    }
+    {
+      TCHAR reason[256];
+
+      if (!renderApplySettings(
+            hWnd,
+            GRAPHICS_API_OPENGL,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_NATIVE,
+            TEXT_RENDERER_DIRECTWRITE,
+            reason,
+            ARRAYSIZE(reason)) ||
+          !render_smokeResizeWindow(hWnd, GRAPHICS_API_OPENGL, initialClientSize))
+      {
+        return 300;
+      }
+    }
+
+    return 0;
+}
+
+BOOL render_transitionCaptureApi(HWND hWnd, CAPTUREAPI captureApi)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd || lpsd->activeCaptureApi == captureApi)
+    {
+      return NULL != lpsd;
+    }
+
+    render_dwmPrivateDeleteResources(hWnd);
+    render_dwmThumbnailDeleteResources(hWnd);
+    render_wgcDeleteResources(hWnd);
+    render_dxgiDeleteResources(hWnd);
+    if (lpsd->graphicsBackend && lpsd->graphicsState &&
+        !render_setGraphicsPresentationEnabled(
+          hWnd,
+          !render_captureUsesCompositor(captureApi)))
+    {
+      lpsd->activeCaptureApi = CAPTURE_API_COUNT;
+      return FALSE;
+    }
+    lpsd->activeCaptureApi = captureApi;
+    return TRUE;
 }

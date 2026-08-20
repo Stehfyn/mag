@@ -168,10 +168,21 @@
     <ClCompile Include="d3dkmtx.c" />
     <ClCompile Include="dwmprivate.cpp" />
     <ClCompile Include="dwmapix.c" />
+    <ClCompile Include="graphics.c" />
+    <ClCompile Include="graphics_dcomp.cpp" />
+    <ClCompile Include="graphics_d3d11.c" />
+    <ClCompile Include="graphics_d3d12.c" />
+    <ClCompile Include="graphics_d3d9.c" />
+    <ClCompile Include="graphics_gdi.c" />
+    <ClCompile Include="graphics_opengl.c" />
+    <ClCompile Include="graphics_vulkan.c" />
     <ClCompile Include="help.c" />
     <ClCompile Include="mag.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="render.c" />
+    <ClCompile Include="ui_renderer.c">
+      <CompileAs>CompileAsCpp</CompileAs>
+    </ClCompile>
     <ClCompile Include="wingdix.c" />
     <ClCompile Include="winuserx.c" />
   </ItemGroup>
@@ -179,10 +190,13 @@
     <ClInclude Include="d3dkmtx.h" />
     <ClInclude Include="dwmprivate.h" />
     <ClInclude Include="dwmapix.h" />
+    <ClInclude Include="graphics.h" />
+    <ClInclude Include="graphics_dcomp.h" />
     <ClInclude Include="help.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="mag.h" />
     <ClInclude Include="render.h" />
+    <ClInclude Include="ui_renderer.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="wingdix.h" />
@@ -202,6 +216,9 @@
     <None Include="help\mag.hhp" />
   </ItemGroup>
   <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <PreBuildEvent>
       <Message>Generating source code help pages and compiling HTML Help...</Message>
       <Command>powershell -ExecutionPolicy Bypass -File "$(ProjectDir)help\gen_source.ps1" -ProjectDir "$(ProjectDir)"
