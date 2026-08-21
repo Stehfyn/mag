@@ -1,11 +1,17 @@
+#define COBJMACROS
+
 #include "mag.h"
 #include "render.h"
+#include "graphics_dcomp.h"
+
+#include <d3d11.h>
+#include <dxgi1_2.h>
 
 #define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM
 #define MAIN_TEST_DESKTOP_PREFIX TEXT("mag-test-")
-#define MAIN_TEST_DESKTOP_CLASS L"MagSmokeDesktopWindow"
+#define MAIN_TEST_DESKTOP_CLASS L"Progman"
 #define MAIN_TEST_PEER_CLASS L"MagSmokePeerWindow"
-#define MAIN_TEST_TASKBAR_CLASS L"MagSmokeTaskbarWindow"
+#define MAIN_TEST_TASKBAR_CLASS L"Shell_TrayWnd"
 
 typedef struct MAINTESTWINDOWS
 {
@@ -16,6 +22,10 @@ typedef struct MAINTESTWINDOWS
   HWND      desktop;
   HWND      peer;
   HWND      taskbar;
+  ID3D11Device*        peerDevice;
+  ID3D11DeviceContext* peerContext;
+  IDXGISwapChain1*     peerSwapChain;
+  MAGDCOMPPRESENTER*   peerPresenter;
 } MAINTESTWINDOWS, *LPMAINTESTWINDOWS;
 
 typedef struct MAINVBLANKTHREAD
@@ -34,6 +44,133 @@ LRESULT CALLBACK main_TestWindowProc(HWND hWnd, UINT message, WPARAM wParam, LPA
 BOOL main_CreateIsolatedTestWindows(HINSTANCE hInstance, LPMAINTESTWINDOWS windows);
 void main_DestroyIsolatedTestWindows(LPMAINTESTWINDOWS windows);
 BOOL main_InitializeAndRevealWindow(HWND hWnd, int nCmdShow, BOOL synchronize);
+
+static void main_ReleaseUnknown(IUnknown** object)
+{
+    if (object && *object)
+    {
+      IUnknown_Release(*object);
+      *object = NULL;
+    }
+}
+
+static BOOL main_CreateCompositionTestPeer(
+  HWND hWnd,
+  UINT width,
+  UINT height,
+  LPMAINTESTWINDOWS windows)
+{
+    IDXGIDevice* dxgiDevice = NULL;
+    IDXGIAdapter* adapter = NULL;
+    IDXGIFactory2* factory = NULL;
+    ID3D11Texture2D* backBuffer = NULL;
+    ID3D11RenderTargetView* renderTarget = NULL;
+    D3D_FEATURE_LEVEL featureLevel;
+    DXGI_SWAP_CHAIN_DESC1 swapChainDesc;
+    const FLOAT clearColor[4] = { 0.75f, 0.18f, 0.14f, 1.0f };
+    HRESULT hr;
+
+    if (!hWnd || !width || !height || !windows)
+    {
+      return FALSE;
+    }
+    hr = D3D11CreateDevice(
+      NULL,
+      D3D_DRIVER_TYPE_HARDWARE,
+      NULL,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+      NULL,
+      0,
+      D3D11_SDK_VERSION,
+      &windows->peerDevice,
+      &featureLevel,
+      &windows->peerContext);
+    if (FAILED(hr))
+    {
+      hr = D3D11CreateDevice(
+        NULL,
+        D3D_DRIVER_TYPE_WARP,
+        NULL,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        NULL,
+        0,
+        D3D11_SDK_VERSION,
+        &windows->peerDevice,
+        &featureLevel,
+        &windows->peerContext);
+    }
+    if (SUCCEEDED(hr))
+    {
+      hr = ID3D11Device_QueryInterface(
+        windows->peerDevice,
+        &IID_IDXGIDevice,
+        (void**)&dxgiDevice);
+    }
+    if (SUCCEEDED(hr))
+    {
+      hr = IDXGIDevice_GetAdapter(dxgiDevice, &adapter);
+    }
+    if (SUCCEEDED(hr))
+    {
+      hr = IDXGIAdapter_GetParent(
+        adapter, &IID_IDXGIFactory2, (void**)&factory);
+    }
+    ZeroMemory(&swapChainDesc, sizeof(swapChainDesc));
+    swapChainDesc.Width = width;
+    swapChainDesc.Height = height;
+    swapChainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.BufferCount = 2;
+    swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    if (SUCCEEDED(hr))
+    {
+      hr = IDXGIFactory2_CreateSwapChainForComposition(
+        factory,
+        (IUnknown*)windows->peerDevice,
+        &swapChainDesc,
+        NULL,
+        &windows->peerSwapChain);
+    }
+    if (SUCCEEDED(hr))
+    {
+      hr = IDXGISwapChain1_GetBuffer(
+        windows->peerSwapChain,
+        0,
+        &IID_ID3D11Texture2D,
+        (void**)&backBuffer);
+    }
+    if (SUCCEEDED(hr))
+    {
+      hr = ID3D11Device_CreateRenderTargetView(
+        windows->peerDevice,
+        (ID3D11Resource*)backBuffer,
+        NULL,
+        &renderTarget);
+    }
+    if (SUCCEEDED(hr))
+    {
+      ID3D11DeviceContext_ClearRenderTargetView(
+        windows->peerContext, renderTarget, clearColor);
+      hr = IDXGISwapChain1_Present(windows->peerSwapChain, 0, 0);
+    }
+    if (SUCCEEDED(hr) &&
+        !magDCompPresenterCreate(
+          hWnd,
+          (IUnknown*)windows->peerSwapChain,
+          &windows->peerPresenter))
+    {
+      hr = E_FAIL;
+    }
+    main_ReleaseUnknown((IUnknown**)&renderTarget);
+    main_ReleaseUnknown((IUnknown**)&backBuffer);
+    main_ReleaseUnknown((IUnknown**)&factory);
+    main_ReleaseUnknown((IUnknown**)&adapter);
+    main_ReleaseUnknown((IUnknown**)&dxgiDevice);
+    return SUCCEEDED(hr);
+}
 
 LRESULT CALLBACK main_TestWindowProc(
   HWND hWnd,
@@ -91,6 +228,14 @@ void main_DestroyIsolatedTestWindows(LPMAINTESTWINDOWS windows)
     {
       return;
     }
+    if (windows->peerPresenter)
+    {
+      magDCompPresenterDestroy(windows->peerPresenter);
+      windows->peerPresenter = NULL;
+    }
+    main_ReleaseUnknown((IUnknown**)&windows->peerSwapChain);
+    main_ReleaseUnknown((IUnknown**)&windows->peerContext);
+    main_ReleaseUnknown((IUnknown**)&windows->peerDevice);
     if (windows->taskbar)
     {
       DestroyWindow(windows->taskbar);
@@ -127,6 +272,8 @@ BOOL main_CreateIsolatedTestWindows(
     const int width = max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
     const int height = max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const int taskbarHeight = min(48, height);
+    const int peerWidth = min(480, width);
+    const int peerHeight = min(320, height);
 
     if (!windows)
     {
@@ -134,11 +281,9 @@ BOOL main_CreateIsolatedTestWindows(
     }
     ZeroMemory(windows, sizeof(*windows));
     windows->instance = hInstance;
-    /* Explorer's special shell surfaces cannot be manufactured on a private
-       WinStation desktop: the private DWM thumbnail ordinal rejects synthetic
-       Progman/Shell_TrayWnd sources.  These semantic fixtures still prove the
-       multi-window visual includes independent top-level DWM surfaces without
-       ever touching the user's input desktop. */
+    /* Use the actual shell class semantics on a private WinStation desktop so
+       the test exercises dedicated desktop/taskbar visuals without ever
+       touching the user's input desktop. */
     windows->desktopClass = main_RegisterTestWindowClass(
       hInstance, MAIN_TEST_DESKTOP_CLASS);
     windows->peerClass = main_RegisterTestWindowClass(
@@ -166,14 +311,14 @@ BOOL main_CreateIsolatedTestWindows(
       hInstance,
       (LPVOID)(ULONG_PTR)RGB(22, 48, 80));
     windows->peer = CreateWindowExW(
-      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
       MAKEINTATOM(windows->peerClass),
       L"MAG smoke peer",
       WS_POPUP,
       left + min(160, width / 8),
       top + min(120, height / 8),
-      min(480, width),
-      min(320, height),
+      peerWidth,
+      peerHeight,
       NULL,
       NULL,
       hInstance,
@@ -192,6 +337,18 @@ BOOL main_CreateIsolatedTestWindows(
       hInstance,
       (LPVOID)(ULONG_PTR)RGB(32, 120, 64));
     if (!windows->desktop || !windows->peer || !windows->taskbar)
+    {
+      main_DestroyIsolatedTestWindows(windows);
+      return FALSE;
+    }
+    /* Chromium/Electron content is composed below its top-level HWND and is
+       absent from the old shared-desktop visual.  A no-redirection DComp flip
+       swap chain gives the isolated smoke the same capture requirement. */
+    if (!main_CreateCompositionTestPeer(
+          windows->peer,
+          (UINT)peerWidth,
+          (UINT)peerHeight,
+          windows))
     {
       main_DestroyIsolatedTestWindows(windows);
       return FALSE;

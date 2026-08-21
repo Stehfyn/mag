@@ -21,9 +21,9 @@
 #define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164
 #define DWM_PRIVATE_MULTIWINDOW_BUILD 20000
 #define DWM_PRIVATE_THUMBNAIL_TYPE_ICONIC 2
-#define DWM_PRIVATE_MAX_TOP_WINDOWS 64
-#define DWM_PRIVATE_MAX_SHELL_VISUALS 32
-#define DWM_PRIVATE_MAX_EXCLUSIONS (DWM_PRIVATE_MAX_SHELL_VISUALS + 1)
+#define DWM_PRIVATE_MAX_TOP_WINDOWS 512
+#define DWM_PRIVATE_MAX_SOURCE_VISUALS DWM_PRIVATE_MAX_TOP_WINDOWS
+#define DWM_PRIVATE_MAX_EXCLUSIONS (DWM_PRIVATE_MAX_SOURCE_VISUALS + 1)
 
 #ifndef DWM_TNP_ENABLE3D
 #define DWM_TNP_ENABLE3D 0x04000000
@@ -69,11 +69,12 @@ typedef struct MAG_RTL_OSVERSIONINFOW
 
 typedef LONG (WINAPI* PFN_RTLGETVERSION)(MAG_RTL_OSVERSIONINFOW*);
 
-typedef enum DWMPRIVATESHELLLAYER
+typedef enum DWMPRIVATESOURCELAYER
 {
   DWM_PRIVATE_SHELL_DESKTOP = 0,
+  DWM_PRIVATE_APPLICATION,
   DWM_PRIVATE_SHELL_TASKBAR
-} DWMPRIVATESHELLLAYER;
+} DWMPRIVATESOURCELAYER;
 
 typedef enum DWMPRIVATETOPWINDOWKIND
 {
@@ -89,26 +90,30 @@ typedef struct DWMPRIVATETOPWINDOW
   RECT                    rect;
   DWMPRIVATETOPWINDOWKIND kind;
   BOOL                    visible;
+  BOOL                    iconic;
+  BOOL                    cloaked;
   BOOL                    hasDesktopView;
 } DWMPRIVATETOPWINDOW;
 
-typedef struct DWMPRIVATESHELLCANDIDATE
+typedef struct DWMPRIVATESOURCECANDIDATE
 {
   HWND                    hwnd;
   RECT                    rect;
-  DWMPRIVATESHELLLAYER    layer;
-} DWMPRIVATESHELLCANDIDATE;
+  DWMPRIVATESOURCELAYER   layer;
+} DWMPRIVATESOURCECANDIDATE;
 
-typedef struct DWMPRIVATESHELLVISUAL
+typedef struct DWMPRIVATESOURCEVISUAL
 {
   HWND                          hwnd;
   RECT                          rect;
   SIZE                          sourceSize;
-  DWMPRIVATESHELLLAYER          layer;
+  FLOAT                         offsetX;
+  FLOAT                         offsetY;
+  DWMPRIVATESOURCELAYER         layer;
   DWM_THUMBNAIL_PROPERTIES      properties;
   MAG_IDCompositionVisual*      visual;
   HTHUMBNAIL                    thumbnail;
-} DWMPRIVATESHELLVISUAL;
+} DWMPRIVATESOURCEVISUAL;
 
 typedef struct MAG_D2D_MATRIX_3X2_F
 {
@@ -171,14 +176,15 @@ struct DWMPRIVATECAPTURESTATE
   RECT                                      viewDestination;
   DWMPRIVATETOPWINDOW                       topWindows[DWM_PRIVATE_MAX_TOP_WINDOWS];
   UINT                                      topWindowCount;
-  DWMPRIVATESHELLCANDIDATE                  shellCandidates[DWM_PRIVATE_MAX_SHELL_VISUALS];
-  UINT                                      shellCandidateCount;
-  DWMPRIVATESHELLVISUAL                     shellVisuals[DWM_PRIVATE_MAX_SHELL_VISUALS];
-  UINT                                      shellVisualCount;
-  DWMPRIVATESHELLVISUAL                     retiredShellVisuals[DWM_PRIVATE_MAX_SHELL_VISUALS];
-  UINT                                      retiredShellVisualCount;
+  DWMPRIVATESOURCECANDIDATE                 sourceCandidates[DWM_PRIVATE_MAX_SOURCE_VISUALS];
+  UINT                                      sourceCandidateCount;
+  DWMPRIVATESOURCEVISUAL                    sourceVisuals[DWM_PRIVATE_MAX_SOURCE_VISUALS];
+  UINT                                      sourceVisualCount;
+  DWMPRIVATESOURCEVISUAL                    retiredSourceVisuals[DWM_PRIVATE_MAX_SOURCE_VISUALS];
+  UINT                                      retiredSourceVisualCount;
   HWND                                      desktopExclusions[DWM_PRIVATE_MAX_EXCLUSIONS];
   UINT                                      desktopExclusionCount;
+  UINT64                                    sourceResourceGeneration;
 };
 
 static void DwmPrivateReleaseUnknown(void** object)
@@ -406,8 +412,22 @@ static BOOL CALLBACK DwmPrivateEnumTopWindow(HWND hwnd, LPARAM parameter)
   DWMPRIVATEENUMCONTEXT* context = (DWMPRIVATEENUMCONTEXT*)parameter;
   DWMPRIVATETOPWINDOWKIND kind = DwmPrivateClassifyTopWindow(hwnd);
   DWMPRIVATETOPWINDOW* window;
+  const BOOL visible = IsWindowVisible(hwnd);
+  const BOOL iconic = IsIconic(hwnd);
+  DWORD cloaked = 0;
+  BOOL isCloaked = FALSE;
 
-  if (DWM_PRIVATE_TOP_OTHER == kind)
+  if (SUCCEEDED(DwmGetWindowAttribute(
+        hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))))
+  {
+    isCloaked = 0 != cloaked;
+  }
+  /* Shell ordering needs hidden Progman/WorkerW hosts.  Ordinary windows are
+     retained only while DWM can actually display them, keeping enumeration
+     and the live source set bounded by visible desktop content. */
+  if (DWM_PRIVATE_TOP_OTHER == kind &&
+      (hwnd == context->state->hwndDestination ||
+       !visible || iconic || isCloaked))
   {
     return TRUE;
   }
@@ -424,7 +444,9 @@ static BOOL CALLBACK DwmPrivateEnumTopWindow(HWND hwnd, LPARAM parameter)
   }
   window->hwnd = hwnd;
   window->kind = kind;
-  window->visible = IsWindowVisible(hwnd);
+  window->visible = visible;
+  window->iconic = iconic;
+  window->cloaked = isCloaked;
   window->hasDesktopView =
     NULL != FindWindowExW(hwnd, NULL, L"SHELLDLL_DefView", NULL);
   ++context->state->topWindowCount;
@@ -460,10 +482,10 @@ static BOOL DwmPrivateIsWallpaperWorker(
   return FALSE;
 }
 
-static HRESULT DwmPrivateAppendShellCandidate(
+static HRESULT DwmPrivateAppendSourceCandidate(
   DWMPRIVATECAPTURESTATE* state,
   const DWMPRIVATETOPWINDOW* window,
-  DWMPRIVATESHELLLAYER layer,
+  DWMPRIVATESOURCELAYER layer,
   const RECT* desktopSource)
 {
   RECT intersection;
@@ -473,26 +495,26 @@ static HRESULT DwmPrivateAppendShellCandidate(
   {
     return S_FALSE;
   }
-  for (index = 0; index < state->shellCandidateCount; ++index)
+  for (index = 0; index < state->sourceCandidateCount; ++index)
   {
-    if (state->shellCandidates[index].hwnd == window->hwnd &&
-        state->shellCandidates[index].layer == layer)
+    if (state->sourceCandidates[index].hwnd == window->hwnd &&
+        state->sourceCandidates[index].layer == layer)
     {
       return S_FALSE;
     }
   }
-  if (state->shellCandidateCount >= DWM_PRIVATE_MAX_SHELL_VISUALS)
+  if (state->sourceCandidateCount >= DWM_PRIVATE_MAX_SOURCE_VISUALS)
   {
     return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
   }
-  state->shellCandidates[state->shellCandidateCount].hwnd = window->hwnd;
-  state->shellCandidates[state->shellCandidateCount].rect = window->rect;
-  state->shellCandidates[state->shellCandidateCount].layer = layer;
-  ++state->shellCandidateCount;
+  state->sourceCandidates[state->sourceCandidateCount].hwnd = window->hwnd;
+  state->sourceCandidates[state->sourceCandidateCount].rect = window->rect;
+  state->sourceCandidates[state->sourceCandidateCount].layer = layer;
+  ++state->sourceCandidateCount;
   return S_OK;
 }
 
-static HRESULT DwmPrivateBuildShellCandidates(
+static HRESULT DwmPrivateBuildSourceCandidates(
   DWMPRIVATECAPTURESTATE* state,
   const RECT* desktopSource)
 {
@@ -502,13 +524,16 @@ static HRESULT DwmPrivateBuildShellCandidates(
   ZeroMemory(&context, sizeof(context));
   context.state = state;
   state->topWindowCount = 0;
-  state->shellCandidateCount = 0;
+  state->sourceCandidateCount = 0;
   if (!EnumWindows(DwmPrivateEnumTopWindow, (LPARAM)&context) &&
       context.overflow)
   {
     return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
   }
 
+  /* EnumWindows is top-to-bottom.  Building the retained source list in the
+     reverse direction gives DirectComposition an exact bottom-to-top stack
+     without creating or destroying resources when only z-order changes. */
   index = state->topWindowCount;
   while (index-- > 0)
   {
@@ -519,23 +544,29 @@ static HRESULT DwmPrivateBuildShellCandidates(
        (window->hasDesktopView || DwmPrivateIsWallpaperWorker(state, index)));
     if (isDesktop)
     {
-      HRESULT hr = DwmPrivateAppendShellCandidate(
+      HRESULT hr = DwmPrivateAppendSourceCandidate(
         state, window, DWM_PRIVATE_SHELL_DESKTOP, desktopSource);
       if (FAILED(hr))
       {
         return hr;
       }
     }
-  }
-
-  index = state->topWindowCount;
-  while (index-- > 0)
-  {
-    const DWMPRIVATETOPWINDOW* window = &state->topWindows[index];
-    if (DWM_PRIVATE_TOP_TASKBAR == window->kind && window->visible)
+    else if (DWM_PRIVATE_TOP_TASKBAR == window->kind &&
+             window->visible && !window->iconic && !window->cloaked)
     {
-      HRESULT hr = DwmPrivateAppendShellCandidate(
+      HRESULT hr = DwmPrivateAppendSourceCandidate(
         state, window, DWM_PRIVATE_SHELL_TASKBAR, desktopSource);
+      if (FAILED(hr))
+      {
+        return hr;
+      }
+    }
+    else if (DWM_PRIVATE_TOP_OTHER == window->kind &&
+             window->hwnd != state->hwndDestination &&
+             window->visible && !window->iconic && !window->cloaked)
+    {
+      HRESULT hr = DwmPrivateAppendSourceCandidate(
+        state, window, DWM_PRIVATE_APPLICATION, desktopSource);
       if (FAILED(hr))
       {
         return hr;
@@ -545,7 +576,7 @@ static HRESULT DwmPrivateBuildShellCandidates(
   return S_OK;
 }
 
-static SIZE DwmPrivateQueryShellSourceSize(
+static SIZE DwmPrivateQuerySourceSize(
   DWMPRIVATECAPTURESTATE* state,
   HWND hwnd,
   const RECT* windowRect)
@@ -566,17 +597,20 @@ static SIZE DwmPrivateQueryShellSourceSize(
   return size;
 }
 
-static HRESULT DwmPrivateBuildShellThumbnailProperties(
+static HRESULT DwmPrivateBuildSourceThumbnailProperties(
   const RECT* desktopSource,
   const RECT* windowRect,
   SIZE sourceSize,
-  DWM_THUMBNAIL_PROPERTIES* properties)
+  DWM_THUMBNAIL_PROPERTIES* properties,
+  FLOAT* offsetX,
+  FLOAT* offsetY)
 {
   const LONG windowWidth = windowRect->right - windowRect->left;
   const LONG windowHeight = windowRect->bottom - windowRect->top;
   RECT intersection;
 
-  if (!properties || windowWidth < 1 || windowHeight < 1 ||
+  if (!properties || !offsetX || !offsetY ||
+      windowWidth < 1 || windowHeight < 1 ||
       sourceSize.cx < 1 || sourceSize.cy < 1 ||
       !IntersectRect(&intersection, windowRect, desktopSource))
   {
@@ -586,10 +620,13 @@ static HRESULT DwmPrivateBuildShellThumbnailProperties(
   properties->dwFlags = DWM_TNP_RECTDESTINATION |
     DWM_TNP_RECTSOURCE | DWM_TNP_OPACITY | DWM_TNP_VISIBLE |
     DWM_TNP_SOURCECLIENTAREAONLY | DWM_TNP_ENABLE3D;
-  properties->rcDestination.left = intersection.left - desktopSource->left;
-  properties->rcDestination.top = intersection.top - desktopSource->top;
-  properties->rcDestination.right = intersection.right - desktopSource->left;
-  properties->rcDestination.bottom = intersection.bottom - desktopSource->top;
+  /* Ordinal 147 requires a local destination anchored at (0,0).  Position the
+     returned zero-copy visual in desktop space instead of baking its screen
+     coordinates into DWM_THUMBNAIL_PROPERTIES. */
+  properties->rcDestination.left = 0;
+  properties->rcDestination.top = 0;
+  properties->rcDestination.right = intersection.right - intersection.left;
+  properties->rcDestination.bottom = intersection.bottom - intersection.top;
   properties->rcSource.left = MulDiv(
     intersection.left - windowRect->left, sourceSize.cx, windowWidth);
   properties->rcSource.top = MulDiv(
@@ -601,6 +638,8 @@ static HRESULT DwmPrivateBuildShellThumbnailProperties(
   properties->opacity = 255;
   properties->fVisible = TRUE;
   properties->fSourceClientAreaOnly = FALSE;
+  *offsetX = (FLOAT)(intersection.left - desktopSource->left);
+  *offsetY = (FLOAT)(intersection.top - desktopSource->top);
   if (properties->rcSource.right <= properties->rcSource.left ||
       properties->rcSource.bottom <= properties->rcSource.top)
   {
@@ -621,21 +660,21 @@ static BOOL DwmPrivateEqualThumbnailProperties(
     left->fSourceClientAreaOnly == right->fSourceClientAreaOnly;
 }
 
-static void DwmPrivateDestroyShellVisual(DWMPRIVATESHELLVISUAL* shellVisual)
+static void DwmPrivateDestroySourceVisual(DWMPRIVATESOURCEVISUAL* sourceVisual)
 {
-  if (shellVisual->thumbnail)
+  if (sourceVisual->thumbnail)
   {
-    DwmUnregisterThumbnail(shellVisual->thumbnail);
+    DwmUnregisterThumbnail(sourceVisual->thumbnail);
   }
-  DwmPrivateReleaseUnknown((void**)&shellVisual->visual);
-  ZeroMemory(shellVisual, sizeof(*shellVisual));
+  DwmPrivateReleaseUnknown((void**)&sourceVisual->visual);
+  ZeroMemory(sourceVisual, sizeof(*sourceVisual));
 }
 
-static HRESULT DwmPrivateCreateShellVisual(
+static HRESULT DwmPrivateCreateSourceVisual(
   DWMPRIVATECAPTURESTATE* state,
-  const DWMPRIVATESHELLCANDIDATE* candidate,
+  const DWMPRIVATESOURCECANDIDATE* candidate,
   const RECT* desktopSource,
-  DWMPRIVATESHELLVISUAL* shellVisual)
+  DWMPRIVATESOURCEVISUAL* sourceVisual)
 {
   HRESULT hr;
 
@@ -643,83 +682,118 @@ static HRESULT DwmPrivateCreateShellVisual(
   {
     return E_NOINTERFACE;
   }
-  ZeroMemory(shellVisual, sizeof(*shellVisual));
-  shellVisual->hwnd = candidate->hwnd;
-  shellVisual->rect = candidate->rect;
-  shellVisual->layer = candidate->layer;
-  shellVisual->sourceSize = DwmPrivateQueryShellSourceSize(
+  ZeroMemory(sourceVisual, sizeof(*sourceVisual));
+  sourceVisual->hwnd = candidate->hwnd;
+  sourceVisual->rect = candidate->rect;
+  sourceVisual->layer = candidate->layer;
+  sourceVisual->sourceSize = DwmPrivateQuerySourceSize(
     state, candidate->hwnd, &candidate->rect);
-  hr = DwmPrivateBuildShellThumbnailProperties(
+  hr = DwmPrivateBuildSourceThumbnailProperties(
     desktopSource,
     &candidate->rect,
-    shellVisual->sourceSize,
-    &shellVisual->properties);
+    sourceVisual->sourceSize,
+    &sourceVisual->properties,
+    &sourceVisual->offsetX,
+    &sourceVisual->offsetY);
   if (SUCCEEDED(hr))
   {
     hr = state->createSharedThumbnailVisual(
       state->hwndDestination,
       candidate->hwnd,
       DWM_PRIVATE_THUMBNAIL_TYPE_ICONIC,
-      &shellVisual->properties,
+      &sourceVisual->properties,
       state->dcompDevice,
-      (void**)&shellVisual->visual,
-      &shellVisual->thumbnail);
+      (void**)&sourceVisual->visual,
+      &sourceVisual->thumbnail);
+  }
+  if (SUCCEEDED(hr))
+  {
+    hr = sourceVisual->visual->lpVtbl->SetOffsetXValue(
+      sourceVisual->visual, sourceVisual->offsetX);
+  }
+  if (SUCCEEDED(hr))
+  {
+    hr = sourceVisual->visual->lpVtbl->SetOffsetYValue(
+      sourceVisual->visual, sourceVisual->offsetY);
   }
   if (FAILED(hr))
   {
-    DwmPrivateDestroyShellVisual(shellVisual);
+    DwmPrivateDestroySourceVisual(sourceVisual);
+  }
+  else
+  {
+    ++state->sourceResourceGeneration;
   }
   return hr;
 }
 
-static HRESULT DwmPrivateUpdateShellVisual(
+static HRESULT DwmPrivateUpdateSourceVisual(
   DWMPRIVATECAPTURESTATE* state,
-  const DWMPRIVATESHELLCANDIDATE* candidate,
+  const DWMPRIVATESOURCECANDIDATE* candidate,
   const RECT* desktopSource,
-  DWMPRIVATESHELLVISUAL* shellVisual)
+  DWMPRIVATESOURCEVISUAL* sourceVisual)
 {
   DWM_THUMBNAIL_PROPERTIES properties;
-  SIZE sourceSize = shellVisual->sourceSize;
+  SIZE sourceSize = sourceVisual->sourceSize;
+  FLOAT offsetX;
+  FLOAT offsetY;
   HRESULT hr;
 
-  if (!EqualRect(&shellVisual->rect, &candidate->rect))
+  if (!EqualRect(&sourceVisual->rect, &candidate->rect))
   {
-    sourceSize = DwmPrivateQueryShellSourceSize(
+    sourceSize = DwmPrivateQuerySourceSize(
       state, candidate->hwnd, &candidate->rect);
   }
-  hr = DwmPrivateBuildShellThumbnailProperties(
-    desktopSource, &candidate->rect, sourceSize, &properties);
+  hr = DwmPrivateBuildSourceThumbnailProperties(
+    desktopSource,
+    &candidate->rect,
+    sourceSize,
+    &properties,
+    &offsetX,
+    &offsetY);
   if (SUCCEEDED(hr) &&
-      !DwmPrivateEqualThumbnailProperties(&shellVisual->properties, &properties))
+      !DwmPrivateEqualThumbnailProperties(&sourceVisual->properties, &properties))
   {
-    hr = DwmUpdateThumbnailProperties(shellVisual->thumbnail, &properties);
+    hr = DwmUpdateThumbnailProperties(sourceVisual->thumbnail, &properties);
+  }
+  if (SUCCEEDED(hr) && sourceVisual->offsetX != offsetX)
+  {
+    hr = sourceVisual->visual->lpVtbl->SetOffsetXValue(
+      sourceVisual->visual, offsetX);
+  }
+  if (SUCCEEDED(hr) && sourceVisual->offsetY != offsetY)
+  {
+    hr = sourceVisual->visual->lpVtbl->SetOffsetYValue(
+      sourceVisual->visual, offsetY);
   }
   if (SUCCEEDED(hr))
   {
-    shellVisual->rect = candidate->rect;
-    shellVisual->sourceSize = sourceSize;
-    shellVisual->properties = properties;
+    sourceVisual->rect = candidate->rect;
+    sourceVisual->sourceSize = sourceSize;
+    sourceVisual->offsetX = offsetX;
+    sourceVisual->offsetY = offsetY;
+    sourceVisual->properties = properties;
   }
   return hr;
 }
 
 static HRESULT DwmPrivatePopulateViewChildren(
   DWMPRIVATECAPTURESTATE* state,
-  const DWMPRIVATESHELLVISUAL* shellVisuals,
-  UINT shellVisualCount)
+  const DWMPRIVATESOURCEVISUAL* sourceVisuals,
+  UINT sourceVisualCount)
 {
   HRESULT hr = state->viewVisual->lpVtbl->RemoveAllVisuals(state->viewVisual);
   UINT index;
 
-  for (index = 0; SUCCEEDED(hr) && index < shellVisualCount; ++index)
+  for (index = 0; SUCCEEDED(hr) && index < sourceVisualCount; ++index)
   {
-    if (DWM_PRIVATE_SHELL_DESKTOP == shellVisuals[index].layer)
+    if (DWM_PRIVATE_SHELL_DESKTOP == sourceVisuals[index].layer)
     {
-      /* With no reference visual, insertAbove=TRUE inserts at the bottom of
-         the child list.  Wallpaper/desktop visuals must remain behind the
-         shared multi-window visual. */
+      /* The candidates are already bottom-to-top.  Adding each new source at
+         the top preserves that order while keeping wallpaper below the
+         shared fallback. */
       hr = state->viewVisual->lpVtbl->AddVisual(
-        state->viewVisual, shellVisuals[index].visual, TRUE, NULL);
+        state->viewVisual, sourceVisuals[index].visual, FALSE, NULL);
     }
   }
   if (SUCCEEDED(hr))
@@ -728,26 +802,27 @@ static HRESULT DwmPrivatePopulateViewChildren(
     hr = state->viewVisual->lpVtbl->AddVisual(
       state->viewVisual, state->sharedVisual, FALSE, NULL);
   }
-  for (index = 0; SUCCEEDED(hr) && index < shellVisualCount; ++index)
+  for (index = 0; SUCCEEDED(hr) && index < sourceVisualCount; ++index)
   {
-    if (DWM_PRIVATE_SHELL_TASKBAR == shellVisuals[index].layer)
+    if (DWM_PRIVATE_SHELL_DESKTOP != sourceVisuals[index].layer)
     {
-      /* Taskbars are shell-owned top-level surfaces and belong above both the
-         desktop and ordinary application windows. */
+      /* Every visible application and taskbar has its own retained ENABLE3D
+         source.  This is the path that carries Chromium/Electron child
+         DirectComposition swapchains which the shared desktop visual omits. */
       hr = state->viewVisual->lpVtbl->AddVisual(
-        state->viewVisual, shellVisuals[index].visual, FALSE, NULL);
+        state->viewVisual, sourceVisuals[index].visual, FALSE, NULL);
     }
   }
   return hr;
 }
 
-static HRESULT DwmPrivateConfigureShellVisuals(
+static HRESULT DwmPrivateConfigureSourceVisuals(
   DWMPRIVATECAPTURESTATE* state,
   const RECT* desktopSource)
 {
-  DWMPRIVATESHELLVISUAL pending[DWM_PRIVATE_MAX_SHELL_VISUALS];
-  BOOL pendingNew[DWM_PRIVATE_MAX_SHELL_VISUALS];
-  BOOL activeUsed[DWM_PRIVATE_MAX_SHELL_VISUALS];
+  DWMPRIVATESOURCEVISUAL pending[DWM_PRIVATE_MAX_SOURCE_VISUALS];
+  BOOL pendingNew[DWM_PRIVATE_MAX_SOURCE_VISUALS];
+  BOOL activeUsed[DWM_PRIVATE_MAX_SOURCE_VISUALS];
   BOOL orderChanged;
   HRESULT hr;
   UINT candidateIndex;
@@ -755,38 +830,42 @@ static HRESULT DwmPrivateConfigureShellVisuals(
   ZeroMemory(pending, sizeof(pending));
   ZeroMemory(pendingNew, sizeof(pendingNew));
   ZeroMemory(activeUsed, sizeof(activeUsed));
-  hr = DwmPrivateBuildShellCandidates(state, desktopSource);
+  hr = DwmPrivateBuildSourceCandidates(state, desktopSource);
   if (FAILED(hr))
   {
     return hr;
   }
 
   for (candidateIndex = 0;
-       candidateIndex < state->shellCandidateCount;
+       candidateIndex < state->sourceCandidateCount;
        ++candidateIndex)
   {
-    const DWMPRIVATESHELLCANDIDATE* candidate =
-      &state->shellCandidates[candidateIndex];
+    const DWMPRIVATESOURCECANDIDATE* candidate =
+      &state->sourceCandidates[candidateIndex];
     UINT activeIndex;
     BOOL found = FALSE;
 
     for (activeIndex = 0;
-         activeIndex < state->shellVisualCount;
+         activeIndex < state->sourceVisualCount;
          ++activeIndex)
     {
       if (!activeUsed[activeIndex] &&
-          state->shellVisuals[activeIndex].hwnd == candidate->hwnd &&
-          state->shellVisuals[activeIndex].layer == candidate->layer)
+          state->sourceVisuals[activeIndex].hwnd == candidate->hwnd &&
+          state->sourceVisuals[activeIndex].layer == candidate->layer)
       {
-        pending[candidateIndex] = state->shellVisuals[activeIndex];
-        hr = DwmPrivateUpdateShellVisual(
+        pending[candidateIndex] = state->sourceVisuals[activeIndex];
+        hr = DwmPrivateUpdateSourceVisual(
           state, candidate, desktopSource, &pending[candidateIndex]);
         if (SUCCEEDED(hr))
         {
-          state->shellVisuals[activeIndex].rect = pending[candidateIndex].rect;
-          state->shellVisuals[activeIndex].sourceSize =
+          state->sourceVisuals[activeIndex].rect = pending[candidateIndex].rect;
+          state->sourceVisuals[activeIndex].sourceSize =
             pending[candidateIndex].sourceSize;
-          state->shellVisuals[activeIndex].properties =
+          state->sourceVisuals[activeIndex].offsetX =
+            pending[candidateIndex].offsetX;
+          state->sourceVisuals[activeIndex].offsetY =
+            pending[candidateIndex].offsetY;
+          state->sourceVisuals[activeIndex].properties =
             pending[candidateIndex].properties;
         }
         activeUsed[activeIndex] = TRUE;
@@ -796,7 +875,7 @@ static HRESULT DwmPrivateConfigureShellVisuals(
     }
     if (!found)
     {
-      hr = DwmPrivateCreateShellVisual(
+      hr = DwmPrivateCreateSourceVisual(
         state, candidate, desktopSource, &pending[candidateIndex]);
       pendingNew[candidateIndex] = SUCCEEDED(hr);
     }
@@ -809,22 +888,22 @@ static HRESULT DwmPrivateConfigureShellVisuals(
       {
         if (pendingNew[cleanupIndex])
         {
-          DwmPrivateDestroyShellVisual(&pending[cleanupIndex]);
+          DwmPrivateDestroySourceVisual(&pending[cleanupIndex]);
         }
       }
       return hr;
     }
   }
 
-  orderChanged = state->shellVisualCount != state->shellCandidateCount;
+  orderChanged = state->sourceVisualCount != state->sourceCandidateCount;
   if (!orderChanged)
   {
     for (candidateIndex = 0;
-         candidateIndex < state->shellCandidateCount;
+         candidateIndex < state->sourceCandidateCount;
          ++candidateIndex)
     {
-      if (state->shellVisuals[candidateIndex].hwnd != pending[candidateIndex].hwnd ||
-          state->shellVisuals[candidateIndex].layer != pending[candidateIndex].layer)
+      if (state->sourceVisuals[candidateIndex].hwnd != pending[candidateIndex].hwnd ||
+          state->sourceVisuals[candidateIndex].layer != pending[candidateIndex].layer)
       {
         orderChanged = TRUE;
         break;
@@ -834,53 +913,57 @@ static HRESULT DwmPrivateConfigureShellVisuals(
   if (!orderChanged)
   {
     for (candidateIndex = 0;
-         candidateIndex < state->shellCandidateCount;
+         candidateIndex < state->sourceCandidateCount;
          ++candidateIndex)
     {
-      state->shellVisuals[candidateIndex].rect = pending[candidateIndex].rect;
-      state->shellVisuals[candidateIndex].sourceSize =
+      state->sourceVisuals[candidateIndex].rect = pending[candidateIndex].rect;
+      state->sourceVisuals[candidateIndex].sourceSize =
         pending[candidateIndex].sourceSize;
-      state->shellVisuals[candidateIndex].properties =
+      state->sourceVisuals[candidateIndex].offsetX =
+        pending[candidateIndex].offsetX;
+      state->sourceVisuals[candidateIndex].offsetY =
+        pending[candidateIndex].offsetY;
+      state->sourceVisuals[candidateIndex].properties =
         pending[candidateIndex].properties;
     }
     return S_OK;
   }
 
   hr = DwmPrivatePopulateViewChildren(
-    state, pending, state->shellCandidateCount);
+    state, pending, state->sourceCandidateCount);
   if (FAILED(hr))
   {
     DwmPrivatePopulateViewChildren(
-      state, state->shellVisuals, state->shellVisualCount);
+      state, state->sourceVisuals, state->sourceVisualCount);
     for (candidateIndex = 0;
-         candidateIndex < state->shellCandidateCount;
+         candidateIndex < state->sourceCandidateCount;
          ++candidateIndex)
     {
       if (pendingNew[candidateIndex])
       {
-        DwmPrivateDestroyShellVisual(&pending[candidateIndex]);
+        DwmPrivateDestroySourceVisual(&pending[candidateIndex]);
       }
     }
     return hr;
   }
 
-  state->retiredShellVisualCount = 0;
+  state->retiredSourceVisualCount = 0;
   for (candidateIndex = 0;
-       candidateIndex < state->shellVisualCount;
+       candidateIndex < state->sourceVisualCount;
        ++candidateIndex)
   {
     if (!activeUsed[candidateIndex])
     {
-      state->retiredShellVisuals[state->retiredShellVisualCount++] =
-        state->shellVisuals[candidateIndex];
+      state->retiredSourceVisuals[state->retiredSourceVisualCount++] =
+        state->sourceVisuals[candidateIndex];
     }
   }
-  ZeroMemory(state->shellVisuals, sizeof(state->shellVisuals));
+  ZeroMemory(state->sourceVisuals, sizeof(state->sourceVisuals));
   CopyMemory(
-    state->shellVisuals,
+    state->sourceVisuals,
     pending,
-    state->shellCandidateCount * sizeof(pending[0]));
-  state->shellVisualCount = state->shellCandidateCount;
+    state->sourceCandidateCount * sizeof(pending[0]));
+  state->sourceVisualCount = state->sourceCandidateCount;
   state->treeDirty = TRUE;
   return S_OK;
 }
@@ -904,9 +987,12 @@ static HRESULT DwmPrivateConfigureDesktop(
   RECT sourceCopy = *desktopSource;
   SIZE destinationSize;
   HRESULT hr;
-  UINT shellIndex;
+  UINT sourceIndex;
 
-  hr = DwmPrivateConfigureShellVisuals(state, desktopSource);
+  /* This runs before the desktop fast-path deliberately.  External windows
+     can move or change z-order while MAG's own desktop/view rectangle stays
+     constant, so their retained visuals must be reconciled every vblank. */
+  hr = DwmPrivateConfigureSourceVisuals(state, desktopSource);
   if (FAILED(hr))
   {
     return hr;
@@ -919,9 +1005,9 @@ static HRESULT DwmPrivateConfigureDesktop(
   }
 
   exclusions[0] = state->hwndDestination;
-  for (shellIndex = 0;
-       shellIndex < state->shellVisualCount;
-       ++shellIndex)
+  for (sourceIndex = 0;
+       sourceIndex < state->sourceVisualCount;
+       ++sourceIndex)
   {
     UINT existingIndex;
     BOOL exists = FALSE;
@@ -929,7 +1015,7 @@ static HRESULT DwmPrivateConfigureDesktop(
          existingIndex < exclusionCount;
          ++existingIndex)
     {
-      if (exclusions[existingIndex] == state->shellVisuals[shellIndex].hwnd)
+      if (exclusions[existingIndex] == state->sourceVisuals[sourceIndex].hwnd)
       {
         exists = TRUE;
         break;
@@ -937,7 +1023,7 @@ static HRESULT DwmPrivateConfigureDesktop(
     }
     if (!exists)
     {
-      exclusions[exclusionCount++] = state->shellVisuals[shellIndex].hwnd;
+      exclusions[exclusionCount++] = state->sourceVisuals[sourceIndex].hwnd;
     }
   }
   if (state->desktopConfigured &&
@@ -1240,13 +1326,13 @@ void DwmPrivateCaptureDestroy(DWMPRIVATECAPTURESTATE* state)
   {
     DwmPrivateSetExcludedFromLivePreview(state, FALSE);
   }
-  for (index = 0; index < state->shellVisualCount; ++index)
+  for (index = 0; index < state->sourceVisualCount; ++index)
   {
-    DwmPrivateDestroyShellVisual(&state->shellVisuals[index]);
+    DwmPrivateDestroySourceVisual(&state->sourceVisuals[index]);
   }
-  for (index = 0; index < state->retiredShellVisualCount; ++index)
+  for (index = 0; index < state->retiredSourceVisualCount; ++index)
   {
-    DwmPrivateDestroyShellVisual(&state->retiredShellVisuals[index]);
+    DwmPrivateDestroySourceVisual(&state->retiredSourceVisuals[index]);
   }
   if (state->thumbnail)
   {
@@ -1625,12 +1711,13 @@ BOOL DwmPrivateCaptureUpdate(
     {
       state->treeDirty = FALSE;
       for (index = 0;
-           index < state->retiredShellVisualCount;
+           index < state->retiredSourceVisualCount;
            ++index)
       {
-        DwmPrivateDestroyShellVisual(&state->retiredShellVisuals[index]);
+        DwmPrivateDestroySourceVisual(&state->retiredSourceVisuals[index]);
+        ++state->sourceResourceGeneration;
       }
-      state->retiredShellVisualCount = 0;
+      state->retiredSourceVisualCount = 0;
     }
   }
   if (SUCCEEDED(hr) && synchronize)
@@ -1649,7 +1736,9 @@ BOOL DwmPrivateCaptureUpdate(
 UINT64 DwmPrivateCaptureGetResourceGeneration(
   const DWMPRIVATECAPTURESTATE* state)
 {
-  return state ? state->overlayResourceGeneration : 0;
+  return state
+    ? state->overlayResourceGeneration + state->sourceResourceGeneration
+    : 0;
 }
 
 UINT DwmPrivateCaptureGetWindowCoverage(
@@ -1671,22 +1760,58 @@ UINT DwmPrivateCaptureGetWindowCoverage(
       break;
     }
   }
-  for (index = 0; index < state->shellVisualCount; ++index)
+  for (index = 0; index < state->sourceVisualCount; ++index)
   {
-    if (state->shellVisuals[index].hwnd == hwnd)
+    if (state->sourceVisuals[index].hwnd == hwnd)
     {
-      coverage |= DWM_PRIVATE_SHELL_DESKTOP == state->shellVisuals[index].layer
-        ? DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP
-        : DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR;
+      if (DWM_PRIVATE_SHELL_DESKTOP == state->sourceVisuals[index].layer)
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP;
+      }
+      else if (DWM_PRIVATE_SHELL_TASKBAR == state->sourceVisuals[index].layer)
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR;
+      }
+      else
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_APPLICATION;
+      }
       return coverage;
     }
   }
   if (state->desktopConfigured &&
       !(coverage & DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED))
   {
-    /* The private multi-window visual is configured with a NULL include list,
-       which means every top-level window not present in the exclusion list. */
+    /* The shared multi-window visual remains a background safety layer for
+       surfaces that are not eligible for a retained source visual. */
     coverage |= DWM_PRIVATE_WINDOW_COVERAGE_SHARED;
   }
   return coverage;
+}
+
+BOOL DwmPrivateCaptureGetWindowVisualPlacement(
+  const DWMPRIVATECAPTURESTATE* state,
+  HWND hwnd,
+  RECT* windowRect,
+  POINT* visualOffset,
+  UINT* zOrder)
+{
+  UINT index;
+
+  if (!state || !hwnd || !windowRect || !visualOffset || !zOrder)
+  {
+    return FALSE;
+  }
+  for (index = 0; index < state->sourceVisualCount; ++index)
+  {
+    if (state->sourceVisuals[index].hwnd == hwnd)
+    {
+      *windowRect = state->sourceVisuals[index].rect;
+      visualOffset->x = (LONG)state->sourceVisuals[index].offsetX;
+      visualOffset->y = (LONG)state->sourceVisuals[index].offsetY;
+      *zOrder = index;
+      return TRUE;
+    }
+  }
+  return FALSE;
 }

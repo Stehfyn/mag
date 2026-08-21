@@ -3846,9 +3846,17 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
     uiGeneration = magUiRendererGetSurfaceGeneration(lpsd->uiRenderer);
     layeredGeneration = magLayeredPresenterGetResourceGeneration(lpsd->layeredPresenter);
     dwmPrivateGeneration = DwmPrivateCaptureGetResourceGeneration(lpsd->dwmPrivate.state);
+    /* DWM intentionally paces a non-input WinStation desktop near 4 Hz.  The
+       private-visual smoke therefore permits one such flush interval while
+       still requiring the matching geometry/frame epoch synchronously and
+       proving below that no capture/presentation resource was recreated. */
     epochLatencyLimit = CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE == lpsd->captureApi
       ? 500U
-      : (CAPTURE_API_DXGI_DESKTOP_DUPLICATION == lpsd->captureApi ? 250U : 100U);
+      : (CAPTURE_API_DXGI_DESKTOP_DUPLICATION == lpsd->captureApi
+          ? 250U
+          : (CAPTURE_API_DWM_PRIVATE_VISUAL == lpsd->captureApi
+              ? 300U
+              : 100U));
     resizeStart = GetTickCount64();
     SendMessage(hWnd, WM_ENTERSIZEMOVE, 0, 0);
 
@@ -4311,11 +4319,46 @@ static BOOL render_smokeDwmPrivateCoverage(
       lpsd ? lpsd->dwmPrivate.state : NULL, hTaskbarFixture);
     const UINT peerCoverage = DwmPrivateCaptureGetWindowCoverage(
       lpsd ? lpsd->dwmPrivate.state : NULL, hPeerFixture);
-    const UINT expectedCoverage = DWM_PRIVATE_WINDOW_COVERAGE_SHARED;
+    const UINT expectedDesktopCoverage =
+      DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP |
+      DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED;
+    const UINT expectedTaskbarCoverage =
+      DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR |
+      DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED;
+    const UINT expectedPeerCoverage =
+      DWM_PRIVATE_WINDOW_COVERAGE_APPLICATION |
+      DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED;
+    RECT placementRect;
+    POINT placementOffset;
+    UINT desktopZOrder = 0;
+    UINT peerZOrder = 0;
+    UINT taskbarZOrder = 0;
+    const BOOL placementValid = lpsd &&
+      DwmPrivateCaptureGetWindowVisualPlacement(
+        lpsd->dwmPrivate.state,
+        hDesktopFixture,
+        &placementRect,
+        &placementOffset,
+        &desktopZOrder) &&
+      DwmPrivateCaptureGetWindowVisualPlacement(
+        lpsd->dwmPrivate.state,
+        hPeerFixture,
+        &placementRect,
+        &placementOffset,
+        &peerZOrder) &&
+      DwmPrivateCaptureGetWindowVisualPlacement(
+        lpsd->dwmPrivate.state,
+        hTaskbarFixture,
+        &placementRect,
+        &placementOffset,
+        &taskbarZOrder);
 
-    if (desktopCoverage != expectedCoverage ||
-        taskbarCoverage != expectedCoverage ||
-        peerCoverage != expectedCoverage)
+    if (!lpsd || lpsd->fGraphicsPresentationEnabled ||
+        desktopCoverage != expectedDesktopCoverage ||
+        taskbarCoverage != expectedTaskbarCoverage ||
+        peerCoverage != expectedPeerCoverage ||
+        !placementValid ||
+        desktopZOrder >= peerZOrder || peerZOrder >= taskbarZOrder)
     {
       TCHAR detail[320];
 
@@ -4323,17 +4366,157 @@ static BOOL render_smokeDwmPrivateCoverage(
         detail,
         ARRAYSIZE(detail),
         _TRUNCATE,
-        TEXT("DWM private window coverage is incomplete: desktop=0x%x/0x%x taskbar=0x%x/0x%x peer=0x%x/0x%x."),
+        TEXT("DWM private route is incomplete: pixel-presenter=%u desktop=0x%x/0x%x taskbar=0x%x/0x%x peer=0x%x/0x%x placement=%u z=%u/%u/%u."),
+        lpsd ? lpsd->fGraphicsPresentationEnabled : TRUE,
         desktopCoverage,
-        expectedCoverage,
+        expectedDesktopCoverage,
         taskbarCoverage,
-        expectedCoverage,
+        expectedTaskbarCoverage,
         peerCoverage,
-        expectedCoverage);
+        expectedPeerCoverage,
+        placementValid,
+        desktopZOrder,
+        peerZOrder,
+        taskbarZOrder);
       render_smokeFailure(failureCode, detail);
       return FALSE;
     }
     return TRUE;
+}
+
+static BOOL render_smokeDwmPrivatePositionTracking(
+  HWND hWnd,
+  LPMAGSTATE lpsd,
+  HWND hPeerFixture,
+  int failureCode)
+{
+    const LONG moveX = 37;
+    const LONG moveY = 23;
+    RECT originalRect;
+    RECT actualRect;
+    RECT retainedRect;
+    POINT originalOffset;
+    POINT movedOffset;
+    POINT restoredOffset;
+    UINT visualZOrder;
+    UINT64 resourceGeneration;
+    BOOL moved = FALSE;
+    BOOL valid = FALSE;
+    TCHAR detail[512];
+
+    ZeroMemory(detail, sizeof(detail));
+    ZeroMemory(&actualRect, sizeof(actualRect));
+    ZeroMemory(&retainedRect, sizeof(retainedRect));
+    ZeroMemory(&originalOffset, sizeof(originalOffset));
+    ZeroMemory(&movedOffset, sizeof(movedOffset));
+    ZeroMemory(&restoredOffset, sizeof(restoredOffset));
+    if (!lpsd || !lpsd->dwmPrivate.state || !hPeerFixture ||
+        !GetWindowRect(hPeerFixture, &originalRect) ||
+        !DwmPrivateCaptureGetWindowVisualPlacement(
+          lpsd->dwmPrivate.state,
+          hPeerFixture,
+          &retainedRect,
+          &originalOffset,
+          &visualZOrder) ||
+        !EqualRect(&retainedRect, &originalRect))
+    {
+      _tcscpy_s(
+        detail,
+        ARRAYSIZE(detail),
+        TEXT("The initial retained application visual placement is unavailable or stale."));
+      goto Cleanup;
+    }
+    resourceGeneration = DwmPrivateCaptureGetResourceGeneration(
+      lpsd->dwmPrivate.state);
+    if (!SetWindowPos(
+          hPeerFixture,
+          NULL,
+          originalRect.left + moveX,
+          originalRect.top + moveY,
+          0,
+          0,
+          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+    {
+      _tcscpy_s(
+        detail,
+        ARRAYSIZE(detail),
+        TEXT("The isolated peer window could not be moved."));
+      goto Cleanup;
+    }
+    moved = TRUE;
+    if (!renderSubmit(hWnd) ||
+        !GetWindowRect(hPeerFixture, &actualRect) ||
+        !DwmPrivateCaptureGetWindowVisualPlacement(
+          lpsd->dwmPrivate.state,
+          hPeerFixture,
+          &retainedRect,
+          &movedOffset,
+          &visualZOrder) ||
+        !EqualRect(&retainedRect, &actualRect) ||
+        movedOffset.x != originalOffset.x + moveX ||
+        movedOffset.y != originalOffset.y + moveY ||
+        DwmPrivateCaptureGetResourceGeneration(lpsd->dwmPrivate.state) !=
+          resourceGeneration)
+    {
+      _sntprintf_s(
+        detail,
+        ARRAYSIZE(detail),
+        _TRUNCATE,
+        TEXT("External move was not reflected by the next private-visual submission without resource recreation: actual=(%ld,%ld)-(%ld,%ld), retained=(%ld,%ld)-(%ld,%ld), offset=(%ld,%ld)/(%ld,%ld), generation=%llu/%llu."),
+        actualRect.left,
+        actualRect.top,
+        actualRect.right,
+        actualRect.bottom,
+        retainedRect.left,
+        retainedRect.top,
+        retainedRect.right,
+        retainedRect.bottom,
+        movedOffset.x,
+        movedOffset.y,
+        originalOffset.x + moveX,
+        originalOffset.y + moveY,
+        DwmPrivateCaptureGetResourceGeneration(lpsd->dwmPrivate.state),
+        resourceGeneration);
+      goto Cleanup;
+    }
+    valid = TRUE;
+
+Cleanup:
+    if (moved)
+    {
+      if (!SetWindowPos(
+            hPeerFixture,
+            NULL,
+            originalRect.left,
+            originalRect.top,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) ||
+          !renderSubmit(hWnd) ||
+          !DwmPrivateCaptureGetWindowVisualPlacement(
+            lpsd->dwmPrivate.state,
+            hPeerFixture,
+            &retainedRect,
+            &restoredOffset,
+            &visualZOrder) ||
+          !EqualRect(&retainedRect, &originalRect) ||
+          restoredOffset.x != originalOffset.x ||
+          restoredOffset.y != originalOffset.y ||
+          DwmPrivateCaptureGetResourceGeneration(lpsd->dwmPrivate.state) !=
+            resourceGeneration)
+      {
+        valid = FALSE;
+        _tcscpy_s(
+          detail,
+          ARRAYSIZE(detail),
+          TEXT("The retained application visual did not coherently restore its original placement."));
+      }
+    }
+    if (!valid)
+    {
+      render_smokeFailure(failureCode, detail);
+    }
+    return valid;
 }
 
 int renderRunDwmPrivateSmoke(
@@ -4383,17 +4566,22 @@ int renderRunDwmPrivateSmoke(
     {
       return 913;
     }
+    if (!render_smokeDwmPrivatePositionTracking(
+          hWnd, lpsd, hPeerFixture, 914))
+    {
+      return 914;
+    }
     for (resizeIndex = 0; resizeIndex < ARRAYSIZE(resizeSizes); ++resizeIndex)
     {
       if (!render_smokeResizeWindow(
             hWnd, GRAPHICS_API_GDI, resizeSizes[resizeIndex]))
       {
-        return 914 + (int)resizeIndex;
+        return 915 + (int)resizeIndex;
       }
     }
     if (!render_smokeWindowTransitions(hWnd, GRAPHICS_API_GDI))
     {
-      return 916;
+      return 917;
     }
     return 0;
 }

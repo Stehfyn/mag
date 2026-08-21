@@ -135,9 +135,9 @@ typedef struct MAG_IDCompositionVisualVtbl
   ULONG (STDMETHODCALLTYPE* AddRef)(MAG_IDCompositionVisual*);
   ULONG (STDMETHODCALLTYPE* Release)(MAG_IDCompositionVisual*);
   void* SetOffsetXAnimation;
-  void* SetOffsetXValue;
+  HRESULT (STDMETHODCALLTYPE* SetOffsetXValue)(MAG_IDCompositionVisual*, FLOAT);
   void* SetOffsetYAnimation;
-  void* SetOffsetYValue;
+  HRESULT (STDMETHODCALLTYPE* SetOffsetYValue)(MAG_IDCompositionVisual*, FLOAT);
   void* SetTransformObject;
   HRESULT (STDMETHODCALLTYPE* SetTransformMatrix)(MAG_IDCompositionVisual*, const void*);
   void* SetTransformParent;

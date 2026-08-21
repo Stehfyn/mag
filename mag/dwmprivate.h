@@ -37,7 +37,8 @@ typedef enum DWMPRIVATEWINDOWCOVERAGE
   DWM_PRIVATE_WINDOW_COVERAGE_SHARED = 0x1,
   DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP = 0x2,
   DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR = 0x4,
-  DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED = 0x8
+  DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED = 0x8,
+  DWM_PRIVATE_WINDOW_COVERAGE_APPLICATION = 0x10
 } DWMPRIVATEWINDOWCOVERAGE;
 
 #ifdef __cplusplus
@@ -71,6 +72,13 @@ UINT64 DwmPrivateCaptureGetResourceGeneration(
 UINT DwmPrivateCaptureGetWindowCoverage(
   const DWMPRIVATECAPTURESTATE* lpState,
   HWND                          hWnd);
+
+BOOL DwmPrivateCaptureGetWindowVisualPlacement(
+  const DWMPRIVATECAPTURESTATE* lpState,
+  HWND                          hWnd,
+  RECT*                         lprcWindow,
+  POINT*                        lpVisualOffset,
+  UINT*                         lpZOrder);
 
 #ifdef __cplusplus
 }
