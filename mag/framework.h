@@ -23,6 +23,6 @@
 #include "d3dkmtx.h"
 
 #define ABS(x)         ((x < 0) ? -x : x)
-#define RECTWIDTH(rc)  (ABS(rc.right - rc.left))
-#define RECTHEIGHT(rc) (ABS(rc.bottom - rc.top))
+#define RECTWIDTH(rc)  ((rc).right - (rc).left)
+#define RECTHEIGHT(rc) ((rc).bottom - (rc).top)
 #define CLAMP(x,lo,hi) (max(min(x, hi),lo))

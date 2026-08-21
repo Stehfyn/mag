@@ -1,7 +1,12 @@
 #include "framework.h"
 #include "graphics.h"
+#include "graphics_presentation_manager.h"
+#include "presentation.h"
+
+#include <d3d11.h>
 
 #pragma comment(lib, "Msimg32")
+#pragma comment(lib, "d3d11")
 
 typedef struct MAGGDISTATE
 {
@@ -9,8 +14,122 @@ typedef struct MAGGDISTATE
   HBITMAP  hColorBitmap;
   HBITMAP  hColorBitmapOld;
   DWORD*   colorPixel;
+  ID3D11Device* d3dDevice;
+  ID3D11DeviceContext* d3dContext;
+  MAGPRESENTATIONMANAGERPRESENTER* presentationManager;
+  MAGCPUCOMPOSITOR compositor;
+  UINT     width;
+  UINT     height;
+  UINT     capacityWidth;
+  UINT     capacityHeight;
+  BOOL     presentationManagerHost;
+  BOOL     presentationEnabled;
   UINT64   resourceGeneration;
 } MAGGDISTATE;
+
+static void magGraphicsGdiReleaseState(MAGGDISTATE* state)
+{
+    if (!state)
+    {
+      return;
+    }
+    if (state->hColorDC && state->hColorBitmapOld)
+    {
+      SelectBitmap(state->hColorDC, state->hColorBitmapOld);
+    }
+    if (state->hColorBitmap)
+    {
+      DeleteBitmap(state->hColorBitmap);
+    }
+    if (state->hColorDC)
+    {
+      DeleteDC(state->hColorDC);
+    }
+    magPresentationManagerPresenterDestroy(state->presentationManager);
+    if (state->d3dContext)
+    {
+      ID3D11DeviceContext_Release(state->d3dContext);
+    }
+    if (state->d3dDevice)
+    {
+      ID3D11Device_Release(state->d3dDevice);
+    }
+    magGraphicsDestroyCpuCompositor(&state->compositor);
+    HeapFree(GetProcessHeap(), 0, state);
+}
+
+static BOOL magGraphicsGdiCreatePresentationManager(
+  HWND hWnd,
+  MAGGDISTATE* state,
+  SIZE clientSize,
+  const MAGPRESENTATIONSETTINGS* presentation)
+{
+    IDXGIAdapter1* adapter = NULL;
+    D3D_FEATURE_LEVEL featureLevel;
+    D3D_DRIVER_TYPE driverType;
+    SIZE reservoirSize;
+    UINT deviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+      D3D11_CREATE_DEVICE_SINGLETHREADED |
+      D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+    HRESULT hr;
+
+    if (!presentation || MAG_HOST_PRESENTATION_MANAGER != presentation->host)
+    {
+      return TRUE;
+    }
+    driverType = MAG_HARDWARE_ADAPTER_WARP == presentation->hardware.mode
+      ? D3D_DRIVER_TYPE_WARP
+      : D3D_DRIVER_TYPE_UNKNOWN;
+    if (D3D_DRIVER_TYPE_WARP != driverType &&
+        !magAdapterOpenDxgi(presentation->hardware.adapterLuid, &adapter))
+    {
+      return FALSE;
+    }
+
+    hr = D3D11CreateDevice(
+      (IDXGIAdapter*)adapter,
+      driverType,
+      NULL,
+      deviceFlags,
+      NULL,
+      0,
+      D3D11_SDK_VERSION,
+      &state->d3dDevice,
+      &featureLevel,
+      &state->d3dContext);
+    if (adapter)
+    {
+      IDXGIAdapter1_Release(adapter);
+    }
+    if (FAILED(hr))
+    {
+      return FALSE;
+    }
+
+    reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
+    if (!magPresentationManagerPresenterCreate(
+          hWnd,
+          state->d3dDevice,
+          reservoirSize,
+          presentation,
+          &state->presentationManager,
+          NULL,
+          0) ||
+        !magGraphicsReserveCpuCompositor(
+          &state->compositor,
+          (UINT)reservoirSize.cx,
+          (UINT)reservoirSize.cy))
+    {
+      return FALSE;
+    }
+    state->width = (UINT)clientSize.cx;
+    state->height = (UINT)clientSize.cy;
+    state->capacityWidth = (UINT)reservoirSize.cx;
+    state->capacityHeight = (UINT)reservoirSize.cy;
+    state->presentationManagerHost = TRUE;
+    state->presentationEnabled = TRUE;
+    return TRUE;
+}
 
 static BOOL magGraphicsGdiIsAvailable(LPTSTR reason, UINT reasonCount)
 {
@@ -30,11 +149,7 @@ static BOOL magGraphicsGdiCreate(
     MAGGDISTATE* state;
     BITMAPINFO bmi = { 0 };
 
-    UNREFERENCED_PARAMETER(hWnd);
-    UNREFERENCED_PARAMETER(clientSize);
-    UNREFERENCED_PARAMETER(presentation);
-
-    if (!stateOut)
+    if (!stateOut || !presentation || clientSize.cx < 1 || clientSize.cy < 1)
     {
       return FALSE;
     }
@@ -61,26 +176,21 @@ static BOOL magGraphicsGdiCreate(
       NULL,
       0);
 
-    if (!state->hColorDC || !state->hColorBitmap || !state->colorPixel)
+    if (!state->hColorDC || !state->hColorBitmap || !state->colorPixel ||
+        !magGraphicsGdiCreatePresentationManager(
+          hWnd,
+          state,
+          clientSize,
+          presentation))
     {
-      if (state->hColorBitmap)
-      {
-        DeleteBitmap(state->hColorBitmap);
-      }
-      if (state->hColorDC)
-      {
-        DeleteDC(state->hColorDC);
-      }
-      HeapFree(GetProcessHeap(), 0, state);
+      magGraphicsGdiReleaseState(state);
       return FALSE;
     }
 
     state->hColorBitmapOld = SelectBitmap(state->hColorDC, state->hColorBitmap);
     if (!state->hColorBitmapOld)
     {
-      DeleteBitmap(state->hColorBitmap);
-      DeleteDC(state->hColorDC);
-      HeapFree(GetProcessHeap(), 0, state);
+      magGraphicsGdiReleaseState(state);
       return FALSE;
     }
 
@@ -100,26 +210,56 @@ static void magGraphicsGdiDestroy(HWND hWnd, void* opaqueState)
       return;
     }
 
-    if (state->hColorDC && state->hColorBitmapOld)
-    {
-      SelectBitmap(state->hColorDC, state->hColorBitmapOld);
-    }
-    if (state->hColorBitmap)
-    {
-      DeleteBitmap(state->hColorBitmap);
-    }
-    if (state->hColorDC)
-    {
-      DeleteDC(state->hColorDC);
-    }
-    HeapFree(GetProcessHeap(), 0, state);
+    magGraphicsGdiReleaseState(state);
 }
 
-static BOOL magGraphicsGdiResize(HWND hWnd, void* state, SIZE clientSize)
+static BOOL magGraphicsGdiResize(HWND hWnd, void* opaqueState, SIZE clientSize)
 {
+    MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+
     UNREFERENCED_PARAMETER(hWnd);
-    UNREFERENCED_PARAMETER(clientSize);
-    return NULL != state;
+    if (!state || clientSize.cx < 1 || clientSize.cy < 1)
+    {
+      return FALSE;
+    }
+    if (!state->presentationManagerHost)
+    {
+      return TRUE;
+    }
+    if ((UINT)clientSize.cx > state->capacityWidth ||
+        (UINT)clientSize.cy > state->capacityHeight ||
+        !magPresentationManagerPresenterResize(
+          state->presentationManager,
+          clientSize))
+    {
+      return FALSE;
+    }
+    state->width = (UINT)clientSize.cx;
+    state->height = (UINT)clientSize.cy;
+    return TRUE;
+}
+
+static BOOL magGraphicsGdiSetPresentationEnabled(
+  HWND hWnd,
+  void* opaqueState,
+  BOOL enabled)
+{
+    MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+
+    UNREFERENCED_PARAMETER(hWnd);
+    if (!state)
+    {
+      return FALSE;
+    }
+    if (state->presentationManagerHost &&
+        !magPresentationManagerPresenterSetEnabled(
+          state->presentationManager,
+          enabled))
+    {
+      return FALSE;
+    }
+    state->presentationEnabled = enabled;
+    return TRUE;
 }
 
 static BYTE magGraphicsGdiColorByte(FLOAT value)
@@ -184,15 +324,55 @@ static BOOL magGraphicsGdiRender(
   const MAGPRESENTINTENT* intent)
 {
     MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+    MAGPIXELBUFFER composed;
     BITMAPINFO bmi = { 0 };
     HDC hDC;
     UINT i;
     int copied;
 
-    UNREFERENCED_PARAMETER(intent);
     if (!state || !frame || !frame->pixels || !frame->width || !frame->height)
     {
       return FALSE;
+    }
+
+    if (state->presentationManagerHost)
+    {
+      ID3D11Texture2D* texture = NULL;
+      UINT bufferIndex;
+      D3D11_BOX box;
+
+      if (!state->presentationEnabled || frame->width != state->width ||
+          frame->height != state->height ||
+          !magGraphicsComposeFrame(&state->compositor, frame, ui, &composed) ||
+          !magPresentationManagerPresenterAcquire(
+            state->presentationManager,
+            !intent || intent->synchronize,
+            &texture,
+            &bufferIndex) ||
+          !texture)
+      {
+        return FALSE;
+      }
+      box.left = 0;
+      box.top = 0;
+      box.front = 0;
+      box.right = frame->width;
+      box.bottom = frame->height;
+      box.back = 1;
+      ID3D11DeviceContext_UpdateSubresource(
+        state->d3dContext,
+        (ID3D11Resource*)texture,
+        0,
+        &box,
+        composed.pixels,
+        composed.stride,
+        0);
+      ID3D11Texture2D_Release(texture);
+      return magPresentationManagerPresenterPresent(
+        state->presentationManager,
+        bufferIndex,
+        (SIZE){ (LONG)frame->width, (LONG)frame->height },
+        intent);
     }
 
     hDC = GetDC(hWnd);
@@ -244,14 +424,43 @@ static BOOL magGraphicsGdiRender(
 
 static HANDLE magGraphicsGdiGetFrameWaitHandle(void* state)
 {
-    UNREFERENCED_PARAMETER(state);
-    return NULL;
+    MAGGDISTATE* gdiState = (MAGGDISTATE*)state;
+    return gdiState && gdiState->presentationManagerHost
+      ? magPresentationManagerPresenterGetFrameWaitHandle(
+          gdiState->presentationManager)
+      : NULL;
 }
 
 static UINT64 magGraphicsGdiGetResourceGeneration(void* opaqueState)
 {
     MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
-    return state ? state->resourceGeneration : 0;
+    return state
+      ? state->resourceGeneration + state->compositor.generation +
+        magPresentationManagerPresenterGetResourceGeneration(
+          state->presentationManager)
+      : 0;
+}
+
+static BOOL magGraphicsGdiGetNextEstimatedFrameTime(
+  void* opaqueState,
+  LONGLONG* frameTime)
+{
+    MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+    return state && state->presentationManagerHost &&
+      magPresentationManagerPresenterGetNextEstimatedFrameTime(
+        state->presentationManager,
+        frameTime);
+}
+
+static BOOL magGraphicsGdiGetObservedPresentationTarget(
+  void* opaqueState,
+  UINT* target)
+{
+    MAGGDISTATE* state = (MAGGDISTATE*)opaqueState;
+    return state && state->presentationManagerHost &&
+      magPresentationManagerPresenterGetObservedTarget(
+        state->presentationManager,
+        target);
 }
 
 const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend =
@@ -263,10 +472,10 @@ const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend =
   magGraphicsGdiCreate,
   magGraphicsGdiDestroy,
   magGraphicsGdiResize,
-  magGraphicsSetPresentationEnabledNoop,
+  magGraphicsGdiSetPresentationEnabled,
   magGraphicsGdiRender,
   magGraphicsGdiGetFrameWaitHandle,
   magGraphicsGdiGetResourceGeneration,
-  NULL,
-  NULL,
+  magGraphicsGdiGetNextEstimatedFrameTime,
+  magGraphicsGdiGetObservedPresentationTarget,
 };

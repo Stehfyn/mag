@@ -1,9 +1,10 @@
+#define COBJMACROS
+#define D2D_USE_C_DEFINITIONS
+
 #include "ui_renderer.h"
+#include "d2dwriteabi.h"
 
 #include <windowsx.h>
-
-#include <d2d1.h>
-#include <dwrite.h>
 
 #pragma comment(lib, "d2d1")
 #pragma comment(lib, "dwrite")
@@ -20,6 +21,11 @@
 #define MAG_ATLAS_WIDTH (MAG_ATLAS_COLUMNS * MAG_ATLAS_CELL_WIDTH)
 #define MAG_ATLAS_ROWS ((MAG_ATLAS_GLYPH_COUNT + MAG_ATLAS_COLUMNS - 1) / MAG_ATLAS_COLUMNS)
 #define MAG_ATLAS_HEIGHT (MAG_ATLAS_ROWS * MAG_ATLAS_CELL_HEIGHT)
+
+static const IID IID_MAG_ID2D1Factory =
+  { 0x06152247, 0x6f50, 0x465a, { 0x92, 0x45, 0x11, 0x8b, 0xfd, 0x3b, 0x60, 0x07 } };
+static const IID IID_MAG_IDWriteFactory =
+  { 0xb859ee5a, 0xd838, 0x4b5b, { 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48 } };
 
 struct MAGUIRENDERER
 {
@@ -52,7 +58,7 @@ static void magUiReleaseUnknown(IUnknown** object)
 {
     if (*object)
     {
-      (*object)->Release();
+      (*object)->lpVtbl->Release(*object);
       *object = NULL;
     }
 }
@@ -152,20 +158,29 @@ static BOOL magUiCreateD2DResources(MAGUIRENDERER* renderer)
 
     ZeroMemory(&properties, sizeof(properties));
     properties.type = D2D1_RENDER_TARGET_TYPE_SOFTWARE;
-    properties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    properties.pixelFormat.format = MAG_DXGI_FORMAT_B8G8R8A8_UNORM;
     properties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
     properties.usage = D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE;
 
     hr = D2D1CreateFactory(
       D2D1_FACTORY_TYPE_SINGLE_THREADED,
-      &renderer->d2dFactory);
+      &IID_MAG_ID2D1Factory,
+      NULL,
+      (void**)&renderer->d2dFactory);
     if (SUCCEEDED(hr))
     {
-      hr = renderer->d2dFactory->CreateDCRenderTarget(&properties, &renderer->d2dTarget);
+      hr = renderer->d2dFactory->lpVtbl->CreateDCRenderTarget(
+        renderer->d2dFactory,
+        &properties,
+        &renderer->d2dTarget);
     }
     if (SUCCEEDED(hr))
     {
-      hr = renderer->d2dTarget->CreateSolidColorBrush(&color, NULL, &renderer->d2dBrush);
+      hr = renderer->d2dTarget->lpVtbl->CreateSolidColorBrush(
+        renderer->d2dTarget,
+        &color,
+        NULL,
+        &renderer->d2dBrush);
     }
     return SUCCEEDED(hr);
 }
@@ -174,12 +189,13 @@ static BOOL magUiCreateDirectWriteResources(MAGUIRENDERER* renderer)
 {
     HRESULT hr = DWriteCreateFactory(
       DWRITE_FACTORY_TYPE_SHARED,
-      __uuidof(IDWriteFactory),
+      &IID_MAG_IDWriteFactory,
       (IUnknown**)&renderer->dwriteFactory);
 
     if (SUCCEEDED(hr))
     {
-      hr = renderer->dwriteFactory->CreateTextFormat(
+      hr = renderer->dwriteFactory->lpVtbl->CreateTextFormat(
+        renderer->dwriteFactory,
         L"Segoe UI",
         NULL,
         DWRITE_FONT_WEIGHT_NORMAL,
@@ -191,9 +207,15 @@ static BOOL magUiCreateDirectWriteResources(MAGUIRENDERER* renderer)
     }
     if (SUCCEEDED(hr))
     {
-      renderer->textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-      renderer->textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-      renderer->textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+      renderer->textFormat->lpVtbl->SetWordWrapping(
+        renderer->textFormat,
+        DWRITE_WORD_WRAPPING_NO_WRAP);
+      renderer->textFormat->lpVtbl->SetTextAlignment(
+        renderer->textFormat,
+        DWRITE_TEXT_ALIGNMENT_LEADING);
+      renderer->textFormat->lpVtbl->SetParagraphAlignment(
+        renderer->textFormat,
+        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
     return SUCCEEDED(hr);
 }
@@ -242,15 +264,20 @@ static BOOL magUiCreateGlyphAtlas(MAGUIRENDERER* renderer)
     atlasBitmapOld = SelectBitmap(atlasDC, atlasBitmap);
     if (!atlasBitmapOld || !renderer->d2dTarget || !renderer->d2dBrush ||
         !renderer->dwriteFactory || !renderer->textFormat ||
-        FAILED(renderer->d2dTarget->BindDC(atlasDC, &atlasRect)))
+        FAILED(renderer->d2dTarget->lpVtbl->BindDC(
+          renderer->d2dTarget,
+          atlasDC,
+          &atlasRect)))
     {
       goto cleanup;
     }
 
-    renderer->d2dTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-    renderer->d2dBrush->SetColor(&white);
-    renderer->d2dTarget->BeginDraw();
-    renderer->d2dTarget->Clear(&black);
+    renderer->d2dTarget->lpVtbl->SetTextAntialiasMode(
+      renderer->d2dTarget,
+      D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    renderer->d2dBrush->lpVtbl->SetColor(renderer->d2dBrush, &white);
+    renderer->d2dTarget->lpVtbl->BeginDraw(renderer->d2dTarget);
+    renderer->d2dTarget->lpVtbl->Clear(renderer->d2dTarget, &black);
 
     for (i = 0; i < MAG_ATLAS_GLYPH_COUNT; ++i)
     {
@@ -267,7 +294,8 @@ static BOOL magUiCreateGlyphAtlas(MAGUIRENDERER* renderer)
       IDWriteTextLayout* layout = NULL;
       DWRITE_TEXT_METRICS metrics = { 0 };
 
-      if (SUCCEEDED(renderer->dwriteFactory->CreateTextLayout(
+      if (SUCCEEDED(renderer->dwriteFactory->lpVtbl->CreateTextLayout(
+            renderer->dwriteFactory,
             &character,
             1,
             renderer->textFormat,
@@ -275,7 +303,7 @@ static BOOL magUiCreateGlyphAtlas(MAGUIRENDERER* renderer)
             (FLOAT)MAG_ATLAS_CELL_HEIGHT,
             &layout)))
       {
-        layout->GetMetrics(&metrics);
+        layout->lpVtbl->GetMetrics(layout, &metrics);
       }
       SetRect(
         &renderer->glyphs[i].rect,
@@ -286,7 +314,8 @@ static BOOL magUiCreateGlyphAtlas(MAGUIRENDERER* renderer)
       renderer->glyphs[i].advance = max(
         1,
         (LONG)(metrics.widthIncludingTrailingWhitespace + 0.999f));
-      renderer->d2dTarget->DrawText(
+      renderer->d2dTarget->lpVtbl->DrawText(
+        renderer->d2dTarget,
         &character,
         1,
         renderer->textFormat,
@@ -296,10 +325,13 @@ static BOOL magUiCreateGlyphAtlas(MAGUIRENDERER* renderer)
         DWRITE_MEASURING_MODE_NATURAL);
       if (layout)
       {
-        layout->Release();
+        layout->lpVtbl->Release(layout);
       }
     }
-    if (FAILED(renderer->d2dTarget->EndDraw(NULL, NULL)))
+    if (FAILED(renderer->d2dTarget->lpVtbl->EndDraw(
+          renderer->d2dTarget,
+          NULL,
+          NULL)))
     {
       goto cleanup;
     }
@@ -422,7 +454,7 @@ static void magUiSetD2DBrushColor(
   MAGCOLORF source)
 {
     D2D1_COLOR_F color = { source.r, source.g, source.b, source.a };
-    renderer->d2dBrush->SetColor(&color);
+    renderer->d2dBrush->lpVtbl->SetColor(renderer->d2dBrush, &color);
 }
 
 BOOL magUiRendererCreate(
@@ -573,12 +605,15 @@ static BOOL magUiRendererComposeInternal(
 
     if (UI_GRAPHICS_API_DIRECT2D == renderer->uiApi || TEXT_RENDERER_DIRECTWRITE == renderer->textRenderer)
     {
-      if (FAILED(renderer->d2dTarget->BindDC(renderer->hDC, &targetRect)))
+      if (FAILED(renderer->d2dTarget->lpVtbl->BindDC(
+            renderer->d2dTarget,
+            renderer->hDC,
+            &targetRect)))
       {
         return FALSE;
       }
 
-      renderer->d2dTarget->BeginDraw();
+      renderer->d2dTarget->lpVtbl->BeginDraw(renderer->d2dTarget);
       if (ui)
       {
         for (i = 0; i < ui->count; ++i)
@@ -596,13 +631,17 @@ static BOOL magUiRendererComposeInternal(
               MAG_UI_DRAW_FILL_RECT == command->type)
           {
             magUiSetD2DBrushColor(renderer, command->color);
-            renderer->d2dTarget->FillRectangle(&rect, renderer->d2dBrush);
+            renderer->d2dTarget->lpVtbl->FillRectangle(
+              renderer->d2dTarget,
+              &rect,
+              renderer->d2dBrush);
           }
           else if (UI_GRAPHICS_API_DIRECT2D == renderer->uiApi &&
                    MAG_UI_DRAW_STROKE_RECT == command->type)
           {
             magUiSetD2DBrushColor(renderer, command->color);
-            renderer->d2dTarget->DrawRectangle(
+            renderer->d2dTarget->lpVtbl->DrawRectangle(
+              renderer->d2dTarget,
               &rect,
               renderer->d2dBrush,
               command->thickness,
@@ -613,7 +652,8 @@ static BOOL magUiRendererComposeInternal(
                    MAG_UI_DRAW_TEXT == command->type)
           {
             magUiSetD2DBrushColor(renderer, command->color);
-            renderer->d2dTarget->DrawText(
+            renderer->d2dTarget->lpVtbl->DrawText(
+              renderer->d2dTarget,
               command->text,
               lstrlen(command->text),
               renderer->textFormat,
@@ -624,7 +664,10 @@ static BOOL magUiRendererComposeInternal(
           }
         }
       }
-      if (FAILED(renderer->d2dTarget->EndDraw(NULL, NULL)))
+      if (FAILED(renderer->d2dTarget->lpVtbl->EndDraw(
+            renderer->d2dTarget,
+            NULL,
+            NULL)))
       {
         return FALSE;
       }

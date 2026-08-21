@@ -109,6 +109,8 @@ BOOL render_tryPresentPixelFrame(HWND hWnd);
 BOOL render_recreateGraphicsBackend(HWND hWnd);
 BOOL render_stampPresentedContent(HWND hWnd);
 static BOOL renderSubmitGeometryFrame(HWND hWnd, BOOL restartSequence, BOOL synchronize);
+static BOOL render_isInputDesktop(void);
+static HRESULT render_flushVisibleComposition(void);
 void render_gdiCaptureScreen(HWND hWnd);
 void render_updateSurfaceInfo(HWND hWnd);
 BOOL render_gdiCreateCaptureBitmap(HWND hWnd);
@@ -122,6 +124,7 @@ BOOL render_dxgiEnsureDuplication(HWND hWnd, HMONITOR hMonitor, LPDXGIOUTPUTCAPT
 BOOL render_dxgiEnsureStagingTexture(LPDXGIOUTPUTCAPTURE lpOutput, UINT width, UINT height);
 BOOL render_dxgiUpdateFrame(LPDXGIOUTPUTCAPTURE lpOutput);
 void render_dxgiCopyMappedPixelsToRect(LPMAGSTATE lpsd, const BYTE* src, UINT srcWidth, UINT srcHeight, UINT srcPitch, const RECT* lprcDst);
+static BOOL render_mapSourceRectToTarget(SIZE targetSize, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
 BOOL render_mapSourceRectToDestination(LPMAGSTATE lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst);
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource);
 BOOL render_minimapGetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture);
@@ -149,6 +152,8 @@ BOOL render_wgcCaptureIntersection(LPMAGSTATE lpsd, LPWGCMONITORCAPTURE lpCaptur
 void render_wgcCaptureScreen(HWND hWnd);
 void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource);
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
+static void render_computeSourceRectsFresh(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource);
+static BOOL render_captureViewGeometry(HWND hWnd, LPMAGVIEWGEOMETRY geometry);
 void render_dwmThumbnailDeleteResources(HWND hWnd);
 BOOL render_dwmThumbnailEnsureResources(HWND hWnd);
 BOOL render_dwmThumbnailCaptureScreen(HWND hWnd);
@@ -165,6 +170,74 @@ BOOL render_setGraphicsPresentationEnabled(HWND hWnd, BOOL enabled);
 BOOL render_presentDwmFallback(HWND hWnd);
 static int render_smokeFailure(int code, LPCTSTR reason);
 
+static void render_reportFailure(LPCTSTR reason)
+{
+    TCHAR message[256];
+    DWORD written;
+    HANDLE errorHandle;
+
+    _sntprintf_s(
+      message,
+      ARRAYSIZE(message),
+      _TRUNCATE,
+      TEXT("MAG render failure: %s (error 0x%08lX)\r\n"),
+      reason ? reason : TEXT("unknown"),
+      GetLastError());
+    OutputDebugString(message);
+    errorHandle = GetStdHandle(STD_ERROR_HANDLE);
+    if (errorHandle && INVALID_HANDLE_VALUE != errorHandle)
+    {
+      WriteFile(
+        errorHandle,
+        message,
+        (DWORD)(lstrlen(message) * sizeof(TCHAR)),
+        &written,
+        NULL);
+    }
+}
+
+static BOOL render_isInputDesktop(void)
+{
+    HDESK threadDesktop = GetThreadDesktop(GetCurrentThreadId());
+    HDESK inputDesktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    TCHAR threadName[256];
+    TCHAR inputName[256];
+    DWORD threadNameBytes = 0;
+    DWORD inputNameBytes = 0;
+    BOOL isInput = TRUE;
+
+    if (!threadDesktop || !inputDesktop)
+    {
+      if (inputDesktop)
+      {
+        CloseDesktop(inputDesktop);
+      }
+      return TRUE;
+    }
+    if (GetUserObjectInformation(
+          threadDesktop,
+          UOI_NAME,
+          threadName,
+          sizeof(threadName),
+          &threadNameBytes) &&
+        GetUserObjectInformation(
+          inputDesktop,
+          UOI_NAME,
+          inputName,
+          sizeof(inputName),
+          &inputNameBytes))
+    {
+      isInput = 0 == lstrcmp(threadName, inputName);
+    }
+    CloseDesktop(inputDesktop);
+    return isInput;
+}
+
+static HRESULT render_flushVisibleComposition(void)
+{
+    return render_isInputDesktop() ? DwmFlush() : S_OK;
+}
+
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax)
 {
     const LONG maxOrigin = clipMax - sourceExtent;
@@ -175,6 +248,67 @@ LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG 
     }
 
     return CLAMP(origin, clipMin, maxOrigin);
+}
+
+static LONG render_roundSourceCoordinate(DOUBLE value)
+{
+    return (LONG)(value < 0.0 ? value - 0.5 : value + 0.5);
+}
+
+BOOL render_calculateZoomedSourceOrigin(
+  const RECT* oldSource,
+  SIZE clientSize,
+  FLOAT scaler,
+  DOUBLE anchorU,
+  DOUBLE anchorV,
+  const RECT* capture,
+  POINT* sourceOrigin)
+{
+    LONG oldWidth;
+    LONG oldHeight;
+    LONG sourceWidth;
+    LONG sourceHeight;
+    DOUBLE anchorX;
+    DOUBLE anchorY;
+
+    if (!oldSource || !capture || !sourceOrigin ||
+        clientSize.cx < 1 || clientSize.cy < 1 || scaler < 1.0f ||
+        oldSource->right <= oldSource->left ||
+        oldSource->bottom <= oldSource->top ||
+        capture->right <= capture->left || capture->bottom <= capture->top)
+    {
+      return FALSE;
+    }
+
+    oldWidth = oldSource->right - oldSource->left;
+    oldHeight = oldSource->bottom - oldSource->top;
+    if (scaler <= 1.0001f)
+    {
+      sourceWidth = clientSize.cx;
+      sourceHeight = clientSize.cy;
+    }
+    else
+    {
+      sourceWidth = max(1, (LONG)((DOUBLE)clientSize.cx / (DOUBLE)scaler));
+      sourceHeight = max(1, (LONG)((DOUBLE)clientSize.cy / (DOUBLE)scaler));
+    }
+    anchorU = max(0.0, min(1.0, anchorU));
+    anchorV = max(0.0, min(1.0, anchorV));
+    anchorX = (DOUBLE)oldSource->left + anchorU * (DOUBLE)oldWidth;
+    anchorY = (DOUBLE)oldSource->top + anchorV * (DOUBLE)oldHeight;
+    sourceOrigin->x = render_clipSourceOrigin(
+      render_roundSourceCoordinate(
+        anchorX - anchorU * (DOUBLE)sourceWidth),
+      sourceWidth,
+      capture->left,
+      capture->right);
+    sourceOrigin->y = render_clipSourceOrigin(
+      render_roundSourceCoordinate(
+        anchorY - anchorV * (DOUBLE)sourceHeight),
+      sourceHeight,
+      capture->top,
+      capture->bottom);
+    return TRUE;
 }
 
 void render_updateSurfaceInfo(HWND hWnd)
@@ -562,26 +696,36 @@ void render_dxgiCopyMappedPixelsToRect(LPMAGSTATE lpsd, const BYTE* src, UINT sr
     }
 }
 
-BOOL render_mapSourceRectToDestination(LPMAGSTATE lpsd, const RECT* lprcSource, const RECT* lprcPart, RECT* lprcDst)
+static BOOL render_mapSourceRectToTarget(
+  SIZE targetSize,
+  const RECT* lprcSource,
+  const RECT* lprcPart,
+  RECT* lprcDst)
 {
-    const LONG sourceWidth = RECTWIDTH((*lprcSource));
-    const LONG sourceHeight = RECTHEIGHT((*lprcSource));
+    const LONG sourceWidth = lprcSource ? lprcSource->right - lprcSource->left : 0;
+    const LONG sourceHeight = lprcSource ? lprcSource->bottom - lprcSource->top : 0;
 
-    if (sourceWidth < 1 || sourceHeight < 1 || IsRectEmpty(lprcPart))
+    if (!lprcDst || sourceWidth < 1 || sourceHeight < 1 ||
+        targetSize.cx < 1 || targetSize.cy < 1 || !lprcPart ||
+        lprcPart->right <= lprcPart->left ||
+        lprcPart->bottom <= lprcPart->top)
     {
-      SetRectEmpty(lprcDst);
+      if (lprcDst)
+      {
+        SetRectEmpty(lprcDst);
+      }
       return FALSE;
     }
 
-    lprcDst->left = MulDiv(lprcPart->left - lprcSource->left, lpsd->bi.biWidth, sourceWidth);
-    lprcDst->top = MulDiv(lprcPart->top - lprcSource->top, lpsd->bi.biHeight, sourceHeight);
-    lprcDst->right = MulDiv(lprcPart->right - lprcSource->left, lpsd->bi.biWidth, sourceWidth);
-    lprcDst->bottom = MulDiv(lprcPart->bottom - lprcSource->top, lpsd->bi.biHeight, sourceHeight);
+    lprcDst->left = MulDiv(lprcPart->left - lprcSource->left, targetSize.cx, sourceWidth);
+    lprcDst->top = MulDiv(lprcPart->top - lprcSource->top, targetSize.cy, sourceHeight);
+    lprcDst->right = MulDiv(lprcPart->right - lprcSource->left, targetSize.cx, sourceWidth);
+    lprcDst->bottom = MulDiv(lprcPart->bottom - lprcSource->top, targetSize.cy, sourceHeight);
 
-    lprcDst->left = CLAMP(lprcDst->left, 0, lpsd->bi.biWidth);
-    lprcDst->top = CLAMP(lprcDst->top, 0, lpsd->bi.biHeight);
-    lprcDst->right = CLAMP(lprcDst->right, 0, lpsd->bi.biWidth);
-    lprcDst->bottom = CLAMP(lprcDst->bottom, 0, lpsd->bi.biHeight);
+    lprcDst->left = CLAMP(lprcDst->left, 0, targetSize.cx);
+    lprcDst->top = CLAMP(lprcDst->top, 0, targetSize.cy);
+    lprcDst->right = CLAMP(lprcDst->right, 0, targetSize.cx);
+    lprcDst->bottom = CLAMP(lprcDst->bottom, 0, targetSize.cy);
 
     if (IsRectEmpty(lprcDst))
     {
@@ -589,6 +733,25 @@ BOOL render_mapSourceRectToDestination(LPMAGSTATE lpsd, const RECT* lprcSource, 
     }
 
     return TRUE;
+}
+
+BOOL render_mapSourceRectToDestination(
+  LPMAGSTATE lpsd,
+  const RECT* lprcSource,
+  const RECT* lprcPart,
+  RECT* lprcDst)
+{
+    const SIZE targetSize =
+    {
+      lpsd ? lpsd->bi.biWidth : 0,
+      lpsd ? lpsd->bi.biHeight : 0,
+    };
+
+    return render_mapSourceRectToTarget(
+      targetSize,
+      lprcSource,
+      lprcPart,
+      lprcDst);
 }
 
 BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedSource)
@@ -601,6 +764,17 @@ BOOL render_sourceRectIsClipped(const RECT* lprcSource, const RECT* lprcClippedS
 
 BOOL render_minimapGetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture)
 {
+    if (!lpsd || !lprcCapture)
+    {
+      return FALSE;
+    }
+    if (lpsd->fViewGeometryActive)
+    {
+      *lprcCapture = lpsd->viewGeometry.rcCapture;
+      return lprcCapture->right > lprcCapture->left &&
+        lprcCapture->bottom > lprcCapture->top;
+    }
+
     *lprcCapture = lpsd->di.rc;
 
     if (IsRectEmpty(lprcCapture))
@@ -611,7 +785,8 @@ BOOL render_minimapGetCaptureRect(LPMAGSTATE lpsd, RECT* lprcCapture)
       lprcCapture->bottom = lprcCapture->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
     }
 
-    return RECTWIDTH((*lprcCapture)) > 0 && RECTHEIGHT((*lprcCapture)) > 0;
+    return lprcCapture->right > lprcCapture->left &&
+      lprcCapture->bottom > lprcCapture->top;
 }
 
 void render_minimapNotifyActivity(HWND hWnd)
@@ -763,6 +938,7 @@ void render_buildUiDrawList(HWND hWnd, LPMAGUIDRAWLIST list)
     RECT rcLabel;
     TCHAR label[MAG_UI_MAX_TEXT_LENGTH];
     FLOAT opacity;
+    BOOL fHaveWindowRect;
     UINT i;
 
     magUiDrawListReset(list);
@@ -805,7 +981,16 @@ void render_buildUiDrawList(HWND hWnd, LPMAGUIDRAWLIST list)
 
         magUiDrawListAppendStroke(list, &layout.rcMap, render_uiColor(0.78f, 0.82f, 0.88f, 0.88f * opacity), 1.0f);
 
-        if (GetWindowRect(hWnd, &rcWindow) &&
+        if (lpsd->fViewGeometryActive)
+        {
+          rcWindow = lpsd->viewGeometry.rcWindow;
+          fHaveWindowRect = TRUE;
+        }
+        else
+        {
+          fHaveWindowRect = GetWindowRect(hWnd, &rcWindow);
+        }
+        if (fHaveWindowRect &&
             IntersectRect(&rcClippedWindow, &rcWindow, &layout.rcCapture))
         {
           render_minimapMapSourceRectToClient(&layout, &rcClippedWindow, &rcWindowClient);
@@ -1503,7 +1688,10 @@ BOOL render_wgcCaptureIntersection(LPMAGSTATE lpsd, LPWGCMONITORCAPTURE lpCaptur
     return TRUE;
 }
 
-void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSource)
+static void render_computeSourceRectsFresh(
+  HWND hWnd,
+  RECT* lprcSource,
+  RECT* lprcClippedSource)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const LONG cw = lpsd->bi.biWidth;
@@ -1616,6 +1804,65 @@ void render_computeSourceRects(HWND hWnd, RECT* lprcSource, RECT* lprcClippedSou
     {
       SetRectEmpty(lprcClippedSource);
     }
+}
+
+void render_computeSourceRects(
+  HWND hWnd,
+  RECT* lprcSource,
+  RECT* lprcClippedSource)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lprcSource || !lprcClippedSource)
+    {
+      return;
+    }
+    if (lpsd && lpsd->fViewGeometryActive)
+    {
+      *lprcSource = lpsd->viewGeometry.rcSource;
+      *lprcClippedSource = lpsd->viewGeometry.rcClippedSource;
+      return;
+    }
+    render_computeSourceRectsFresh(hWnd, lprcSource, lprcClippedSource);
+}
+
+static BOOL render_captureViewGeometry(
+  HWND hWnd,
+  LPMAGVIEWGEOMETRY geometry)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd || !geometry || !GetClientRect(hWnd, &geometry->rcClient) ||
+        !GetWindowRect(hWnd, &geometry->rcWindow))
+    {
+      return FALSE;
+    }
+
+    geometry->targetSize.cx = geometry->rcClient.right - geometry->rcClient.left;
+    geometry->targetSize.cy = geometry->rcClient.bottom - geometry->rcClient.top;
+    if (geometry->targetSize.cx < 1 || geometry->targetSize.cy < 1 ||
+        geometry->targetSize.cx != lpsd->bi.biWidth ||
+        geometry->targetSize.cy != lpsd->bi.biHeight ||
+        !render_minimapGetCaptureRect(lpsd, &geometry->rcCapture))
+    {
+      return FALSE;
+    }
+
+    render_computeSourceRectsFresh(
+      hWnd,
+      &geometry->rcSource,
+      &geometry->rcClippedSource);
+    geometry->sourceVisible =
+      render_mapSourceRectToTarget(
+        geometry->targetSize,
+        &geometry->rcSource,
+        &geometry->rcClippedSource,
+        &geometry->rcDestination);
+    if (!geometry->sourceVisible)
+    {
+      SetRectEmpty(&geometry->rcDestination);
+    }
+    return TRUE;
 }
 
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource)
@@ -1750,7 +1997,7 @@ BOOL render_dwmThumbnailCaptureScreen(HWND hWnd)
       return render_presentDwmFallback(hWnd);
     }
 
-    return SUCCEEDED(DwmFlush());
+    return SUCCEEDED(render_flushVisibleComposition());
 }
 
 void render_dwmPrivateDeleteResources(HWND hWnd)
@@ -1807,26 +2054,33 @@ BOOL render_dwmPrivateCaptureScreen(HWND hWnd)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DWMPRIVATEDRAWCOMMAND drawCommands[DWM_PRIVATE_MAX_DRAW_COMMANDS];
-    RECT rcSource;
-    RECT rcClippedSource;
-    RECT rcDestination;
-    RECT rcDesktop;
     const RECT* lprcPrivateSource = NULL;
     const RECT* lprcPrivateDestination = NULL;
-    const SIZE targetSize = { lpsd->bi.biWidth, lpsd->bi.biHeight };
+    const MAGVIEWGEOMETRY* geometry;
+    const BOOL restartSequence =
+      lpsd && lpsd->fPresentIntentActive &&
+      lpsd->presentIntent.restartSequence;
+    const BOOL synchronize =
+      lpsd && lpsd->fPresentIntentActive &&
+      lpsd->presentIntent.synchronize;
     UINT drawCommandCount;
+
+    if (!lpsd || !lpsd->fViewGeometryActive)
+    {
+      return FALSE;
+    }
+    geometry = &lpsd->viewGeometry;
 
     if (!render_setGraphicsPresentationEnabled(hWnd, FALSE))
     {
+      render_reportFailure(TEXT("DWM private could not detach the parked pixel presenter."));
       return render_presentDwmFallback(hWnd);
     }
 
-    render_computeSourceRects(hWnd, &rcSource, &rcClippedSource);
-    if (!IsRectEmpty(&rcClippedSource) &&
-        render_mapSourceRectToDestination(lpsd, &rcSource, &rcClippedSource, &rcDestination))
+    if (geometry->sourceVisible)
     {
-      lprcPrivateSource = &rcClippedSource;
-      lprcPrivateDestination = &rcDestination;
+      lprcPrivateSource = &geometry->rcClippedSource;
+      lprcPrivateDestination = &geometry->rcDestination;
     }
 
     render_buildUiDrawList(hWnd, &lpsd->uiDrawList);
@@ -1834,18 +2088,24 @@ BOOL render_dwmPrivateCaptureScreen(HWND hWnd)
       &lpsd->uiDrawList,
       drawCommands,
       ARRAYSIZE(drawCommands));
-    if (!render_minimapGetCaptureRect(lpsd, &rcDesktop) ||
-        !render_dwmPrivateEnsureResources(hWnd) ||
-        !DwmPrivateCaptureUpdate(
+    if (!render_dwmPrivateEnsureResources(hWnd))
+    {
+      render_reportFailure(TEXT("DWM private visual creation failed."));
+      render_dwmPrivateDeleteResources(hWnd);
+      return render_presentDwmFallback(hWnd);
+    }
+    if (!DwmPrivateCaptureUpdate(
           lpsd->dwmPrivate.state,
-          &rcDesktop,
+          &geometry->rcCapture,
           lprcPrivateSource,
           lprcPrivateDestination,
-          targetSize,
+          geometry->targetSize,
           drawCommands,
-          drawCommandCount))
+          drawCommandCount,
+          restartSequence,
+          synchronize))
     {
-      render_dwmPrivateDeleteResources(hWnd);
+      render_reportFailure(TEXT("DWM private visual update failed."));
       return render_presentDwmFallback(hWnd);
     }
 
@@ -2362,7 +2622,7 @@ BOOL renderApplyPresentationSettings(
             GRAPHICS_API_VULKAN != oldGraphicsBackend->api)))
       {
         oldGraphicsBackend->Destroy(hWnd, oldGraphicsState);
-        DwmFlush();
+        render_flushVisibleComposition();
       }
     }
     if (uiChanged)
@@ -2898,7 +3158,9 @@ static BOOL render_contentTargetsCurrentFrame(
     {
       return FALSE;
     }
-    if (!lpsd->graphicsBackend ||
+    if (!lpsd->fGraphicsPresentationEnabled ||
+        render_captureUsesCompositor(lpsd->captureApi) ||
+        !lpsd->graphicsBackend ||
         !lpsd->graphicsBackend->GetNextEstimatedFrameTime)
     {
       return TRUE;
@@ -2939,7 +3201,7 @@ BOOL renderPrepareWindowResize(HWND hWnd, SIZE proposedClientSize)
     }
 
     if (fPresented && render_contentSizeMatches(lpsd, currentClientSize) &&
-        SUCCEEDED(DwmFlush()))
+        SUCCEEDED(render_flushVisibleComposition()))
     {
       ++lpsd->geometryEpoch;
       lpsd->fGeometryTransition = TRUE;
@@ -3030,14 +3292,16 @@ BOOL render_stampPresentedContent(HWND hWnd)
     lpsd->presentedGeometryEpoch = lpsd->committedGeometryEpoch;
     lpsd->presentedStateTransitionEpoch = lpsd->stateTransitionEpoch;
     lpsd->presentedTargetFrame = 0;
-    if (lpsd->graphicsBackend && lpsd->graphicsState &&
+    if (lpsd->fGraphicsPresentationEnabled &&
+        lpsd->graphicsBackend && lpsd->graphicsState &&
         lpsd->graphicsBackend->GetNextEstimatedFrameTime)
     {
       lpsd->graphicsBackend->GetNextEstimatedFrameTime(
         lpsd->graphicsState,
         &lpsd->presentedTargetFrame);
     }
-    if (lpsd->graphicsBackend && lpsd->graphicsState &&
+    if (lpsd->fGraphicsPresentationEnabled &&
+        lpsd->graphicsBackend && lpsd->graphicsState &&
         lpsd->graphicsBackend->GetObservedPresentationTarget &&
         lpsd->graphicsBackend->GetObservedPresentationTarget(
           lpsd->graphicsState,
@@ -3081,7 +3345,8 @@ static BOOL renderSubmitGeometryFrame(
     oldIntent = lpsd->presentIntent;
     oldIntentActive = lpsd->fPresentIntentActive;
     lpsd->presentIntent.restartSequence = restartSequence;
-    lpsd->presentIntent.synchronize = synchronize;
+    lpsd->presentIntent.synchronize =
+      synchronize && render_isInputDesktop();
     lpsd->fPresentIntentActive = TRUE;
     result = renderSubmit(hWnd);
     lpsd->presentIntent = oldIntent;
@@ -3120,11 +3385,22 @@ BOOL renderSubmitStateTransitionFrame(HWND hWnd, BOOL synchronize)
 BOOL renderSubmit(HWND hWnd)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    BOOL ownsGeometry;
     BOOL fPresented;
 
     if (!lpsd)
     {
       return FALSE;
+    }
+
+    ownsGeometry = !lpsd->fViewGeometryActive;
+    if (ownsGeometry)
+    {
+      if (!render_captureViewGeometry(hWnd, &lpsd->viewGeometry))
+      {
+        return FALSE;
+      }
+      lpsd->fViewGeometryActive = TRUE;
     }
 
     (void)render_transitionCaptureApi(hWnd, lpsd->captureApi);
@@ -3157,6 +3433,10 @@ BOOL renderSubmit(HWND hWnd)
     if (fPresented)
     {
       render_stampPresentedContent(hWnd);
+    }
+    if (ownsGeometry)
+    {
+      lpsd->fViewGeometryActive = FALSE;
     }
     return fPresented;
 }
@@ -3439,6 +3719,104 @@ cleanup:
     return success;
 }
 
+static BOOL render_testViewGeometryMath(void)
+{
+    const SIZE targetSize = { 800, 600 };
+    const RECT source = { -1200, 250, -800, 650 };
+    const RECT clipped = { -1000, 300, -800, 650 };
+    const RECT expectedDestination = { 400, 75, 800, 600 };
+    const RECT capture = { -2560, -400, 1920, 1080 };
+    const RECT oldSource = { -2000, -100, -1200, 500 };
+    const RECT transformDestination = { 100, 50, 700, 500 };
+    const MINIMAPLAYOUT layout =
+    {
+      { -2000, -100, 2000, 900 },
+      { 10, 20, 410, 120 },
+    };
+    const RECT minimapSource = { -1000, 400, 0, 650 };
+    const RECT expectedMinimap = { 110, 70, 210, 95 };
+    const POINT minimapClientPoint = { 110, 70 };
+    const POINT expectedSourcePoint = { -1000, 400 };
+    RECT destination;
+    RECT minimapRect;
+    POINT sourcePoint;
+    POINT origin;
+    DWMPRIVATEVIEWTRANSFORM transform;
+
+    if (!render_mapSourceRectToTarget(
+          targetSize,
+          &source,
+          &clipped,
+          &destination) ||
+        !EqualRect(&destination, &expectedDestination))
+    {
+      return FALSE;
+    }
+
+    render_minimapMapSourceRectToClient(
+      &layout,
+      &minimapSource,
+      &minimapRect);
+    sourcePoint = render_minimapClientPointToSource(
+      &layout,
+      minimapClientPoint);
+    if (!EqualRect(&minimapRect, &expectedMinimap) ||
+        sourcePoint.x != expectedSourcePoint.x ||
+        sourcePoint.y != expectedSourcePoint.y)
+    {
+      return FALSE;
+    }
+
+    if (!render_calculateZoomedSourceOrigin(
+          &oldSource,
+          targetSize,
+          2.0f,
+          0.25,
+          0.25,
+          &capture,
+          &origin) ||
+        origin.x != -1900 || origin.y != -25)
+    {
+      return FALSE;
+    }
+
+    if (!DwmPrivateCalculateViewTransform(
+          &capture,
+          &oldSource,
+          &transformDestination,
+          &transform) ||
+        fabsf(
+          ((FLOAT)(oldSource.left - capture.left) * transform.m11) +
+            transform.dx - (FLOAT)transformDestination.left) > 0.001f ||
+        fabsf(
+          ((FLOAT)(oldSource.right - capture.left) * transform.m11) +
+            transform.dx - (FLOAT)transformDestination.right) > 0.001f ||
+        fabsf(
+          ((FLOAT)(oldSource.top - capture.top) * transform.m22) +
+            transform.dy - (FLOAT)transformDestination.top) > 0.001f ||
+        fabsf(
+          ((FLOAT)(oldSource.bottom - capture.top) * transform.m22) +
+            transform.dy - (FLOAT)transformDestination.bottom) > 0.001f ||
+        !EqualRect(&transform.clip, &transformDestination))
+    {
+      return FALSE;
+    }
+
+    if (!render_calculateZoomedSourceOrigin(
+          &oldSource,
+          (SIZE){ 1000, 700 },
+          2.0f,
+          0.5,
+          0.5,
+          &capture,
+          &origin) ||
+        origin.x != -1850 || origin.y != 25)
+    {
+      return FALSE;
+    }
+    return TRUE;
+}
+
 static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE desiredClientSize)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -3534,7 +3912,11 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
         actualSize.cx = RECTWIDTH(rcClient);
         actualSize.cy = RECTHEIGHT(rcClient);
 
-        if (actualSize.cx < 1 || actualSize.cy < 1 ||
+        if (!GetWindowRect(hWnd, &rcWindow) ||
+            actualSize.cx < 1 || actualSize.cy < 1 ||
+            (!IsZoomed(hWnd) &&
+             (rcWindow.right - rcWindow.left != actualSize.cx ||
+              rcWindow.bottom - rcWindow.top != actualSize.cy)) ||
             lpsd->resizeCommitCount <= commitBefore ||
             lpsd->committedGeometryEpoch <= epochBefore ||
             lpsd->presentedGeometryEpoch != lpsd->committedGeometryEpoch ||
@@ -3543,6 +3925,10 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
             lpsd->presentedContentSize.cy != actualSize.cy ||
             lpsd->frame.width != (UINT)actualSize.cx ||
             lpsd->frame.height != (UINT)actualSize.cy ||
+            lpsd->viewGeometry.targetSize.cx != actualSize.cx ||
+            lpsd->viewGeometry.targetSize.cy != actualSize.cy ||
+            !EqualRect(&lpsd->viewGeometry.rcClient, &rcClient) ||
+            lpsd->fViewGeometryActive ||
             lpsd->fDeferredResize ||
             lpsd->fGeometryTransition ||
             GetTickCount64() - epochStart > epochLatencyLimit)
@@ -3912,7 +4298,111 @@ static int render_smokeFailure(int code, LPCTSTR reason)
     return code;
 }
 
-int renderRunGraphicsSmoke(HWND hWnd)
+static BOOL render_smokeDwmPrivateCoverage(
+  LPMAGSTATE lpsd,
+  HWND hDesktopFixture,
+  HWND hTaskbarFixture,
+  HWND hPeerFixture,
+  int failureCode)
+{
+    const UINT desktopCoverage = DwmPrivateCaptureGetWindowCoverage(
+      lpsd ? lpsd->dwmPrivate.state : NULL, hDesktopFixture);
+    const UINT taskbarCoverage = DwmPrivateCaptureGetWindowCoverage(
+      lpsd ? lpsd->dwmPrivate.state : NULL, hTaskbarFixture);
+    const UINT peerCoverage = DwmPrivateCaptureGetWindowCoverage(
+      lpsd ? lpsd->dwmPrivate.state : NULL, hPeerFixture);
+    const UINT expectedCoverage = DWM_PRIVATE_WINDOW_COVERAGE_SHARED;
+
+    if (desktopCoverage != expectedCoverage ||
+        taskbarCoverage != expectedCoverage ||
+        peerCoverage != expectedCoverage)
+    {
+      TCHAR detail[320];
+
+      _sntprintf_s(
+        detail,
+        ARRAYSIZE(detail),
+        _TRUNCATE,
+        TEXT("DWM private window coverage is incomplete: desktop=0x%x/0x%x taskbar=0x%x/0x%x peer=0x%x/0x%x."),
+        desktopCoverage,
+        expectedCoverage,
+        taskbarCoverage,
+        expectedCoverage,
+        peerCoverage,
+        expectedCoverage);
+      render_smokeFailure(failureCode, detail);
+      return FALSE;
+    }
+    return TRUE;
+}
+
+int renderRunDwmPrivateSmoke(
+  HWND hWnd,
+  HWND hDesktopFixture,
+  HWND hTaskbarFixture,
+  HWND hPeerFixture)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    MAGPRESENTATIONSETTINGS presentation;
+    const SIZE resizeSizes[] = { { 337, 251 }, { 509, 347 } };
+    TCHAR reason[256];
+    UINT frameIndex;
+    UINT resizeIndex;
+
+    if (!lpsd)
+    {
+      return render_smokeFailure(910, TEXT("The DWM private smoke has no window state."));
+    }
+    magPresentationSettingsSetDefaults(&presentation);
+    if (!renderApplyFullSettings(
+          hWnd,
+          GRAPHICS_API_GDI,
+          CAPTURE_API_DWM_PRIVATE_VISUAL,
+          UI_GRAPHICS_API_DIRECT2D,
+          TEXT_RENDERER_DIRECTWRITE,
+          &presentation,
+          reason,
+          ARRAYSIZE(reason)))
+    {
+      return render_smokeFailure(911, reason);
+    }
+    for (frameIndex = 0; frameIndex < 3; ++frameIndex)
+    {
+      if (!renderSubmit(hWnd))
+      {
+        return render_smokeFailure(
+          912, TEXT("The DWM private visual could not submit a frame."));
+      }
+    }
+    if (!render_smokeDwmPrivateCoverage(
+          lpsd,
+          hDesktopFixture,
+          hTaskbarFixture,
+          hPeerFixture,
+          913))
+    {
+      return 913;
+    }
+    for (resizeIndex = 0; resizeIndex < ARRAYSIZE(resizeSizes); ++resizeIndex)
+    {
+      if (!render_smokeResizeWindow(
+            hWnd, GRAPHICS_API_GDI, resizeSizes[resizeIndex]))
+      {
+        return 914 + (int)resizeIndex;
+      }
+    }
+    if (!render_smokeWindowTransitions(hWnd, GRAPHICS_API_GDI))
+    {
+      return 916;
+    }
+    return 0;
+}
+
+int renderRunGraphicsSmoke(
+  HWND hWnd,
+  HWND hDesktopFixture,
+  HWND hTaskbarFixture,
+  HWND hPeerFixture)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     const MAGGRAPHICSBACKEND* availableBackends[GRAPHICS_API_COUNT];
@@ -3931,7 +4421,7 @@ int renderRunGraphicsSmoke(HWND hWnd)
       render_gdiCreateResources(hWnd);
     }
     if (!lpsd || !lpsd->frame.pixels || !GetClientRect(hWnd, &initialClientRect) ||
-        !render_testCpuCompositor())
+        !render_testCpuCompositor() || !render_testViewGeometryMath())
     {
       return 1;
     }
@@ -4140,6 +4630,18 @@ int renderRunGraphicsSmoke(HWND hWnd)
           if (!renderSubmit(hWnd))
           {
             return 520 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi;
+          }
+        }
+        if (CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi)
+        {
+          if (!render_smokeDwmPrivateCoverage(
+                lpsd,
+                hDesktopFixture,
+                hTaskbarFixture,
+                hPeerFixture,
+                900 + (int)backendIndex))
+          {
+            return 900 + (int)backendIndex;
           }
         }
         {

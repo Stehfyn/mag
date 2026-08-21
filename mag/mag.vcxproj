@@ -166,31 +166,31 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="d3dkmtx.c" />
-    <ClCompile Include="dwmprivate.cpp" />
+    <ClCompile Include="dwmprivate.c" />
     <ClCompile Include="dwmapix.c" />
     <ClCompile Include="graphics.c" />
-    <ClCompile Include="graphics_dcomp.cpp" />
+    <ClCompile Include="graphics_dcomp.c" />
     <ClCompile Include="graphics_d3d11.c" />
     <ClCompile Include="graphics_d3d12.c" />
     <ClCompile Include="graphics_d3d9.c" />
     <ClCompile Include="graphics_gdi.c" />
     <ClCompile Include="graphics_layered.c" />
     <ClCompile Include="graphics_opengl.c" />
-    <ClCompile Include="graphics_presentation_manager.cpp" />
+    <ClCompile Include="graphics_presentation_manager.c" />
     <ClCompile Include="graphics_vulkan.c" />
     <ClCompile Include="help.c" />
     <ClCompile Include="mag.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="presentation.c" />
     <ClCompile Include="render.c" />
-    <ClCompile Include="ui_renderer.c">
-      <CompileAs>CompileAsCpp</CompileAs>
-    </ClCompile>
+    <ClCompile Include="ui_renderer.c" />
     <ClCompile Include="wingdix.c" />
     <ClCompile Include="winuserx.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="d3dkmtx.h" />
+    <ClInclude Include="dcompabi.h" />
+    <ClInclude Include="d2dwriteabi.h" />
     <ClInclude Include="dwmprivate.h" />
     <ClInclude Include="dwmapix.h" />
     <ClInclude Include="graphics.h" />

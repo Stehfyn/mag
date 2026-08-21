@@ -66,6 +66,18 @@ typedef struct DWMPRIVATEVISUALCAPTURE
   DWMPRIVATECAPTURESTATE* state;
 } DWMPRIVATEVISUALCAPTURE, *LPDWMPRIVATEVISUALCAPTURE;
 
+typedef struct MAGVIEWGEOMETRY
+{
+  RECT rcClient;
+  RECT rcWindow;
+  RECT rcCapture;
+  RECT rcSource;
+  RECT rcClippedSource;
+  RECT rcDestination;
+  SIZE targetSize;
+  BOOL sourceVisible;
+} MAGVIEWGEOMETRY, *LPMAGVIEWGEOMETRY;
+
 typedef struct MAGSTATE
 {
   BOOL             fTrackCursor;
@@ -101,6 +113,8 @@ typedef struct MAGSTATE
   RECT             rc;
   DISPLAYINFO      di;
   BITMAPINFOHEADER bi;
+  MAGVIEWGEOMETRY  viewGeometry;
+  BOOL             fViewGeometryActive;
   MAGPIXELBUFFER   frame;
   UINT             frameCapacityWidth;
   UINT             frameCapacityHeight;
@@ -188,9 +202,26 @@ HANDLE renderDuplicateFrameWaitHandle(HWND hWnd);
 void renderRender(HWND hWnd);
 BOOL renderSubmit(HWND hWnd);
 BOOL renderSubmitLiveFrame(HWND hWnd);
-int renderRunGraphicsSmoke(HWND hWnd);
+int renderRunGraphicsSmoke(
+  HWND hWnd,
+  HWND hDesktopFixture,
+  HWND hTaskbarFixture,
+  HWND hPeerFixture);
+int renderRunDwmPrivateSmoke(
+  HWND hWnd,
+  HWND hDesktopFixture,
+  HWND hTaskbarFixture,
+  HWND hPeerFixture);
 
 LONG render_clipSourceOrigin(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
+BOOL render_calculateZoomedSourceOrigin(
+  const RECT* oldSource,
+  SIZE clientSize,
+  FLOAT scaler,
+  DOUBLE anchorU,
+  DOUBLE anchorV,
+  const RECT* capture,
+  POINT* sourceOrigin);
 
 void render_computeSourceRect(HWND hWnd, RECT* lprcSource);
 

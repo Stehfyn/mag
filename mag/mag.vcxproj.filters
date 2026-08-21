@@ -1,6 +1,12 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClInclude Include="dcompabi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="d2dwriteabi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <Filter Include="Source Files">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
@@ -33,7 +39,7 @@
     <ClCompile Include="graphics.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="graphics_dcomp.cpp">
+    <ClCompile Include="graphics_dcomp.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics_d3d11.c">
@@ -54,7 +60,7 @@
     <ClCompile Include="graphics_opengl.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="graphics_presentation_manager.cpp">
+    <ClCompile Include="graphics_presentation_manager.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics_vulkan.c">
@@ -63,7 +69,7 @@
     <ClCompile Include="d3dkmtx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="dwmprivate.cpp">
+    <ClCompile Include="dwmprivate.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="help.c">

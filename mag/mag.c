@@ -1546,11 +1546,6 @@ UINT mag_OnNCCalcSize(HWND hWnd, BOOL fCalcValidRects, NCCALCSIZE_PARAMS* lpcsp)
           lpcsp->rgrc[0] = mi.rcWork;
         }
       }
-      else if (!lpsd || MAG_HOST_TRADITIONAL_LAYERED != lpsd->resolvedPresentation.host)
-      {
-        lpcsp->rgrc[0].bottom += 1;
-      }
-
       /*
        * The proposed rectangle is not committed yet.  Latch content for the
        * current client size before DWM switches geometry; the replacement
@@ -1805,8 +1800,6 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
       const FLOAT fWheelSteps = (FLOAT)zDelta / (FLOAT)WHEEL_DELTA;
       FLOAT fScaleNew;
       FLOAT fTexScalerNew;
-      DOUBLE anchorX = 0.0;
-      DOUBLE anchorY = 0.0;
 
       render_minimapNotifyActivity(hWnd);
 
@@ -1829,16 +1822,6 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
           return;
         }
 
-        if (fMouseRelativeZoom)
-        {
-          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)ptClient.x * (DOUBLE)RECTWIDTH(rcSourceOld) / (DOUBLE)clientWidth);
-          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)ptClient.y * (DOUBLE)RECTHEIGHT(rcSourceOld) / (DOUBLE)clientHeight);
-        }
-        else
-        {
-          anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)RECTWIDTH(rcSourceOld) / 2.0);
-          anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)RECTHEIGHT(rcSourceOld) / 2.0);
-        }
       }
 
       lpsd->fScale = fScaleNew;
@@ -1846,26 +1829,29 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
 
       if (fAnchorZoom && (lpsd->fTexScaler > 1.0001f || lpsd->fSourceOriginPinned))
       {
-        const LONG srcW = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(clientWidth / lpsd->fTexScaler)) : clientWidth;
-        const LONG srcH = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(clientHeight / lpsd->fTexScaler)) : clientHeight;
-        LONG srcX;
-        LONG srcY;
+        const SIZE clientSize = { clientWidth, clientHeight };
+        const DOUBLE anchorU = fMouseRelativeZoom
+          ? (DOUBLE)ptClient.x / (DOUBLE)clientWidth
+          : 0.5;
+        const DOUBLE anchorV = fMouseRelativeZoom
+          ? (DOUBLE)ptClient.y / (DOUBLE)clientHeight
+          : 0.5;
+        POINT sourceOrigin;
 
         mag_GetCaptureRect(lpsd, &rcCapture);
-
-        if (fMouseRelativeZoom)
+        if (!render_calculateZoomedSourceOrigin(
+              &rcSourceOld,
+              clientSize,
+              lpsd->fTexScaler,
+              anchorU,
+              anchorV,
+              &rcCapture,
+              &sourceOrigin))
         {
-          srcX = (LONG)(anchorX - ((DOUBLE)ptClient.x * (DOUBLE)srcW / (DOUBLE)clientWidth));
-          srcY = (LONG)(anchorY - ((DOUBLE)ptClient.y * (DOUBLE)srcH / (DOUBLE)clientHeight));
-        }
-        else
-        {
-          srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
-          srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
+          return;
         }
 
-        lpsd->ptSourceOrigin.x = render_clipSourceOrigin(srcX, srcW, rcCapture.left, rcCapture.right);
-        lpsd->ptSourceOrigin.y = render_clipSourceOrigin(srcY, srcH, rcCapture.top, rcCapture.bottom);
+        lpsd->ptSourceOrigin = sourceOrigin;
         lpsd->fUseSourceOrigin = TRUE;
         if (!fKeepSourceOrigin)
         {
@@ -1878,7 +1864,11 @@ void mag_OnMouseWheel(HWND hWnd, int xPos, int yPos, int zDelta, UINT fwKeys)
         lpsd->fSourceOriginPinned = FALSE;
       }
 
-      renderRender(hWnd);
+      if (MAG_VIEW_LENS == lpsd->viewMode)
+      {
+        mag_UpdateLensWindowPosition(hWnd);
+      }
+      renderSubmitStateTransitionFrame(hWnd, TRUE);
     }
 }
 
@@ -2069,8 +2059,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     RECT rcSourceOld;
     RECT rcCapture;
     BOOL fPreservePinnedCenter = FALSE;
-    DOUBLE anchorX = 0.0;
-    DOUBLE anchorY = 0.0;
 
     if (lpsd &&
         fSized &&
@@ -2083,8 +2071,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
       render_computeSourceRect(hWnd, &rcSourceOld);
       if (!IsRectEmpty(&rcSourceOld))
       {
-        anchorX = (DOUBLE)rcSourceOld.left + ((DOUBLE)RECTWIDTH(rcSourceOld) / 2.0);
-        anchorY = (DOUBLE)rcSourceOld.top + ((DOUBLE)RECTHEIGHT(rcSourceOld) / 2.0);
         fPreservePinnedCenter = TRUE;
       }
     }
@@ -2097,6 +2083,13 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
     {
       render_minimapNotifyActivity(hWnd);
 
+      if (fSized && !renderResizeCapture(hWnd))
+      {
+        lpsd->fResizeContractViolation = TRUE;
+        lpsd->fGeometryTransition = FALSE;
+        return;
+      }
+
       if (fActualMove)
       {
         lpsd->fUseSourceOrigin = FALSE;
@@ -2106,14 +2099,28 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
                lpsd->bi.biWidth > 0 &&
                lpsd->bi.biHeight > 0)
       {
-        const LONG srcW = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(lpsd->bi.biWidth / lpsd->fTexScaler)) : lpsd->bi.biWidth;
-        const LONG srcH = (lpsd->fTexScaler > 1.0001f) ? max(1, (LONG)(lpsd->bi.biHeight / lpsd->fTexScaler)) : lpsd->bi.biHeight;
-        const LONG srcX = (LONG)(anchorX - ((DOUBLE)srcW / 2.0));
-        const LONG srcY = (LONG)(anchorY - ((DOUBLE)srcH / 2.0));
+        const SIZE clientSize =
+        {
+          lpsd->bi.biWidth,
+          lpsd->bi.biHeight,
+        };
+        POINT sourceOrigin;
 
         mag_GetCaptureRect(lpsd, &rcCapture);
-        lpsd->ptSourceOrigin.x = render_clipSourceOrigin(srcX, srcW, rcCapture.left, rcCapture.right);
-        lpsd->ptSourceOrigin.y = render_clipSourceOrigin(srcY, srcH, rcCapture.top, rcCapture.bottom);
+        if (!render_calculateZoomedSourceOrigin(
+              &rcSourceOld,
+              clientSize,
+              lpsd->fTexScaler,
+              0.5,
+              0.5,
+              &rcCapture,
+              &sourceOrigin))
+        {
+          lpsd->fResizeContractViolation = TRUE;
+          lpsd->fGeometryTransition = FALSE;
+          return;
+        }
+        lpsd->ptSourceOrigin = sourceOrigin;
         lpsd->fUseSourceOrigin = TRUE;
         lpsd->fSourceOriginPinned = TRUE;
       }
@@ -2123,7 +2130,6 @@ void mag_OnWindowPosChanged(HWND hWnd, const WINDOWPOS* lpwndpos)
       }
       if (fSized)
       {
-        renderResizeCapture(hWnd);
         renderPresentCommittedGeometry(hWnd);
         lpsd->fGeometryTransition = FALSE;
       }

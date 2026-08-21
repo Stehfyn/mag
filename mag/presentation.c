@@ -552,9 +552,11 @@ BOOL magPresentationResolve(
       return FALSE;
     }
     if (MAG_HARDWARE_ADAPTER_WARP == resolved->hardware.mode &&
-        GRAPHICS_API_D3D11 != graphicsApi && GRAPHICS_API_D3D12 != graphicsApi)
+        GRAPHICS_API_D3D11 != graphicsApi && GRAPHICS_API_D3D12 != graphicsApi &&
+        !(GRAPHICS_API_GDI == graphicsApi &&
+          MAG_HOST_PRESENTATION_MANAGER == requested->host))
     {
-      lstrcpyn(status->reason, TEXT("WARP is available only to the Direct3D 11 and Direct3D 12 renderers."), ARRAYSIZE(status->reason));
+      lstrcpyn(status->reason, TEXT("WARP is available to Direct3D renderers and to the explicit GDI-to-Presentation-Manager bridge."), ARRAYSIZE(status->reason));
       return FALSE;
     }
 
@@ -613,7 +615,8 @@ BOOL magPresentationResolve(
     }
     if (MAG_HOST_PRESENTATION_MANAGER == resolved->host &&
         GRAPHICS_API_D3D11 != graphicsApi &&
-        GRAPHICS_API_D3D12 != graphicsApi)
+        GRAPHICS_API_D3D12 != graphicsApi &&
+        GRAPHICS_API_GDI != graphicsApi)
     {
       lstrcpyn(status->reason, TEXT("The selected renderer does not expose an adapter-compatible native frame to the Presentation Manager bridge."), ARRAYSIZE(status->reason));
       return FALSE;
@@ -633,6 +636,8 @@ BOOL magPresentationResolve(
       return FALSE;
     }
     if (GRAPHICS_API_D3D11 != graphicsApi && GRAPHICS_API_D3D12 != graphicsApi &&
+        !(GRAPHICS_API_GDI == graphicsApi &&
+          MAG_HOST_PRESENTATION_MANAGER == resolved->host) &&
         CAPTURE_API_DWM_PRIVATE_VISUAL != captureApi &&
         MAG_HOST_REDIRECTED_HWND != resolved->host &&
         MAG_HOST_TRADITIONAL_LAYERED != resolved->host)
