@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Presentation and Composition - MAG Screen Magnifier Help</title>
+  <link rel="stylesheet" type="text/css" href="help.css">
+</head>
+<body>
+
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Presentation and Composition</p>
+
+<h1>Presentation and Composition</h1>
+
+<p>
+  These controls describe how completed content reaches the Desktop Window Manager and
+  display. They are validated together; selecting an API name does not guarantee that
+  Windows can use that model for the current renderer, host, adapter, and window state.
+</p>
+
+<div class="hero">
+  <p class="lead">Start on Auto. Exact choices are contracts, not hints: MAG rejects an unavailable target, incompatible surface/host, forbidden copy class, or unavailable adapter instead of silently weakening the request.</p>
+</div>
+
+<div class="help-figure figure-wide">
+  <img src="images/mag-settings-presentation.png" width="1020" alt="MAG Present tab with target, surface, host, copy policy, exact-target, and tearing controls.">
+  <p class="caption"><strong>Present tab:</strong> the same controls embedded in Route nodes are available at full width. Compatible choices activate immediately; Exact target and Allow tearing are independent settings.</p>
+</div>
+
+<h2>Presentation controls in MAG</h2>
+<table class="gallery-table">
+  <tr>
+    <td><img src="images/mag-settings-target-options.png" alt="MAG presentation target dropdown with all eight presentation models."><p class="caption"><strong>Target:</strong> Auto plus legacy flip/copy, independent flip, composed flip, hardware-composed independent flip, and GPU/CPU GDI copy models.</p></td>
+    <td><img src="images/mag-settings-surface-options.png" alt="MAG surface dropdown with Auto, DWM redirection, and no redirection."><p class="caption"><strong>Surface:</strong> host-owned Auto, DWM redirection, or no redirection.</p></td>
+  </tr>
+  <tr>
+    <td><img src="images/mag-settings-host-options.png" alt="MAG composition host dropdown with Auto, Redirected HWND, Traditional layered window, DirectComposition, and Presentation Manager."><p class="caption"><strong>Host:</strong> Auto, Redirected HWND, Traditional layered window, DirectComposition, or Windows 11 Presentation Manager.</p></td>
+    <td><img src="images/mag-settings-copy-options.png" alt="MAG copy policy dropdown with Auto, Strict zero-copy, Allow GPU-local copy, and Allow CPU round trip."><p class="caption"><strong>Copy policy:</strong> fastest valid, strict zero-copy, GPU-local copy, or diagnostic CPU round trip.</p></td>
+  </tr>
+  <tr>
+    <td><img src="images/mag-settings-alpha-options.png" alt="MAG alpha mode dropdown with Opaque, Constant alpha, Color key, and Per-pixel premultiplied alpha."><p class="caption"><strong>Alpha:</strong> opaque, constant, color key, or per-pixel premultiplied.</p></td>
+    <td><img src="images/mag-settings-display-adapter-options.png" alt="MAG display adapter dropdown with Auto, Follow captured display, and explicit output choices."><p class="caption"><strong>Display adapter:</strong> window output, captured display, or a named output/monitor.</p></td>
+  </tr>
+  <tr>
+    <td><img src="images/mag-settings-hardware-adapter-options.png" alt="MAG hardware adapter dropdown with automatic, display, capture, WARP, and explicit adapter choices."><p class="caption"><strong>Hardware adapter:</strong> highest-performance compatible, match display/capture, WARP, or an explicit adapter/LUID.</p></td>
+    <td><img src="images/mag-settings-compositor-status.png" alt="MAG Route DAG after DWM Private Visual activates successfully."><p class="caption"><strong>Resolved result:</strong> the Route DAG and status identify the active compositor-visual path immediately.</p></td>
+  </tr>
+</table>
+
+<h2>Presentation target</h2>
+<table>
+  <tr><th>Target</th><th>Description</th></tr>
+  <tr><td class="key">Auto (highest performance)</td><td>Selects the fastest target implemented by the active graphics/host route.</td></tr>
+  <tr><td class="key">Hardware: Legacy Flip</td><td>Requests the legacy hardware flip path used by compatible presenters such as WGL.</td></tr>
+  <tr><td class="key">Hardware: Legacy Copy to front buffer</td><td>Requests the legacy front-buffer copy presentation model where the backend exposes it.</td></tr>
+  <tr><td class="key">Hardware: Independent Flip</td><td>Requests direct independent-flip eligibility. Actual promotion remains under Windows/DWM control.</td></tr>
+  <tr><td class="key">Composed: Flip</td><td>Uses flip-model presentation while DWM composes the result.</td></tr>
+  <tr><td class="key">Hardware Composed: Independent Flip</td><td>Requests the hardware-composed independent-flip model supported by compatible DXGI/Presentation Manager routes.</td></tr>
+  <tr><td class="key">Composed: Copy with GPU GDI</td><td>Requests the composed GPU-assisted GDI copy model where supported.</td></tr>
+  <tr><td class="key">Composed: Copy with CPU GDI</td><td>Uses the CPU/GDI composed-copy model, including traditional layered presentation.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Observed mode:</strong> Windows can decline a requested hardware mode because of
+  occlusion, scaling, overlays, topology, driver capability, or window state. With
+  <em>Require exact target</em> enabled, an observed mismatch marks the route unsupported.
+</div>
+
+<h2>Configured presenter, eligible plane, and observed result</h2>
+<p>
+  A swap effect is an application configuration. DirectFlip, Independent Flip, and MPO are
+  decisions Windows can make later for an eligible submitted frame. MAG keeps the following
+  states separate so an available capability is never presented as proof that the frame is
+  currently scanning out on that plane.
+</p>
+<table>
+  <tr><th>State</th><th>What it means</th></tr>
+  <tr><td class="key">Requested</td><td>The Target selected in Settings, or Auto.</td></tr>
+  <tr><td class="key">Configured</td><td>The presenter/host MAG actually created, including swap effect, buffers, pacing, format, alpha, surface ownership, and adapter.</td></tr>
+  <tr><td class="key">Eligible</td><td>The selected output and current geometry satisfy the reported DirectFlip, panel-fitter, Independent Flip, MPO, displayable-surface, opacity, and adapter prerequisites.</td></tr>
+  <tr><td class="key">Observed</td><td>Windows reported the exact result for a MAG frame through Presentation Manager statistics or the process-scoped ETW observer.</td></tr>
+</table>
+
+<p class="note">
+  DirectFlip is a transition/prerequisite, not a separate exact PresentMon label. A generic or
+  missing statistic is never converted to Independent Flip. If the ETW session cannot start,
+  the status reports the Windows error and continues to describe only configuration and
+  eligibility; it does not claim that a hardware plane is active.
+</p>
+
+<h2>Display-plane status</h2>
+<table>
+  <tr><th>Reported value</th><th>How MAG uses it</th></tr>
+  <tr><td class="key">DirectFlip and geometry</td><td>Shows driver support and whether the current client covers the selected output. Full-output coverage is one DirectFlip route; it is not the only possible MPO route.</td></tr>
+  <tr><td class="key">Panel fitter</td><td>Reports hardware scaling eligibility when a full-output client uses a differently sized buffer. The cursor-stretch warning is shown separately.</td></tr>
+  <tr><td class="key">Independent Flip</td><td>Reports primary and secondary-display capability. Windows can still return to composition because of occlusion, overlays, alpha, scaling, topology, or another desktop change.</td></tr>
+  <tr><td class="key">MPO planes</td><td>Shows the selected VidPN source's current total, RGB, and YUV plane counts plus decode, secondary-display, stretch, HUD, kernel, and MPO3 support.</td></tr>
+  <tr><td class="key">MPO features</td><td>Shows rotation, vertical/horizontal flip, RGB/YUV stretching, bilinear/high filtering, shared-plane, immediate-flip, and plane-0 virtual-mode flags returned by the display stack.</td></tr>
+  <tr><td class="key">Scaling limits</td><td>Shows MPO and post-composition shrink/stretch limits. A zero is displayed only when the driver reported zero; a failed query is labeled <em>not reported</em>.</td></tr>
+  <tr><td class="key">Displayable / hardware flip queue</td><td>Shows WDDM 3 displayable-allocation support and the hardware flip queue support/enabled state used by the highest-performance Presentation Manager route.</td></tr>
+  <tr><td class="key">Cross-adapter tier</td><td>Reports none, copy, texture, or scanout capability. This is diagnostic eligibility only; MAG does not call a route zero-copy until the actual shared resource and synchronization path is active.</td></tr>
+  <tr><td class="key">Scanout and cursor caps</td><td>Preserves the raw scanout capability word and names documented cursor/MPO restrictions, including plane-0 cursor scaling and unavailable XOR blending.</td></tr>
+</table>
+
+<p>
+  Plane counts are properties of the selected output configuration, not just the GPU model.
+  Monitor topology, HDR/SDR format, bit depth, GPU scaling, and driver state can change them.
+  MAG therefore refreshes the capability catalog when the display route is rebuilt.
+</p>
+
+<h2>Swap-chain rules used by MAG</h2>
+<ul>
+  <li>Flip discard is preferred for complete-frame modern presentation. Flip sequential is reserved for a route that genuinely preserves and consumes prior regions.</li>
+  <li>Flip chains use at least two single-sampled buffers. Multisampling, if added, must resolve into a non-MSAA presentable buffer.</li>
+  <li>Only one flip-model chain owns an HWND/composition target. Mixed GDI/DXGI drawing belongs to an explicit BitBlt host.</li>
+  <li>Buffer count, maximum latency, sync interval, tearing, and waitability are treated as one pacing contract. Waitability is not assumed to be faster after DirectFlip eligibility is lost.</li>
+  <li>During resize, the newest complete frame for the committed geometry wins. Older ready frames are dropped rather than shown late.</li>
+</ul>
+
+<h2>Waitable swap-chain policy</h2>
+<table>
+  <tr><th>Choice</th><th>What MAG configures</th></tr>
+  <tr><td class="key">Auto</td><td>Enables the DXGI frame-latency wait object only for a D3D11/D3D12 flip route that is currently Independent-Flip or MPO eligible. It disables the object for composed-only, BitBlt, non-DXGI, and Presentation Manager routes.</td></tr>
+  <tr><td class="key">Enabled</td><td>Creates a compatible D3D11/D3D12 flip chain with <code>DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT</code>, applies the maximum-latency slider to the chain, and exposes its wait handle to MAG's frame loop.</td></tr>
+  <tr><td class="key">Disabled</td><td>Creates the flip chain without the waitable flag. D3D11 applies its device-level maximum latency; D3D12 leaves queue latency driver-managed and labels the slider value as a request.</td></tr>
+</table>
+<p class="note">Presentation Manager is not a DXGI waitable-chain mode. It owns a separate buffer-available event, retirement fences, and presentation-statistics path. Switching the waitable flag recreates the one permitted HWND flip chain transactionally; a failed replacement restores the previous working chain.</p>
+
+<h2>Surface ownership</h2>
+<table>
+  <tr><th>Choice</th><th>Description</th></tr>
+  <tr><td class="key">Auto (host-owned)</td><td>Uses no-redirection for DirectComposition/Presentation Manager and DWM redirection for redirected/layered hosts.</td></tr>
+  <tr><td class="key">DWM redirection surface</td><td>DWM owns the conventional redirected HWND surface.</td></tr>
+  <tr><td class="key">No redirection surface</td><td>Sets the no-redirection ownership model. Visible content must be supplied by DirectComposition or Presentation Manager.</td></tr>
+</table>
+
+<h2>Composition host</h2>
+<table>
+  <tr><th>Host</th><th>Description</th></tr>
+  <tr><td class="key">Auto (highest performance)</td><td>Selects a host from the requested target, capture route, renderer, API availability, and desktop state.</td></tr>
+  <tr><td class="key">Redirected HWND</td><td>Uses normal HWND/DWM redirection and the graphics backend's window presenter.</td></tr>
+  <tr><td class="key">Traditional layered window</td><td>Uses the User32 layered-window bitmap contract. This is a CPU round-trip route and is incompatible with compositor-owned DWM visual capture.</td></tr>
+  <tr><td class="key">DirectComposition</td><td>Attaches visual content to a DirectComposition target. No-redirection is supported when all visible content is attached.</td></tr>
+  <tr><td class="key">Windows 11 Presentation Manager</td><td>Uses Presentation Manager when its runtime entry points and a compatible native frame route are available.</td></tr>
+</table>
+
+<h2>Copy policy</h2>
+<table>
+  <tr><th>Policy</th><th>Accepted routes</th></tr>
+  <tr><td class="key">Auto (fastest valid route)</td><td>Chooses the highest-performing route that satisfies the other explicit settings.</td></tr>
+  <tr><td class="key">Strict zero-copy</td><td>Accepts only a proven true zero-copy route or compositor-visual pass-through. CPU map/upload paths are rejected.</td></tr>
+  <tr><td class="key">Allow GPU-local copy</td><td>Allows native GPU-local copies but rejects CPU-owned and CPU round-trip routes.</td></tr>
+  <tr><td class="key">Allow CPU round trip (diagnostic)</td><td>Allows all implemented routes, including CPU capture/readback/upload. Use this for compatibility testing rather than maximum performance.</td></tr>
+</table>
+
+<h2>Alpha and layering</h2>
+<table>
+  <tr><th>Mode</th><th>Requirements</th></tr>
+  <tr><td class="key">Opaque</td><td>Default, highest-compatibility output.</td></tr>
+  <tr><td class="key">Constant alpha</td><td>Uses the 0&ndash;255 constant-alpha value on a layered or composition host.</td></tr>
+  <tr><td class="key">Color key</td><td>Uses the RRGGBB key on a compatible host. DirectComposition/Presentation Manager require a renderer key-to-alpha pass and reject this mode when that pass is unavailable.</td></tr>
+  <tr><td class="key">Per-pixel premultiplied alpha</td><td>Requires a layered or composition host and premultiplied BGRA content.</td></tr>
+</table>
+
+<h2>Adapter selection</h2>
+<table>
+  <tr><th>Control</th><th>Choices</th></tr>
+  <tr><td class="key">Display adapter</td><td><em>Auto (window output)</em>, <em>Follow captured display</em>, or an explicit output showing adapter, device name, desktop coordinates, refresh rate, and HDR status.</td></tr>
+  <tr><td class="key">Hardware adapter</td><td><em>Auto (highest-performance compatible)</em>, <em>Same as Display Adapter</em>, <em>Same as Capture Adapter</em>, <em>WARP (software, explicit fallback)</em>, or an explicit physical adapter/LUID.</td></tr>
+</table>
+
+<p>
+  Strict zero-copy is rejected when Hardware Adapter and Display Adapter differ unless a
+  validated cross-adapter zero-copy route exists. Disconnected, software-only, or missing
+  explicit adapters are also rejected. WARP is an explicit software fallback and is limited
+  to the routes named by the status box.
+</p>
+
+<h2>Important compatibility rules</h2>
+<ul>
+  <li>No-redirection requires DirectComposition or Presentation Manager content.</li>
+  <li>Traditional layered windows require their User32 layered surface and cannot host DWM Thumbnail or DWM Private Visual capture.</li>
+  <li>Presentation Manager requires supported Windows 11 runtime entry points and a compatible D3D11, D3D12, or explicit GDI bridge.</li>
+  <li>Non-Direct3D renderers generally use redirected HWND or traditional layered hosts unless a compositor-owned capture route supplies the visual directly.</li>
+  <li>Tearing requires sync interval 0 plus API, driver, and window support.</li>
+  <li>The status area explains the first rule that rejects an inspected combination while the last valid route remains active.</li>
+</ul>
+
+<h2>Build an exact route</h2>
+<div class="steps">
+  <div class="step">Choose Graphics and Capture first; leave the remaining presentation fields on Auto and confirm the baseline passes.</div>
+  <div class="step">Select the required Target and enable Require exact target when a fallback presentation model is unacceptable.</div>
+  <div class="step">Choose the Surface and Host as a pair: redirected HWND, layered bitmap, DirectComposition no-redirection content, or Presentation Manager.</div>
+  <div class="step">Tighten Copy policy. Strict zero-copy accepts true zero-copy or compositor-visual pass-through, never a CPU map/readback/upload route.</div>
+  <div class="step">Choose Display and Hardware adapters. Prefer matching ownership unless the selected route explicitly validates a cross-adapter transfer.</div>
+  <div class="step">Set alpha, buffer count, maximum latency, sync interval, waitable policy, and tearing. Each compatible change activates immediately; an unavailable request leaves the prior route active.</div>
+</div>
+
+<h2>Architecture and background</h2>
+<p>
+  See <a href="graphics_architecture.htm">Windows Graphics Architecture</a> for DXGI,
+  DirectComposition, DWM/redirection/no-redirection, WDDM/driver, and renderer stack diagrams.
+  The architecture topic also documents the three Microsoft layering articles and the
+  <a href="https://wiki.special-k.info/Presentation_Model">presentation-model reference</a>
+  plus <a href="https://wiki.special-k.info/en/SwapChain">SwapChain Science</a>, which MAG
+  uses for the swap-effect/presentation-outcome distinction and flip-model compatibility rules.
+</p>
+
+</body>
+</html>

@@ -1,7 +1,7 @@
 body {
     font-family: "Segoe UI", "MS Shell Dlg", Tahoma, sans-serif;
     font-size: 9pt;
-    margin: 14px 18px;
+    margin: 16px 22px 28px 22px;
     color: #1a1a1a;
     background-color: #ffffff;
 }
@@ -84,9 +84,80 @@ td.key {
     font-size: 9pt;
 }
 
+h3 {
+    font-size: 9.5pt;
+    font-weight: bold;
+    color: #253f6d;
+    margin-top: 13px;
+    margin-bottom: 5px;
+}
+
+.warning {
+    background-color: #fff4e5;
+    border-left: 4px solid #d97706;
+    padding: 7px 12px;
+    margin: 10px 0;
+    font-size: 9pt;
+}
+
+.help-figure {
+    background-color: #f7f9fc;
+    border: 1px solid #cbd3df;
+    padding: 8px;
+    margin: 12px 0 16px 0;
+    text-align: center;
+}
+
+.help-figure img {
+    display: block;
+    width: 100%;
+    max-width: 760px;
+    height: auto;
+    margin: 0 auto;
+    border: 0;
+}
+
+.help-figure.figure-wide img {
+    max-width: 1200px;
+}
+
+.help-figure.figure-native img {
+    width: auto;
+    max-width: 100%;
+}
+
+.help-figure.figure-menu {
+    text-align: left;
+}
+
+.help-figure.figure-menu img {
+    width: auto;
+    max-width: 100%;
+    margin: 0;
+}
+
+.help-figure .caption {
+    margin: 7px 4px 2px 4px;
+    color: #465367;
+    font-size: 9pt;
+    text-align: left;
+}
+
+code {
+    font-family: "Consolas", "Courier New", monospace;
+    background-color: #f1f3f6;
+    border: 1px solid #d7dce4;
+    padding: 1px 3px;
+}
+
 ul {
     margin: 6px 0 10px 0;
     padding-left: 20px;
+}
+
+ol {
+    margin: 6px 0 10px 0;
+    padding-left: 24px;
 }
 
 li {
@@ -102,6 +173,132 @@ li {
 
 .breadcrumb a {
     color: #666;
+}
+
+.hero {
+    background-color: #eef6ff;
+    border: 1px solid #9fc7ef;
+    padding: 12px 16px;
+    margin: 10px 0 16px 0;
+}
+
+.hero .lead {
+    color: #17365f;
+    font-size: 10pt;
+    line-height: 1.55;
+    margin: 0 0 8px 0;
+}
+
+.topic-grid,
+.gallery-table {
+    table-layout: fixed;
+}
+
+.topic-grid td,
+.gallery-table td {
+    width: 50%;
+    border: 1px solid #d4dce7;
+    background-color: #ffffff;
+    padding: 10px 12px;
+}
+
+.topic-grid tr:nth-child(even) td,
+.gallery-table tr:nth-child(even) td {
+    background-color: #ffffff;
+}
+
+.gallery-table img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 7px auto;
+}
+
+.gallery-table .caption {
+    color: #465367;
+    font-size: 8.5pt;
+    line-height: 1.45;
+}
+
+.steps {
+    counter-reset: magstep;
+    margin: 10px 0 16px 0;
+}
+
+.step {
+    counter-increment: magstep;
+    border: 1px solid #cbd5e1;
+    border-left: 5px solid #1a3a6e;
+    background-color: #fafcff;
+    padding: 8px 12px 8px 42px;
+    margin: 7px 0;
+    position: relative;
+    min-height: 26px;
+}
+
+.step:before {
+    content: counter(magstep);
+    position: absolute;
+    left: 12px;
+    top: 8px;
+    width: 21px;
+    height: 21px;
+    line-height: 21px;
+    text-align: center;
+    color: #ffffff;
+    background-color: #1a3a6e;
+    font-weight: bold;
+}
+
+.status-good {
+    background-color: #edf9f0;
+    border-left: 4px solid #1f8a4c;
+    padding: 8px 12px;
+    margin: 10px 0;
+}
+
+.status-bad {
+    background-color: #fff1f0;
+    border-left: 4px solid #c0392b;
+    padding: 8px 12px;
+    margin: 10px 0;
+}
+
+.badge {
+    display: inline-block;
+    color: #ffffff;
+    background-color: #1a3a6e;
+    padding: 2px 6px;
+    margin-right: 4px;
+    font-size: 8pt;
+    font-weight: bold;
+}
+
+.path {
+    font-family: "Consolas", "Courier New", monospace;
+    background-color: #f4f6f8;
+    border: 1px solid #d7dce4;
+    padding: 7px 9px;
+    margin: 7px 0;
+    line-height: 1.5;
+}
+
+.api-links td.key {
+    width: 25%;
+}
+
+.source-meta {
+    color: #526071;
+    background-color: #f3f6fa;
+    border: 1px solid #d5dde8;
+    padding: 7px 10px;
+    margin: 7px 0 10px 0;
+}
+
+.source-nav {
+    font-size: 8.5pt;
+    margin: 8px 0;
 }
 
 /* VS Dark theme source code block */

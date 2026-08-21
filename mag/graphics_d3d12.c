@@ -49,9 +49,11 @@ typedef struct MAGD3D12STATE
   UINT                  bufferCount;
   UINT                  syncInterval;
   UINT                  presentFlags;
+  UINT                  swapChainFlags;
   BOOL                  warp;
   BOOL                  compositionHost;
   BOOL                  presentationManagerHost;
+  BOOL                  waitableSwapChain;
   BOOL                  presentationEnabled;
 } MAGD3D12STATE;
 
@@ -282,6 +284,7 @@ static BOOL magGraphicsD3D12Create(
     BOOL allowTearing = FALSE;
     BOOL compositionHost;
     BOOL presentationManagerHost;
+    BOOL waitableSwapChain;
     HRESULT hr;
 
     if (!stateOut || !presentation || clientSize.cx < 1 || clientSize.cy < 1 ||
@@ -302,8 +305,11 @@ static BOOL magGraphicsD3D12Create(
     state->bufferCount = presentation->bufferCount;
     compositionHost = MAG_HOST_DIRECTCOMPOSITION == presentation->host;
     presentationManagerHost = MAG_HOST_PRESENTATION_MANAGER == presentation->host;
+    waitableSwapChain = !presentationManagerHost &&
+      MAG_WAITABLE_SWAP_CHAIN_ENABLED == presentation->waitableSwapChainMode;
     state->compositionHost = compositionHost;
     state->presentationManagerHost = presentationManagerHost;
+    state->waitableSwapChain = waitableSwapChain;
     reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
 
     hr = CreateDXGIFactory1(&IID_IDXGIFactory4, (void**)&state->factory);
@@ -389,7 +395,9 @@ static BOOL magGraphicsD3D12Create(
       MAG_LAYER_ALPHA_OPAQUE != presentation->alphaMode
       ? DXGI_ALPHA_MODE_PREMULTIPLIED
       : DXGI_ALPHA_MODE_IGNORE;
-    swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    swapDesc.Flags = waitableSwapChain
+      ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+      : 0;
 
     if (presentation->allowTearing && 0 == presentation->syncInterval &&
         SUCCEEDED(IDXGIFactory4_QueryInterface(
@@ -461,12 +469,26 @@ static BOOL magGraphicsD3D12Create(
       return FALSE;
     }
 
-    IDXGISwapChain2_SetMaximumFrameLatency(
-      (IDXGISwapChain2*)state->swapChain,
-      presentation->maximumFrameLatency);
-    state->frameWaitHandle = IDXGISwapChain2_GetFrameLatencyWaitableObject((IDXGISwapChain2*)state->swapChain);
+    if (waitableSwapChain)
+    {
+      if (FAILED(IDXGISwapChain2_SetMaximumFrameLatency(
+            (IDXGISwapChain2*)state->swapChain,
+            presentation->maximumFrameLatency)))
+      {
+        magGraphicsD3D12Destroy(hWnd, state);
+        return FALSE;
+      }
+      state->frameWaitHandle = IDXGISwapChain2_GetFrameLatencyWaitableObject(
+        (IDXGISwapChain2*)state->swapChain);
+      if (!state->frameWaitHandle)
+      {
+        magGraphicsD3D12Destroy(hWnd, state);
+        return FALSE;
+      }
+    }
     state->syncInterval = presentation->syncInterval;
     state->presentFlags = allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    state->swapChainFlags = swapDesc.Flags;
     state->presentationEnabled = TRUE;
     }
 
@@ -647,8 +669,7 @@ static BOOL magGraphicsD3D12Resize(HWND hWnd, void* opaqueState, SIZE clientSize
       (UINT)reservoirSize.cx,
       (UINT)reservoirSize.cy,
       DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT |
-        (state->presentFlags ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0));
+      state->swapChainFlags);
     return SUCCEEDED(hr) &&
       magGraphicsD3D12CreateFrameResources(state, reservoirSize) &&
       SUCCEEDED(IDXGISwapChain2_SetSourceSize(
@@ -834,7 +855,13 @@ static BOOL magGraphicsD3D12Render(
       HRESULT first = IDXGISwapChain3_Present(
         state->swapChain,
         0,
-        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT | DXGI_PRESENT_RESTART);
+        state->presentFlags | DXGI_PRESENT_RESTART |
+          (state->waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : 0));
+
+      if (!intent->synchronize && !state->waitableSwapChain)
+      {
+        return SUCCEEDED(first);
+      }
       hr = IDXGISwapChain3_Present(
         state->swapChain,
         intent->synchronize ? 1 : 0,
@@ -851,7 +878,8 @@ static BOOL magGraphicsD3D12Render(
       hr = IDXGISwapChain3_Present(
         state->swapChain,
         0,
-        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT);
+        state->presentFlags |
+          (state->waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : 0));
     }
     else
     {
@@ -920,9 +948,6 @@ static BOOL magGraphicsD3D12GetObservedPresentationTarget(
   UINT* target)
 {
     MAGD3D12STATE* state = (MAGD3D12STATE*)opaqueState;
-    IDXGISwapChainMedia* media = NULL;
-    DXGI_FRAME_STATISTICS_MEDIA statistics = { 0 };
-    BOOL observed = FALSE;
 
     if (state && state->presentationManagerHost)
     {
@@ -930,36 +955,7 @@ static BOOL magGraphicsD3D12GetObservedPresentationTarget(
         state->presentationManager,
         target);
     }
-    if (!state || !state->swapChain || !target ||
-        FAILED(IDXGISwapChain3_QueryInterface(
-          state->swapChain,
-          &IID_IDXGISwapChainMedia,
-          (void**)&media)))
-    {
-      return FALSE;
-    }
-    if (SUCCEEDED(IDXGISwapChainMedia_GetFrameStatisticsMedia(media, &statistics)))
-    {
-      switch (statistics.CompositionMode)
-      {
-      case DXGI_FRAME_PRESENTATION_MODE_COMPOSED:
-        *target = MAG_PRESENT_COMPOSED_FLIP;
-        observed = TRUE;
-        break;
-      case DXGI_FRAME_PRESENTATION_MODE_OVERLAY:
-        *target = MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP;
-        observed = TRUE;
-        break;
-      case DXGI_FRAME_PRESENTATION_MODE_NONE:
-        *target = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
-        observed = TRUE;
-        break;
-      default:
-        break;
-      }
-    }
-    IDXGISwapChainMedia_Release(media);
-    return observed;
+    return FALSE;
 }
 
 const MAGGRAPHICSBACKEND g_magGraphicsD3D12Backend =

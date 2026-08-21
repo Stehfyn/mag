@@ -21,6 +21,7 @@ typedef struct MAGD3D9STATE
   UINT               capacityHeight;
   UINT64             resourceGeneration;
   UINT               adapterOrdinal;
+  MAGPRESENTATIONTARGET configuredTarget;
   BOOL               flipEx;
 } MAGD3D9STATE;
 
@@ -127,6 +128,7 @@ static void magGraphicsD3D9SetPresentParameters(
     state->present.BackBufferFormat = D3DFMT_X8R8G8B8;
     state->present.BackBufferCount = presentation->bufferCount;
     state->present.MultiSampleType = D3DMULTISAMPLE_NONE;
+    state->configuredTarget = presentation->target;
     state->flipEx = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == presentation->target ||
       MAG_PRESENT_COMPOSED_FLIP == presentation->target ||
       MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == presentation->target;
@@ -139,6 +141,10 @@ static void magGraphicsD3D9SetPresentParameters(
     {
       state->present.SwapEffect = D3DSWAPEFFECT_COPY;
       state->present.BackBufferCount = 1;
+    }
+    else if (MAG_PRESENT_HARDWARE_LEGACY_FLIP == presentation->target)
+    {
+      state->present.SwapEffect = D3DSWAPEFFECT_FLIP;
     }
     else
     {
@@ -207,7 +213,7 @@ static BOOL magGraphicsD3D9Create(
     {
       state->d3d = Direct3DCreate9(D3D_SDK_VERSION);
     }
-    if (!state->d3d || (state->flipEx && !state->d3dEx))
+    if (!state->d3d)
     {
       if (state->d3dEx)
       {
@@ -224,14 +230,24 @@ static BOOL magGraphicsD3D9Create(
     state->adapterOrdinal = magGraphicsD3D9FindAdapter(state->d3d, presentation);
     reservoirSize = magGraphicsChooseReservoirSize(hWnd, clientSize);
     magGraphicsD3D9SetPresentParameters(state, hWnd, reservoirSize, presentation);
+    if (state->flipEx && !state->d3dEx)
+    {
+      IDirect3D9_Release(state->d3d);
+      HeapFree(GetProcessHeap(), 0, state);
+      return FALSE;
+    }
     if (state->d3dEx)
     {
+      const DWORD behaviorFlags =
+        D3DCREATE_HARDWARE_VERTEXPROCESSING |
+        D3DCREATE_FPU_PRESERVE |
+        (state->flipEx ? D3DCREATE_ENABLE_PRESENTSTATS : 0);
       hr = IDirect3D9Ex_CreateDeviceEx(
         state->d3dEx,
         state->adapterOrdinal,
         D3DDEVTYPE_HAL,
         hWnd,
-        D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE,
+        behaviorFlags,
         &state->present,
         NULL,
         &state->deviceEx);
@@ -252,12 +268,16 @@ static BOOL magGraphicsD3D9Create(
     {
       if (state->d3dEx)
       {
+        const DWORD behaviorFlags =
+          D3DCREATE_SOFTWARE_VERTEXPROCESSING |
+          D3DCREATE_FPU_PRESERVE |
+          (state->flipEx ? D3DCREATE_ENABLE_PRESENTSTATS : 0);
         hr = IDirect3D9Ex_CreateDeviceEx(
           state->d3dEx,
           state->adapterOrdinal,
           D3DDEVTYPE_HAL,
           hWnd,
-          D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE,
+          behaviorFlags,
           &state->present,
           NULL,
           &state->deviceEx);
@@ -428,7 +448,6 @@ static BOOL magGraphicsD3D9Render(
     MAGD3D9VERTEX vertices[4];
     RECT sourceRect;
     RECT destinationRect;
-    POINT destinationOrigin = { 0, 0 };
     FLOAT uMax;
     FLOAT vMax;
     FLOAT drawWidth;
@@ -474,8 +493,12 @@ static BOOL magGraphicsD3D9Render(
 
     uMax = (FLOAT)state->width / (FLOAT)state->capacityWidth;
     vMax = (FLOAT)state->height / (FLOAT)state->capacityHeight;
-    drawWidth = state->flipEx ? (FLOAT)state->capacityWidth : (FLOAT)state->width;
-    drawHeight = state->flipEx ? (FLOAT)state->capacityHeight : (FLOAT)state->height;
+    drawWidth = D3DSWAPEFFECT_COPY == state->present.SwapEffect
+      ? (FLOAT)state->width
+      : (FLOAT)state->capacityWidth;
+    drawHeight = D3DSWAPEFFECT_COPY == state->present.SwapEffect
+      ? (FLOAT)state->height
+      : (FLOAT)state->capacityHeight;
     vertices[0] = (MAGD3D9VERTEX){ -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFF, 0.0f, 0.0f };
     vertices[1] = (MAGD3D9VERTEX){ drawWidth - 0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFF, uMax, 0.0f };
     vertices[2] = (MAGD3D9VERTEX){ -0.5f, drawHeight - 0.5f, 0.0f, 1.0f, 0xFFFFFFFF, 0.0f, vMax };
@@ -519,13 +542,26 @@ static BOOL magGraphicsD3D9Render(
       return SUCCEEDED(hr) || D3DERR_WASSTILLDRAWING == hr;
     }
 
-    SetRect(&sourceRect, 0, 0, (LONG)state->width, (LONG)state->height);
-    GetClientRect(hWnd, &destinationRect);
-    if (ClientToScreen(hWnd, &destinationOrigin))
+    if (D3DSWAPEFFECT_COPY == state->present.SwapEffect)
     {
-      OffsetRect(&destinationRect, destinationOrigin.x, destinationOrigin.y);
+      SetRect(&sourceRect, 0, 0, (LONG)state->width, (LONG)state->height);
+      GetClientRect(hWnd, &destinationRect);
+      hr = IDirect3DDevice9_Present(
+        state->device,
+        &sourceRect,
+        &destinationRect,
+        NULL,
+        NULL);
     }
-    hr = IDirect3DDevice9_Present(state->device, &sourceRect, &destinationRect, hWnd, NULL);
+    else
+    {
+      hr = IDirect3DDevice9_Present(
+        state->device,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
+    }
     return SUCCEEDED(hr);
 }
 

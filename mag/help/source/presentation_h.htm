@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>presentation.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; presentation.h</p>
+<h1>presentation.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>354 lines</strong> &middot; 9846 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='presentation_c.htm'>&larr; presentation.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_observer_c.htm'>presentation_observer.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+
+<span class='pp'>#include &lt;dxgi1_6.h&gt;</span>
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='kw'>extern</span> <span class='str'>&quot;C&quot;</span> {
+<span class='pp'>#endif</span>
+
+<span class='pp'>#define MAG_MAX_ADAPTERS 16</span>
+<span class='pp'>#define MAG_MAX_OUTPUTS 32</span>
+<span class='pp'>#define MAG_PRESENTATION_REASON_LENGTH 512</span>
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGPRESENTATIONTARGET</span>
+{
+  MAG_PRESENT_AUTO = <span class='num'>0</span>,
+  MAG_PRESENT_HARDWARE_LEGACY_FLIP,
+  MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER,
+  MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP,
+  MAG_PRESENT_COMPOSED_FLIP,
+  MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP,
+  MAG_PRESENT_COMPOSED_COPY_GPU_GDI,
+  MAG_PRESENT_COMPOSED_COPY_CPU_GDI,
+  MAG_PRESENT_COUNT
+} <span class='tp'>MAGPRESENTATIONTARGET</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGSURFACEOWNERSHIP</span>
+{
+  MAG_SURFACE_AUTO = <span class='num'>0</span>,
+  MAG_SURFACE_REDIRECTION,
+  MAG_SURFACE_NO_REDIRECTION,
+  MAG_SURFACE_COUNT
+} <span class='tp'>MAGSURFACEOWNERSHIP</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGCOMPOSITIONHOST</span>
+{
+  MAG_HOST_AUTO = <span class='num'>0</span>,
+  MAG_HOST_REDIRECTED_HWND,
+  MAG_HOST_TRADITIONAL_LAYERED,
+  MAG_HOST_DIRECTCOMPOSITION,
+  MAG_HOST_PRESENTATION_MANAGER,
+  MAG_HOST_COUNT
+} <span class='tp'>MAGCOMPOSITIONHOST</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGCOPYREQUIREMENT</span>
+{
+  MAG_COPY_AUTO_FASTEST = <span class='num'>0</span>,
+  MAG_COPY_STRICT_ZERO_COPY,
+  MAG_COPY_ALLOW_GPU_LOCAL,
+  MAG_COPY_ALLOW_CPU_ROUND_TRIP,
+  MAG_COPY_COUNT
+} <span class='tp'>MAGCOPYREQUIREMENT</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGLAYEREDALPHAMODE</span>
+{
+  MAG_LAYER_ALPHA_OPAQUE = <span class='num'>0</span>,
+  MAG_LAYER_ALPHA_CONSTANT,
+  MAG_LAYER_ALPHA_COLOR_KEY,
+  MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED,
+  MAG_LAYER_ALPHA_COUNT
+} <span class='tp'>MAGLAYEREDALPHAMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGWAITABLESWAPCHAINMODE</span>
+{
+  MAG_WAITABLE_SWAP_CHAIN_AUTO = <span class='num'>0</span>,
+  MAG_WAITABLE_SWAP_CHAIN_ENABLED,
+  MAG_WAITABLE_SWAP_CHAIN_DISABLED,
+  MAG_WAITABLE_SWAP_CHAIN_MODE_COUNT
+} <span class='tp'>MAGWAITABLESWAPCHAINMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGDISPLAYADAPTERMODE</span>
+{
+  MAG_DISPLAY_ADAPTER_AUTO = <span class='num'>0</span>,
+  MAG_DISPLAY_ADAPTER_FOLLOW_CAPTURE,
+  MAG_DISPLAY_ADAPTER_EXPLICIT,
+  MAG_DISPLAY_ADAPTER_MODE_COUNT
+} <span class='tp'>MAGDISPLAYADAPTERMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGHARDWAREADAPTERMODE</span>
+{
+  MAG_HARDWARE_ADAPTER_AUTO = <span class='num'>0</span>,
+  MAG_HARDWARE_ADAPTER_SAME_AS_DISPLAY,
+  MAG_HARDWARE_ADAPTER_SAME_AS_CAPTURE,
+  MAG_HARDWARE_ADAPTER_EXPLICIT,
+  MAG_HARDWARE_ADAPTER_WARP,
+  MAG_HARDWARE_ADAPTER_MODE_COUNT
+} <span class='tp'>MAGHARDWAREADAPTERMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGCOPYCLASS</span>
+{
+  MAG_COPY_CLASS_UNKNOWN = <span class='num'>0</span>,
+  MAG_COPY_CLASS_TRUE_ZERO_COPY,
+  MAG_COPY_CLASS_COMPOSITOR_VISUAL,
+  MAG_COPY_CLASS_GPU_LOCAL,
+  MAG_COPY_CLASS_CPU_SOURCE,
+  MAG_COPY_CLASS_CPU_ROUND_TRIP
+} <span class='tp'>MAGCOPYCLASS</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGNAMEDOPTION</span>
+{
+  <span class='tp'>UINT</span> <span class='tp'>id</span>;
+  <span class='tp'>LPCTSTR</span> name;
+} <span class='tp'>MAGNAMEDOPTION</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGDISPLAYSELECTION</span>
+{
+  <span class='tp'>MAGDISPLAYADAPTERMODE</span> <span class='tp'>mode</span>;
+  LUID adapterLuid;
+  <span class='tp'>TCHAR</span> deviceName[CCHDEVICENAME];
+} <span class='tp'>MAGDISPLAYSELECTION</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGHARDWARESELECTION</span>
+{
+  <span class='tp'>MAGHARDWAREADAPTERMODE</span> <span class='tp'>mode</span>;
+  LUID adapterLuid;
+} <span class='tp'>MAGHARDWARESELECTION</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>
+{
+  <span class='tp'>UINT</span> <span class='tp'>version</span>;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target;
+  <span class='tp'>MAGSURFACEOWNERSHIP</span> surfaceOwnership;
+  <span class='tp'>MAGCOMPOSITIONHOST</span> host;
+  <span class='tp'>MAGCOPYREQUIREMENT</span> copyRequirement;
+  <span class='tp'>MAGLAYEREDALPHAMODE</span> alphaMode;
+  <span class='tp'>BYTE</span> constantAlpha;
+  <span class='tp'>COLORREF</span> colorKey;
+  <span class='tp'>BOOL</span> strictTarget;
+  <span class='tp'>BOOL</span> allowTearing;
+  <span class='tp'>MAGWAITABLESWAPCHAINMODE</span> waitableSwapChainMode;
+  <span class='tp'>UINT</span> bufferCount;
+  <span class='tp'>UINT</span> maximumFrameLatency;
+  <span class='tp'>UINT</span> syncInterval;
+  <span class='tp'>MAGDISPLAYSELECTION</span> display;
+  <span class='tp'>MAGHARDWARESELECTION</span> hardware;
+} <span class='tp'>MAGPRESENTATIONSETTINGS</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGADAPTERINFO</span>
+{
+  LUID <span class='tp'>luid</span>;
+  <span class='tp'>TCHAR</span> description[<span class='num'>128</span>];
+  <span class='tp'>SIZE_T</span> dedicatedVideoMemory;
+  <span class='tp'>BOOL</span> software;
+  <span class='tp'>BOOL</span> remote;
+} <span class='tp'>MAGADAPTERINFO</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGOUTPUTINFO</span>
+{
+  <span class='tp'>UINT</span> <span class='tp'>adapterIndex</span>;
+  <span class='tp'>HMONITOR</span> monitor;
+  <span class='tp'>TCHAR</span> deviceName[CCHDEVICENAME];
+  <span class='tp'>RECT</span> desktopCoordinates;
+  <span class='tp'>UINT</span> refreshNumerator;
+  <span class='tp'>UINT</span> refreshDenominator;
+  <span class='tp'>BOOL</span> attachedToDesktop;
+  <span class='tp'>BOOL</span> hdr;
+  <span class='tp'>BOOL</span> hardwareCompositionSupportKnown;
+  <span class='tp'>UINT</span> hardwareCompositionSupport;
+  <span class='tp'>BOOL</span> displayPlaneCapsKnown;
+  <span class='tp'>BOOL</span> directFlipCapable;
+  <span class='tp'>BOOL</span> independentFlipCapable;
+  <span class='tp'>BOOL</span> multiPlaneOverlayCapable;
+  <span class='tp'>BOOL</span> multiPlaneOverlayDecodeCapable;
+  <span class='tp'>BOOL</span> panelFitterCapable;
+  <span class='tp'>BOOL</span> mpo3DdiCapable;
+  <span class='tp'>BOOL</span> mpoKernelCapsCapable;
+  <span class='tp'>BOOL</span> mpoHudKernelCapable;
+  <span class='tp'>BOOL</span> mpoHudCapable;
+  <span class='tp'>BOOL</span> mpoSecondaryCapable;
+  <span class='tp'>BOOL</span> independentFlipSecondaryCapable;
+  <span class='tp'>BOOL</span> mpoStretchCapable;
+  <span class='tp'>BOOL</span> overlayCapsKnown;
+  <span class='tp'>BOOL</span> postCompositionCapsKnown;
+  <span class='tp'>BOOL</span> overlayRotationCapable;
+  <span class='tp'>BOOL</span> overlayRotationWithoutIndependentFlip;
+  <span class='tp'>BOOL</span> overlayVerticalFlipCapable;
+  <span class='tp'>BOOL</span> overlayHorizontalFlipCapable;
+  <span class='tp'>BOOL</span> overlayStretchRgbCapable;
+  <span class='tp'>BOOL</span> overlayStretchYuvCapable;
+  <span class='tp'>BOOL</span> overlayBilinearFilterCapable;
+  <span class='tp'>BOOL</span> overlayHighFilterCapable;
+  <span class='tp'>BOOL</span> overlaySharedAcrossOutputs;
+  <span class='tp'>BOOL</span> overlayImmediateCapable;
+  <span class='tp'>BOOL</span> overlayPlane0ForVirtualModeOnly;
+  <span class='tp'>BOOL</span> overlayVersion3DdiCapable;
+  <span class='tp'>BOOL</span> displayCapsKnown;
+  <span class='tp'>BOOL</span> displayPreferPhysicallyContiguous;
+  <span class='tp'>BOOL</span> displayCursorScaledWithMpoPlane0;
+  <span class='tp'>BOOL</span> displayCursorNoXorWithMpo;
+  <span class='tp'>BOOL</span> scanoutCapsKnown;
+  <span class='tp'>BOOL</span> crossAdapterSupportKnown;
+  <span class='tp'>BOOL</span> wddm3CapsKnown;
+  <span class='tp'>BOOL</span> hardwareFlipQueueSupported;
+  <span class='tp'>BOOL</span> hardwareFlipQueueEnabled;
+  <span class='tp'>BOOL</span> displayableSupported;
+  <span class='tp'>UINT</span> hardwareFlipQueueSupportState;
+  <span class='tp'>UINT</span> vidPnSourceId;
+  <span class='tp'>UINT</span> maxPlanes;
+  <span class='tp'>UINT</span> maxRgbPlanes;
+  <span class='tp'>UINT</span> maxYuvPlanes;
+  <span class='tp'>UINT</span> overlayCaps;
+  <span class='tp'>UINT</span> scanoutCaps;
+  <span class='tp'>UINT</span> crossAdapterSupportTier;
+  <span class='tp'>FLOAT</span> maxStretchFactor;
+  <span class='tp'>FLOAT</span> maxShrinkFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxStretchFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxShrinkFactor;
+} <span class='tp'>MAGOUTPUTINFO</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGADAPTERCATALOG</span>
+{
+  <span class='tp'>MAGADAPTERINFO</span> adapters[<span class='mc'>MAG_MAX_ADAPTERS</span>];
+  <span class='tp'>UINT</span> <span class='tp'>adapterCount</span>;
+  <span class='tp'>MAGOUTPUTINFO</span> outputs[<span class='mc'>MAG_MAX_OUTPUTS</span>];
+  <span class='tp'>UINT</span> outputCount;
+} <span class='tp'>MAGADAPTERCATALOG</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGPRESENTATIONOBSERVATIONSOURCE</span>
+{
+  MAG_PRESENT_OBSERVATION_NONE = <span class='num'>0</span>,
+  MAG_PRESENT_OBSERVATION_PRESENTATION_MANAGER,
+  MAG_PRESENT_OBSERVATION_ETW,
+  MAG_PRESENT_OBSERVATION_COUNT,
+} <span class='tp'>MAGPRESENTATIONOBSERVATIONSOURCE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSTATUS</span>
+{
+  <span class='tp'>BOOL</span> <span class='tp'>configurationSupported</span>;
+  <span class='tp'>BOOL</span> flickerFree;
+  <span class='tp'>BOOL</span> presentationManagerAvailable;
+  <span class='tp'>BOOL</span> directCompositionAvailable;
+  <span class='tp'>BOOL</span> hardwareAdapterResolved;
+  <span class='tp'>BOOL</span> displayAdapterResolved;
+  <span class='tp'>BOOL</span> hardwareCompositionSupportKnown;
+  <span class='tp'>BOOL</span> displayPlaneCapsKnown;
+  <span class='tp'>BOOL</span> fullscreenHardwareCompositionCapable;
+  <span class='tp'>BOOL</span> windowedHardwareCompositionCapable;
+  <span class='tp'>BOOL</span> hardwareCompositionCursorStretchRisk;
+  <span class='tp'>BOOL</span> directFlipCapable;
+  <span class='tp'>BOOL</span> directFlipGeometryEligible;
+  <span class='tp'>BOOL</span> independentFlipCapable;
+  <span class='tp'>BOOL</span> multiPlaneOverlayCapable;
+  <span class='tp'>BOOL</span> multiPlaneOverlayDecodeCapable;
+  <span class='tp'>BOOL</span> panelFitterCapable;
+  <span class='tp'>BOOL</span> mpo3DdiCapable;
+  <span class='tp'>BOOL</span> mpoKernelCapsCapable;
+  <span class='tp'>BOOL</span> mpoHudKernelCapable;
+  <span class='tp'>BOOL</span> mpoHudCapable;
+  <span class='tp'>BOOL</span> mpoSecondaryCapable;
+  <span class='tp'>BOOL</span> independentFlipSecondaryCapable;
+  <span class='tp'>BOOL</span> mpoStretchCapable;
+  <span class='tp'>BOOL</span> overlayCapsKnown;
+  <span class='tp'>BOOL</span> postCompositionCapsKnown;
+  <span class='tp'>BOOL</span> overlayRotationCapable;
+  <span class='tp'>BOOL</span> overlayRotationWithoutIndependentFlip;
+  <span class='tp'>BOOL</span> overlayVerticalFlipCapable;
+  <span class='tp'>BOOL</span> overlayHorizontalFlipCapable;
+  <span class='tp'>BOOL</span> overlayStretchRgbCapable;
+  <span class='tp'>BOOL</span> overlayStretchYuvCapable;
+  <span class='tp'>BOOL</span> overlayBilinearFilterCapable;
+  <span class='tp'>BOOL</span> overlayHighFilterCapable;
+  <span class='tp'>BOOL</span> overlaySharedAcrossOutputs;
+  <span class='tp'>BOOL</span> overlayImmediateCapable;
+  <span class='tp'>BOOL</span> overlayPlane0ForVirtualModeOnly;
+  <span class='tp'>BOOL</span> overlayVersion3DdiCapable;
+  <span class='tp'>BOOL</span> displayCapsKnown;
+  <span class='tp'>BOOL</span> displayPreferPhysicallyContiguous;
+  <span class='tp'>BOOL</span> displayCursorScaledWithMpoPlane0;
+  <span class='tp'>BOOL</span> displayCursorNoXorWithMpo;
+  <span class='tp'>BOOL</span> scanoutCapsKnown;
+  <span class='tp'>BOOL</span> crossAdapterSupportKnown;
+  <span class='tp'>BOOL</span> wddm3CapsKnown;
+  <span class='tp'>BOOL</span> hardwareFlipQueueSupported;
+  <span class='tp'>BOOL</span> hardwareFlipQueueEnabled;
+  <span class='tp'>BOOL</span> displayableSupported;
+  <span class='tp'>UINT</span> hardwareFlipQueueSupportState;
+  <span class='tp'>BOOL</span> independentFlipEligible;
+  <span class='tp'>BOOL</span> observationAvailable;
+  <span class='tp'>BOOL</span> observationFullFidelity;
+  <span class='tp'>BOOL</span> observationDxgKrnl;
+  <span class='tp'>BOOL</span> observationWin32k;
+  <span class='tp'>BOOL</span> observedTargetValid;
+  <span class='tp'>BOOL</span> strictTargetSatisfied;
+  LUID hardwareAdapterLuid;
+  LUID displayAdapterLuid;
+  <span class='tp'>UINT</span> hardwareCompositionSupport;
+  <span class='tp'>UINT</span> vidPnSourceId;
+  <span class='tp'>UINT</span> maxPlanes;
+  <span class='tp'>UINT</span> maxRgbPlanes;
+  <span class='tp'>UINT</span> maxYuvPlanes;
+  <span class='tp'>UINT</span> overlayCaps;
+  <span class='tp'>UINT</span> scanoutCaps;
+  <span class='tp'>UINT</span> crossAdapterSupportTier;
+  <span class='tp'>FLOAT</span> maxStretchFactor;
+  <span class='tp'>FLOAT</span> maxShrinkFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxStretchFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxShrinkFactor;
+  <span class='tp'>DWORD</span> observationError;
+  <span class='tp'>MAGCOPYCLASS</span> copyClass;
+  <span class='tp'>MAGPRESENTATIONOBSERVATIONSOURCE</span> observationSource;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> observedTarget;
+  <span class='tp'>UINT64</span> configurationGeneration;
+  <span class='tp'>UINT64</span> geometryEpoch;
+  <span class='tp'>TCHAR</span> reason[<span class='mc'>MAG_PRESENTATION_REASON_LENGTH</span>];
+} <span class='tp'>MAGPRESENTATIONSTATUS</span>;
+
+<span class='kw'>void</span> <span class='fn'>magPresentationSettingsSetDefaults</span>(<span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationSettingsEqual</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* <span class='tp'>left</span>,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* right);
+
+<span class='tp'>UINT</span> <span class='fn'>magPresentationTargetCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magPresentationTargetAt</span>(<span class='tp'>UINT</span> index);
+<span class='tp'>LPCTSTR</span> <span class='fn'>magPresentationTargetName</span>(<span class='tp'>MAGPRESENTATIONTARGET</span> target);
+<span class='tp'>LPCTSTR</span> <span class='fn'>magPresentationObservationSourceName</span>(
+  <span class='tp'>MAGPRESENTATIONOBSERVATIONSOURCE</span> source);
+<span class='tp'>LPCTSTR</span> <span class='fn'>magCrossAdapterSupportTierName</span>(<span class='tp'>UINT</span> tier);
+<span class='tp'>UINT</span> <span class='fn'>magSurfaceOwnershipCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magSurfaceOwnershipAt</span>(<span class='tp'>UINT</span> index);
+<span class='tp'>UINT</span> <span class='fn'>magCompositionHostCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magCompositionHostAt</span>(<span class='tp'>UINT</span> index);
+<span class='tp'>UINT</span> <span class='fn'>magCopyRequirementCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magCopyRequirementAt</span>(<span class='tp'>UINT</span> index);
+<span class='tp'>UINT</span> <span class='fn'>magLayeredAlphaModeCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magLayeredAlphaModeAt</span>(<span class='tp'>UINT</span> index);
+<span class='tp'>UINT</span> <span class='fn'>magWaitableSwapChainModeCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* <span class='fn'>magWaitableSwapChainModeAt</span>(<span class='tp'>UINT</span> index);
+
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterLuidEqual</span>(LUID <span class='tp'>left</span>, LUID right);
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterCatalogEnumerate</span>(<span class='tp'>MAGADAPTERCATALOG</span>* catalog, LPTSTR reason, <span class='tp'>UINT</span> reasonCount);
+<span class='kw'>const</span> <span class='tp'>MAGADAPTERINFO</span>* <span class='fn'>magAdapterCatalogFindAdapter</span>(<span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog, LUID <span class='tp'>luid</span>);
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterOpenDxgi</span>(LUID <span class='tp'>luid</span>, IDXGIAdapter1** adapterOut);
+<span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* <span class='fn'>magAdapterCatalogFindOutput</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  LUID adapterLuid,
+  <span class='tp'>LPCTSTR</span> deviceName);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationResolve</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>GRAPHICSAPI</span> graphicsApi,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* requested,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved,
+  <span class='tp'>MAGPRESENTATIONSTATUS</span>* status);
+
+<span class='tp'>LPCTSTR</span> <span class='fn'>magCopyClassName</span>(<span class='tp'>MAGCOPYCLASS</span> copyClass);
+
+<span class='pp'>#ifdef __cplusplus</span>
+}
+<span class='pp'>#endif</span>
+</pre>
+<p class="source-nav"><a href='presentation_c.htm'>&larr; presentation.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_observer_c.htm'>presentation_observer.c &rarr;</a></p>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_layered.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_layered.c</p>
+<h1>graphics_layered.c</h1>
+<p>Traditional User32 layered-window presenter and capacity reservoir.</p>
+<div class="source-meta"><strong>209 lines</strong> &middot; 5815 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_gdiplus_c.htm'>&larr; graphics_gdiplus.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_layered_h.htm'>graphics_layered.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics_layered.h&quot;</span>
+
+<span class='kw'>struct</span> <span class='tp'>MAGLAYEREDPRESENTER</span>
+{
+  <span class='tp'>HDC</span> memoryDC;
+  <span class='tp'>HBITMAP</span> bitmap;
+  <span class='tp'>HBITMAP</span> oldBitmap;
+  <span class='tp'>BYTE</span>* <span class='tp'>pixels</span>;
+  <span class='tp'>UINT</span> capacityWidth;
+  <span class='tp'>UINT</span> capacityHeight;
+  <span class='tp'>UINT64</span> resourceGeneration;
+};
+
+<span class='tp'>BOOL</span> <span class='fn'>magLayeredPresenterCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='tp'>MAGLAYEREDPRESENTER</span>** presenterOut)
+{
+    <span class='tp'>MAGLAYEREDPRESENTER</span>* presenter;
+    BITMAPINFO bitmapInfo = { <span class='num'>0</span> };
+    <span class='tp'>SIZE</span> capacity;
+    <span class='kw'>void</span>* <span class='tp'>pixels</span> = NULL;
+
+    <span class='kw'>if</span> (!hWnd || !presenterOut || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *presenterOut = NULL;
+    presenter = (<span class='tp'>MAGLAYEREDPRESENTER</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*presenter));
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    capacity = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+    presenter-&gt;memoryDC = <span class='fn'>CreateCompatibleDC</span>(NULL);
+    bitmapInfo.bmiHeader.biSize = <span class='kw'>sizeof</span>(bitmapInfo.bmiHeader);
+    bitmapInfo.bmiHeader.biWidth = capacity.cx;
+    bitmapInfo.bmiHeader.biHeight = -capacity.cy;
+    bitmapInfo.bmiHeader.biPlanes = <span class='num'>1</span>;
+    bitmapInfo.bmiHeader.biBitCount = <span class='num'>32</span>;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+    presenter-&gt;bitmap = <span class='fn'>CreateDIBSection</span>(
+      presenter-&gt;memoryDC,
+      &amp;bitmapInfo,
+      DIB_RGB_COLORS,
+      &amp;<span class='tp'>pixels</span>,
+      NULL,
+      <span class='num'>0</span>);
+    <span class='kw'>if</span> (!presenter-&gt;memoryDC || !presenter-&gt;bitmap || !<span class='tp'>pixels</span>)
+    {
+      <span class='fn'>magLayeredPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+    presenter-&gt;oldBitmap = <span class='fn'>SelectBitmap</span>(presenter-&gt;memoryDC, presenter-&gt;bitmap);
+    <span class='kw'>if</span> (!presenter-&gt;oldBitmap)
+    {
+      <span class='fn'>magLayeredPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+    presenter-&gt;<span class='tp'>pixels</span> = (<span class='tp'>BYTE</span>*)<span class='tp'>pixels</span>;
+    presenter-&gt;capacityWidth = (<span class='tp'>UINT</span>)capacity.cx;
+    presenter-&gt;capacityHeight = (<span class='tp'>UINT</span>)capacity.cy;
+    presenter-&gt;resourceGeneration = <span class='num'>1</span>;
+    *presenterOut = presenter;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magLayeredPresenterDestroy</span>(<span class='tp'>MAGLAYEREDPRESENTER</span>* presenter)
+{
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (presenter-&gt;memoryDC &amp;&amp; presenter-&gt;oldBitmap)
+    {
+      <span class='fn'>SelectBitmap</span>(presenter-&gt;memoryDC, presenter-&gt;oldBitmap);
+    }
+    <span class='kw'>if</span> (presenter-&gt;bitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(presenter-&gt;bitmap);
+    }
+    <span class='kw'>if</span> (presenter-&gt;memoryDC)
+    {
+      <span class='fn'>DeleteDC</span>(presenter-&gt;memoryDC);
+    }
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, presenter);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magLayeredCopyPixels</span>(
+  <span class='tp'>MAGLAYEREDPRESENTER</span>* presenter,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='tp'>BOOL</span> perPixelAlpha)
+{
+    <span class='tp'>UINT</span> y;
+
+    <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; frame-&gt;height; ++y)
+    {
+      <span class='kw'>const</span> <span class='tp'>UINT</span> sourceY = MAG_ROW_ORDER_TOP_DOWN == frame-&gt;rowOrder
+        ? y
+        : frame-&gt;height - <span class='num'>1U</span> - y;
+      <span class='kw'>const</span> <span class='tp'>BYTE</span>* source = frame-&gt;<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)sourceY * frame-&gt;stride;
+      <span class='tp'>BYTE</span>* destination = presenter-&gt;<span class='tp'>pixels</span> +
+        (<span class='tp'>SIZE_T</span>)y * presenter-&gt;capacityWidth * <span class='num'>4U</span>;
+      <span class='tp'>UINT</span> <span class='tp'>x</span>;
+
+      <span class='kw'>if</span> (!perPixelAlpha &amp;&amp; MAG_ALPHA_MODE_IGNORE == frame-&gt;alphaMode)
+      {
+        <span class='fn'>CopyMemory</span>(destination, source, (<span class='tp'>SIZE_T</span>)frame-&gt;width * <span class='num'>4U</span>);
+        <span class='kw'>for</span> (<span class='tp'>x</span> = <span class='num'>0</span>; <span class='tp'>x</span> &lt; frame-&gt;width; ++<span class='tp'>x</span>)
+        {
+          destination[(<span class='tp'>SIZE_T</span>)<span class='tp'>x</span> * <span class='num'>4U</span> + <span class='num'>3U</span>] = <span class='num'>255</span>;
+        }
+        <span class='kw'>continue</span>;
+      }
+
+      <span class='kw'>for</span> (<span class='tp'>x</span> = <span class='num'>0</span>; <span class='tp'>x</span> &lt; frame-&gt;width; ++<span class='tp'>x</span>)
+      {
+        <span class='kw'>const</span> <span class='tp'>BYTE</span>* sourcePixel = source + (<span class='tp'>SIZE_T</span>)<span class='tp'>x</span> * <span class='num'>4U</span>;
+        <span class='tp'>BYTE</span>* destinationPixel = destination + (<span class='tp'>SIZE_T</span>)<span class='tp'>x</span> * <span class='num'>4U</span>;
+        <span class='tp'>UINT</span> <span class='tp'>alpha</span> = MAG_ALPHA_MODE_IGNORE == frame-&gt;alphaMode
+          ? <span class='num'>255U</span>
+          : sourcePixel[<span class='num'>3</span>];
+
+        destinationPixel[<span class='num'>3</span>] = (<span class='tp'>BYTE</span>)<span class='tp'>alpha</span>;
+        <span class='kw'>if</span> (perPixelAlpha &amp;&amp; MAG_ALPHA_MODE_STRAIGHT == frame-&gt;alphaMode)
+        {
+          destinationPixel[<span class='num'>0</span>] = (<span class='tp'>BYTE</span>)((sourcePixel[<span class='num'>0</span>] * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+          destinationPixel[<span class='num'>1</span>] = (<span class='tp'>BYTE</span>)((sourcePixel[<span class='num'>1</span>] * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+          destinationPixel[<span class='num'>2</span>] = (<span class='tp'>BYTE</span>)((sourcePixel[<span class='num'>2</span>] * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+        }
+        <span class='kw'>else</span>
+        {
+          destinationPixel[<span class='num'>0</span>] = sourcePixel[<span class='num'>0</span>];
+          destinationPixel[<span class='num'>1</span>] = sourcePixel[<span class='num'>1</span>];
+          destinationPixel[<span class='num'>2</span>] = sourcePixel[<span class='num'>2</span>];
+        }
+      }
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magLayeredPresenterPresent</span>(
+  <span class='tp'>MAGLAYEREDPRESENTER</span>* presenter,
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation)
+{
+    <span class='tp'>RECT</span> windowRect;
+    <span class='tp'>POINT</span> destination;
+    <span class='tp'>POINT</span> source = { <span class='num'>0</span>, <span class='num'>0</span> };
+    <span class='tp'>SIZE</span> size;
+    BLENDFUNCTION blend = { AC_SRC_OVER, <span class='num'>0</span>, <span class='num'>255</span>, <span class='num'>0</span> };
+    UPDATELAYEREDWINDOWINFO info = { <span class='kw'>sizeof</span>(info) };
+    <span class='tp'>DWORD</span> flags;
+    <span class='tp'>BOOL</span> perPixelAlpha;
+
+    <span class='kw'>if</span> (!presenter || !hWnd || !frame || !frame-&gt;<span class='tp'>pixels</span> || !presentation ||
+        !frame-&gt;width || !frame-&gt;height ||
+        frame-&gt;width &gt; presenter-&gt;capacityWidth ||
+        frame-&gt;height &gt; presenter-&gt;capacityHeight ||
+        !<span class='fn'>GetWindowRect</span>(hWnd, &amp;windowRect))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    perPixelAlpha = MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == presentation-&gt;alphaMode;
+    <span class='fn'>magLayeredCopyPixels</span>(presenter, frame, perPixelAlpha);
+    destination.<span class='tp'>x</span> = windowRect.<span class='tp'>left</span>;
+    destination.y = windowRect.top;
+    size.cx = (<span class='tp'>LONG</span>)frame-&gt;width;
+    size.cy = (<span class='tp'>LONG</span>)frame-&gt;height;
+
+    <span class='kw'>switch</span> (presentation-&gt;alphaMode)
+    {
+    <span class='kw'>case</span> MAG_LAYER_ALPHA_CONSTANT:
+      blend.SourceConstantAlpha = presentation-&gt;constantAlpha;
+      flags = ULW_ALPHA;
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_LAYER_ALPHA_COLOR_KEY:
+      flags = ULW_COLORKEY;
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED:
+      blend.AlphaFormat = AC_SRC_ALPHA;
+      flags = ULW_ALPHA;
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_LAYER_ALPHA_OPAQUE:
+    <span class='kw'>default</span>:
+      flags = ULW_ALPHA;
+      <span class='kw'>break</span>;
+    }
+
+    info.pptDst = &amp;destination;
+    info.psize = &amp;size;
+    info.hdcSrc = presenter-&gt;memoryDC;
+    info.pptSrc = &amp;source;
+    info.crKey = presentation-&gt;colorKey;
+    info.pblend = &amp;blend;
+    info.dwFlags = flags;
+    <span class='kw'>return</span> <span class='fn'>UpdateLayeredWindowIndirect</span>(hWnd, &amp;info);
+}
+
+<span class='tp'>UINT64</span> <span class='fn'>magLayeredPresenterGetResourceGeneration</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGLAYEREDPRESENTER</span>* presenter)
+{
+    <span class='kw'>return</span> presenter ? presenter-&gt;resourceGeneration : <span class='num'>0</span>;
+}
+</pre>
+<p class="source-nav"><a href='graphics_gdiplus_c.htm'>&larr; graphics_gdiplus.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_layered_h.htm'>graphics_layered.h &rarr;</a></p>
+</body>
+</html>

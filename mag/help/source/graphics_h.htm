@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics.h</p>
+<h1>graphics.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>201 lines</strong> &middot; 4964 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_c.htm'>&larr; graphics.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_d3d11_c.htm'>graphics_d3d11.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &lt;windows.h&gt;</span>
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='kw'>extern</span> <span class='str'>&quot;C&quot;</span> {
+<span class='pp'>#endif</span>
+
+<span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>;
+
+<span class='pp'>#define MAG_UI_MAX_DRAW_COMMANDS 128</span>
+<span class='pp'>#define MAG_UI_MAX_TEXT_LENGTH 64</span>
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>GRAPHICSAPI</span>
+{
+  GRAPHICS_API_OPENGL = <span class='num'>0</span>,
+  GRAPHICS_API_GDI,
+  GRAPHICS_API_D3D9,
+  GRAPHICS_API_D3D11,
+  GRAPHICS_API_D3D12,
+  GRAPHICS_API_VULKAN,
+  GRAPHICS_API_GDIPLUS,
+  GRAPHICS_API_COUNT
+} <span class='tp'>GRAPHICSAPI</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>UIGRAPHICSAPI</span>
+{
+  UI_GRAPHICS_API_NATIVE = <span class='num'>0</span>,
+  UI_GRAPHICS_API_DIRECT2D,
+  UI_GRAPHICS_API_COUNT
+} <span class='tp'>UIGRAPHICSAPI</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>TEXTRENDERER</span>
+{
+  TEXT_RENDERER_DIRECTWRITE = <span class='num'>0</span>,
+  TEXT_RENDERER_GPU_GLYPH_ATLAS,
+  TEXT_RENDERER_GDI,
+  TEXT_RENDERER_COUNT
+} <span class='tp'>TEXTRENDERER</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>CAPTUREAPI</span>
+{
+  CAPTURE_API_GDI_BITBLT = <span class='num'>0</span>,
+  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
+  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
+  CAPTURE_API_DWM_THUMBNAIL,
+  CAPTURE_API_DWM_PRIVATE_VISUAL,
+  CAPTURE_API_COUNT
+} <span class='tp'>CAPTUREAPI</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGROWORDER</span>
+{
+  MAG_ROW_ORDER_TOP_DOWN = <span class='num'>0</span>,
+  MAG_ROW_ORDER_BOTTOM_UP
+} <span class='tp'>MAGROWORDER</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGALPHAMODE</span>
+{
+  MAG_ALPHA_MODE_IGNORE = <span class='num'>0</span>,
+  MAG_ALPHA_MODE_STRAIGHT,
+  MAG_ALPHA_MODE_PREMULTIPLIED
+} <span class='tp'>MAGALPHAMODE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGPIXELBUFFER</span>
+{
+  <span class='tp'>BYTE</span>*        <span class='tp'>pixels</span>;
+  <span class='tp'>UINT</span>         width;
+  <span class='tp'>UINT</span>         height;
+  <span class='tp'>UINT</span>         stride;
+  <span class='tp'>MAGROWORDER</span>  rowOrder;
+  <span class='tp'>MAGALPHAMODE</span> alphaMode;
+} <span class='tp'>MAGPIXELBUFFER</span>, *<span class='tp'>LPMAGPIXELBUFFER</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGCOLORF</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>r</span>;
+  <span class='tp'>FLOAT</span> g;
+  <span class='tp'>FLOAT</span> b;
+  <span class='tp'>FLOAT</span> a;
+} <span class='tp'>MAGCOLORF</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGUIDRAWCOMMANDTYPE</span>
+{
+  MAG_UI_DRAW_FILL_RECT = <span class='num'>0</span>,
+  MAG_UI_DRAW_STROKE_RECT,
+  MAG_UI_DRAW_TEXT
+} <span class='tp'>MAGUIDRAWCOMMANDTYPE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGUIDRAWCOMMAND</span>
+{
+  <span class='tp'>MAGUIDRAWCOMMANDTYPE</span> <span class='tp'>type</span>;
+  <span class='tp'>RECT</span>                 <span class='tp'>rect</span>;
+  <span class='tp'>MAGCOLORF</span>            color;
+  <span class='tp'>FLOAT</span>                thickness;
+  <span class='tp'>FLOAT</span>                fontSize;
+  <span class='tp'>TCHAR</span>                text[<span class='mc'>MAG_UI_MAX_TEXT_LENGTH</span>];
+} <span class='tp'>MAGUIDRAWCOMMAND</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGGLYPHINFO</span>
+{
+  <span class='tp'>RECT</span> <span class='tp'>rect</span>;
+  <span class='tp'>INT</span>  advance;
+} <span class='tp'>MAGGLYPHINFO</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGGLYPHATLAS</span>
+{
+  <span class='kw'>const</span> <span class='tp'>BYTE</span>*         <span class='tp'>alpha</span>;
+  <span class='tp'>UINT</span>                width;
+  <span class='tp'>UINT</span>                height;
+  <span class='tp'>UINT</span>                stride;
+  <span class='tp'>WCHAR</span>               firstCharacter;
+  <span class='tp'>UINT</span>                glyphCount;
+  <span class='kw'>const</span> <span class='tp'>MAGGLYPHINFO</span>* glyphs;
+} <span class='tp'>MAGGLYPHATLAS</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGUIDRAWLIST</span>
+{
+  <span class='tp'>MAGUIDRAWCOMMAND</span> commands[<span class='mc'>MAG_UI_MAX_DRAW_COMMANDS</span>];
+  <span class='tp'>UINT</span>             <span class='tp'>count</span>;
+  <span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* glyphAtlas;
+} <span class='tp'>MAGUIDRAWLIST</span>, *<span class='tp'>LPMAGUIDRAWLIST</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGCPUCOMPOSITOR</span>
+{
+  <span class='tp'>BYTE</span>*  <span class='tp'>pixels</span>;
+  <span class='tp'>SIZE_T</span> capacity;
+  <span class='tp'>UINT64</span> generation;
+} <span class='tp'>MAGCPUCOMPOSITOR</span>, *<span class='tp'>LPMAGCPUCOMPOSITOR</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTINTENT</span>
+{
+  <span class='tp'>BOOL</span> <span class='tp'>restartSequence</span>;
+  <span class='tp'>BOOL</span> synchronize;
+} <span class='tp'>MAGPRESENTINTENT</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGGRAPHICSBACKEND</span>
+{
+  <span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>;
+  <span class='tp'>LPCTSTR</span>     name;
+  <span class='tp'>BOOL</span>        implemented;
+  <span class='tp'>BOOL</span> (*IsAvailable)(LPTSTR reason, <span class='tp'>UINT</span> reasonCount);
+  <span class='tp'>BOOL</span> (*Create)(
+    <span class='tp'>HWND</span> hWnd,
+    <span class='tp'>SIZE</span> clientSize,
+    <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+    <span class='kw'>void</span>** stateOut);
+  <span class='kw'>void</span> (*Destroy)(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* <span class='tp'>state</span>);
+  <span class='tp'>BOOL</span> (*Resize)(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* <span class='tp'>state</span>, <span class='tp'>SIZE</span> clientSize);
+  <span class='tp'>BOOL</span> (*SetPresentationEnabled)(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* <span class='tp'>state</span>, <span class='tp'>BOOL</span> enabled);
+  <span class='tp'>BOOL</span> (*Render)(
+    <span class='tp'>HWND</span> hWnd,
+    <span class='kw'>void</span>* <span class='tp'>state</span>,
+    <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+    <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+    <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent);
+  <span class='tp'>HANDLE</span> (*GetFrameWaitHandle)(<span class='kw'>void</span>* <span class='tp'>state</span>);
+  <span class='tp'>UINT64</span> (*GetResourceGeneration)(<span class='kw'>void</span>* <span class='tp'>state</span>);
+  <span class='tp'>BOOL</span> (*GetNextEstimatedFrameTime)(<span class='kw'>void</span>* <span class='tp'>state</span>, LONGLONG* frameTime);
+  <span class='tp'>BOOL</span> (*GetObservedPresentationTarget)(<span class='kw'>void</span>* <span class='tp'>state</span>, <span class='tp'>UINT</span>* target);
+} <span class='tp'>MAGGRAPHICSBACKEND</span>;
+
+<span class='kw'>void</span> <span class='fn'>magUiDrawListReset</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list);
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendFill</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list, <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>, <span class='tp'>MAGCOLORF</span> color);
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendStroke</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list, <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>, <span class='tp'>MAGCOLORF</span> color, <span class='tp'>FLOAT</span> thickness);
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendText</span>(
+  <span class='tp'>LPMAGUIDRAWLIST</span> list,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>,
+  <span class='tp'>MAGCOLORF</span> color,
+  <span class='tp'>FLOAT</span> fontSize,
+  <span class='tp'>LPCTSTR</span> value);
+
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsComposeFrame</span>(
+  <span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output);
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsReserveCpuCompositor</span>(
+  <span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor,
+  <span class='tp'>UINT</span> width,
+  <span class='tp'>UINT</span> height);
+<span class='kw'>void</span> <span class='fn'>magGraphicsDestroyCpuCompositor</span>(<span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor);
+
+<span class='tp'>UINT</span> <span class='fn'>magGraphicsGetBackendCount</span>(<span class='kw'>void</span>);
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* <span class='fn'>magGraphicsGetBackendAt</span>(<span class='tp'>UINT</span> index);
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* <span class='fn'>magGraphicsGetBackend</span>(<span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>);
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsSetPresentationEnabledNoop</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* <span class='tp'>state</span>, <span class='tp'>BOOL</span> enabled);
+<span class='tp'>SIZE</span> <span class='fn'>magGraphicsChooseReservoirSize</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>SIZE</span> minimumSize);
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsIsInputDesktop</span>(<span class='kw'>void</span>);
+
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsOpenGLBackend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsGdiBackend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsGdiPlusBackend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsD3D9Backend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsD3D11Backend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsD3D12Backend;
+<span class='kw'>extern</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsVulkanBackend;
+
+<span class='pp'>#ifdef __cplusplus</span>
+}
+<span class='pp'>#endif</span>
+</pre>
+<p class="source-nav"><a href='graphics_c.htm'>&larr; graphics.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_d3d11_c.htm'>graphics_d3d11.c &rarr;</a></p>
+</body>
+</html>

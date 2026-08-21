@@ -7,6 +7,8 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 
+#pragma comment(lib, "comctl32")
+
 #define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM
 #define MAIN_TEST_DESKTOP_PREFIX TEXT("mag-test-")
 #define MAIN_TEST_DESKTOP_CLASS L"Progman"
@@ -613,6 +615,11 @@ _tWinMain(
   _In_ int nShowCmd)
 {
     HWND hWnd;
+    INITCOMMONCONTROLSEX commonControls =
+    {
+      sizeof(commonControls),
+      ICC_WIN95_CLASSES,
+    };
     int exitCode = 0;
     MAINVBLANKTHREAD vblankThread;
     BOOL fMessageDrivenRender = FALSE;
@@ -625,6 +632,11 @@ _tWinMain(
     MAINTESTWINDOWS testWindows = { 0 };
 
     UNREFERENCED_PARAMETER(hPrevInstance);
+
+    if (!InitCommonControlsEx(&commonControls))
+    {
+      return ERROR_DLL_INIT_FAILED;
+    }
 
     if (fIsolatedSmoke && !main_BeginIsolatedTestDesktop(&originalDesktop, &testDesktop))
     {

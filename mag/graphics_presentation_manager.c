@@ -5,6 +5,9 @@
 #include "dcompabi.h"
 
 #include <Presentation.h>
+#include <dwmapi.h>
+
+#pragma comment(lib, "dwmapi")
 
 #define MAG_PRESENTATION_MAX_BUFFERS 16
 
@@ -17,6 +20,7 @@ typedef HRESULT (WINAPI *MAGCREATEPRESENTATIONFACTORY)(
   IUnknown* d3dDevice,
   REFIID riid,
   void** presentationFactory);
+typedef VOID (WINAPI *MAGQUERYINTERRUPTTIME)(PULONGLONG interruptTime);
 
 typedef struct MAGPRESENTATIONBUFFERENTRY
 {
@@ -43,9 +47,52 @@ struct MAGPRESENTATIONMANAGERPRESENTER
   UINT                       nextBuffer;
   UINT64                     resourceGeneration;
   UINT64                     lastSubmittedPresentId;
+  UINT64                     preferredDuration;
+  UINT64                     nextTargetTime;
+  MAGQUERYINTERRUPTTIME      queryInterruptTime;
   MAGPRESENTATIONTARGET      observedTarget;
   BOOL                       haveObservedTarget;
 };
+
+static MAGQUERYINTERRUPTTIME magPresentationManagerGetInterruptTimeQuery(void)
+{
+  HMODULE kernel32 = GetModuleHandle(TEXT("kernel32.dll"));
+  MAGQUERYINTERRUPTTIME query = NULL;
+
+  if (kernel32)
+  {
+    query = (MAGQUERYINTERRUPTTIME)GetProcAddress(
+      kernel32,
+      "QueryInterruptTimePrecise");
+    if (!query)
+    {
+      query = (MAGQUERYINTERRUPTTIME)GetProcAddress(
+        kernel32,
+        "QueryInterruptTime");
+    }
+  }
+  return query;
+}
+
+static UINT64 magPresentationManagerPreferredDuration(
+  HWND hWnd,
+  const MAGPRESENTATIONSETTINGS* settings)
+{
+  DWM_TIMING_INFO timing = { sizeof(timing) };
+
+  if (!settings || !settings->syncInterval)
+  {
+    return 0;
+  }
+  if (SUCCEEDED(DwmGetCompositionTimingInfo(hWnd, &timing)) &&
+      timing.rateRefresh.uiNumerator &&
+      timing.rateRefresh.uiDenominator)
+  {
+    return (10000000ULL * timing.rateRefresh.uiDenominator *
+      settings->syncInterval) / timing.rateRefresh.uiNumerator;
+  }
+  return (10000000ULL * settings->syncInterval) / 60ULL;
+}
 
 static void magPresentationManagerSetReason(
   LPTSTR reason,
@@ -71,6 +118,57 @@ static DXGI_ALPHA_MODE magPresentationManagerAlphaMode(
     return MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == settings->alphaMode
       ? DXGI_ALPHA_MODE_PREMULTIPLIED
       : DXGI_ALPHA_MODE_IGNORE;
+}
+
+static HRESULT magPresentationManagerRestrictToSelectedOutput(
+  IPresentationSurface* surface,
+  const MAGPRESENTATIONSETTINGS* settings)
+{
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* selectedOutput = NULL;
+    UINT outputIndex;
+    HRESULT hr = DXGI_ERROR_NOT_FOUND;
+
+    if (!surface || !settings ||
+        MAG_DISPLAY_ADAPTER_EXPLICIT != settings->display.mode)
+    {
+      return S_OK;
+    }
+    if (!magAdapterOpenDxgi(settings->display.adapterLuid, &adapter))
+    {
+      return DXGI_ERROR_NOT_FOUND;
+    }
+    for (outputIndex = 0; ; ++outputIndex)
+    {
+      IDXGIOutput* output = NULL;
+      DXGI_OUTPUT_DESC desc;
+
+      hr = IDXGIAdapter1_EnumOutputs(adapter, outputIndex, &output);
+      if (DXGI_ERROR_NOT_FOUND == hr)
+      {
+        break;
+      }
+      if (SUCCEEDED(hr) && output &&
+          SUCCEEDED(IDXGIOutput_GetDesc(output, &desc)) &&
+          0 == lstrcmpi(desc.DeviceName, settings->display.deviceName))
+      {
+        selectedOutput = output;
+        break;
+      }
+      if (output)
+      {
+        IDXGIOutput_Release(output);
+      }
+    }
+    if (selectedOutput)
+    {
+      hr = IPresentationSurface_RestrictToOutput(
+        surface,
+        (IUnknown*)selectedOutput);
+      IDXGIOutput_Release(selectedOutput);
+    }
+    IDXGIAdapter1_Release(adapter);
+    return hr;
 }
 
 static void magPresentationManagerDrainStatistics(
@@ -259,7 +357,40 @@ BOOL magPresentationManagerPresenterCreate(
     }
     if (SUCCEEDED(hr))
     {
+      hr = magPresentationManagerRestrictToSelectedOutput(
+        presenter->surface,
+        settings);
+    }
+    if (SUCCEEDED(hr))
+    {
       IPresentationSurface_SetTag(presenter->surface, (UINT_PTR)presenter);
+      presenter->preferredDuration =
+        magPresentationManagerPreferredDuration(hWnd, settings);
+      presenter->queryInterruptTime =
+        magPresentationManagerGetInterruptTimeQuery();
+      if (presenter->preferredDuration)
+      {
+        SystemInterruptTime preferredDuration =
+          { presenter->preferredDuration };
+        SystemInterruptTime tolerance =
+          { max(1ULL, presenter->preferredDuration / 20ULL) };
+        HRESULT durationResult;
+
+        durationResult = IPresentationManager_SetPreferredPresentDuration(
+          presenter->manager,
+          preferredDuration,
+          tolerance);
+        if (FAILED(durationResult))
+        {
+          /* Custom cadence is an optimization, not an ownership prerequisite.
+             Keep the displayable-buffer path alive when the driver declines
+             this duration and let Present() use the system cadence. */
+          presenter->preferredDuration = 0;
+        }
+      }
+    }
+    if (SUCCEEDED(hr))
+    {
       hr = IPresentationManager_EnablePresentStatisticsKind(
         presenter->manager,
         PresentStatisticsKind_PresentStatus,
@@ -557,6 +688,7 @@ BOOL magPresentationManagerPresenterPresent(
     if (intent && intent->restartSequence)
     {
       IPresentationManager_CancelPresentsFrom(presenter->manager, 1);
+      presenter->nextTargetTime = 0;
     }
 
     SetRect(&sourceRect, 0, 0, contentSize.cx, contentSize.cy);
@@ -571,13 +703,36 @@ BOOL magPresentationManagerPresenterPresent(
     }
     if (SUCCEEDED(hr))
     {
+      const BOOL forceVSyncInterrupt =
+        (intent && intent->synchronize) ||
+        (0 == (presenter->lastSubmittedPresentId % presenter->bufferCount));
       hr = IPresentationManager_ForceVSyncInterrupt(
         presenter->manager,
-        (boolean)(intent && intent->synchronize));
+        (boolean)forceVSyncInterrupt);
     }
     if (SUCCEEDED(hr))
     {
       ZeroMemory(&targetTime, sizeof(targetTime));
+      if (presenter->preferredDuration)
+      {
+        UINT64 now = 0;
+
+        if (presenter->queryInterruptTime)
+        {
+          presenter->queryInterruptTime(&now);
+        }
+        else
+        {
+          now = GetTickCount64() * 10000ULL;
+        }
+        if (!presenter->nextTargetTime ||
+            presenter->nextTargetTime + presenter->preferredDuration < now)
+        {
+          presenter->nextTargetTime = now;
+        }
+        targetTime.value = presenter->nextTargetTime;
+        presenter->nextTargetTime += presenter->preferredDuration;
+      }
       hr = IPresentationManager_SetTargetTime(presenter->manager, targetTime);
     }
     if (SUCCEEDED(hr))

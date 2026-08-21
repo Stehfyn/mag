@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>dwmprivate.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dwmprivate.c</p>
+<h1>dwmprivate.c</h1>
+<p>Private DWM shared desktop/window visuals, retained DirectComposition tree, transform/clip, overlay reservoir, and atomic updates.</p>
+<div class="source-meta"><strong>1818 lines</strong> &middot; 52447 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='dwmapix_h.htm'>&larr; dwmapix.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmprivate_h.htm'>dwmprivate.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#define COBJMACROS</span>
+
+<span class='pp'>#include &quot;dwmprivate.h&quot;</span>
+<span class='pp'>#include &quot;dcompabi.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d11.h&gt;</span>
+<span class='pp'>#include &lt;dwmapi.h&gt;</span>
+<span class='pp'>#include &lt;dxgi1_3.h&gt;</span>
+<span class='pp'>#include &lt;math.h&gt;</span>
+<span class='pp'>#include &lt;stdint.h&gt;</span>
+<span class='pp'>#include &lt;string.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;d3d11&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;dwmapi&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;dxgi&quot;)</span>
+
+<span class='pp'>#define DWM_ORD_CREATE_SHARED_THUMBNAIL_VISUAL 147</span>
+<span class='pp'>#define DWM_ORD_QUERY_WINDOW_THUMBNAIL_SOURCE_SIZE 162</span>
+<span class='pp'>#define DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL 163</span>
+<span class='pp'>#define DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL 164</span>
+<span class='pp'>#define DWM_PRIVATE_MULTIWINDOW_BUILD 20000</span>
+<span class='pp'>#define DWM_PRIVATE_THUMBNAIL_TYPE_ICONIC 2</span>
+<span class='pp'>#define DWM_PRIVATE_MAX_TOP_WINDOWS 512</span>
+<span class='pp'>#define DWM_PRIVATE_MAX_SOURCE_VISUALS DWM_PRIVATE_MAX_TOP_WINDOWS</span>
+<span class='pp'>#define DWM_PRIVATE_MAX_EXCLUSIONS (DWM_PRIVATE_MAX_SOURCE_VISUALS + 1)</span>
+
+<span class='pp'>#ifndef DWM_TNP_ENABLE3D</span>
+<span class='pp'>#define DWM_TNP_ENABLE3D 0x04000000</span>
+<span class='pp'>#endif</span>
+
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DCOMPOSITIONCREATEDEVICE3)(
+  IUnknown*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPCREATESHAREDTHUMBNAILVISUAL)(
+  <span class='tp'>HWND</span>, <span class='tp'>HWND</span>, <span class='tp'>DWORD</span>, DWM_THUMBNAIL_PROPERTIES*, <span class='kw'>void</span>*, <span class='kw'>void</span>**, PHTHUMBNAIL);
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPQUERYWINDOWTHUMBNAILSOURCESIZE)(
+  <span class='tp'>HWND</span>, <span class='tp'>BOOL</span>, <span class='tp'>SIZE</span>*);
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPCREATESHAREDDESKTOPVISUAL)(
+  <span class='tp'>HWND</span>, <span class='kw'>void</span>*, <span class='kw'>void</span>**, PHTHUMBNAIL);
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)(
+  <span class='tp'>HTHUMBNAIL</span>, <span class='tp'>HWND</span>*, <span class='tp'>DWORD</span>, <span class='tp'>HWND</span>*, <span class='tp'>DWORD</span>, <span class='tp'>RECT</span>*, <span class='tp'>SIZE</span>*);
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span>* PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)(
+  <span class='tp'>HTHUMBNAIL</span>, <span class='tp'>HWND</span>*, <span class='tp'>DWORD</span>, <span class='tp'>HWND</span>*, <span class='tp'>DWORD</span>, <span class='tp'>RECT</span>*, <span class='tp'>SIZE</span>*, <span class='tp'>DWORD</span>);
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> MAG_WINDOWCOMPOSITIONATTRIB
+{
+  MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW = <span class='num'>0x0D</span>
+} MAG_WINDOWCOMPOSITIONATTRIB;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_WINDOWCOMPOSITIONATTRIBDATA
+{
+  MAG_WINDOWCOMPOSITIONATTRIB attrib;
+  <span class='kw'>void</span>*                       data;
+  <span class='tp'>DWORD</span>                       dataSize;
+} MAG_WINDOWCOMPOSITIONATTRIBDATA;
+
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span> (<span class='kw'>WINAPI</span>* PFN_SETWINDOWCOMPOSITIONATTRIBUTE)(
+  <span class='tp'>HWND</span>, MAG_WINDOWCOMPOSITIONATTRIBDATA*);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_RTL_OSVERSIONINFOW
+{
+  <span class='tp'>ULONG</span> dwOSVersionInfoSize;
+  <span class='tp'>ULONG</span> dwMajorVersion;
+  <span class='tp'>ULONG</span> dwMinorVersion;
+  <span class='tp'>ULONG</span> dwBuildNumber;
+  <span class='tp'>ULONG</span> dwPlatformId;
+  <span class='tp'>WCHAR</span> szCSDVersion[<span class='num'>128</span>];
+} MAG_RTL_OSVERSIONINFOW;
+
+<span class='kw'>typedef</span> <span class='tp'>LONG</span> (<span class='kw'>WINAPI</span>* PFN_RTLGETVERSION)(MAG_RTL_OSVERSIONINFOW*);
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> DWMPRIVATESOURCELAYER
+{
+  DWM_PRIVATE_SHELL_DESKTOP = <span class='num'>0</span>,
+  DWM_PRIVATE_APPLICATION,
+  DWM_PRIVATE_SHELL_TASKBAR
+} DWMPRIVATESOURCELAYER;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> DWMPRIVATETOPWINDOWKIND
+{
+  DWM_PRIVATE_TOP_OTHER = <span class='num'>0</span>,
+  DWM_PRIVATE_TOP_PROGMAN,
+  DWM_PRIVATE_TOP_WORKER,
+  DWM_PRIVATE_TOP_TASKBAR
+} DWMPRIVATETOPWINDOWKIND;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> DWMPRIVATETOPWINDOW
+{
+  <span class='tp'>HWND</span>                    hwnd;
+  <span class='tp'>RECT</span>                    <span class='tp'>rect</span>;
+  DWMPRIVATETOPWINDOWKIND kind;
+  <span class='tp'>BOOL</span>                    visible;
+  <span class='tp'>BOOL</span>                    iconic;
+  <span class='tp'>BOOL</span>                    cloaked;
+  <span class='tp'>BOOL</span>                    hasDesktopView;
+} DWMPRIVATETOPWINDOW;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> DWMPRIVATESOURCECANDIDATE
+{
+  <span class='tp'>HWND</span>                    hwnd;
+  <span class='tp'>RECT</span>                    <span class='tp'>rect</span>;
+  DWMPRIVATESOURCELAYER   layer;
+} DWMPRIVATESOURCECANDIDATE;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> DWMPRIVATESOURCEVISUAL
+{
+  <span class='tp'>HWND</span>                          hwnd;
+  <span class='tp'>RECT</span>                          <span class='tp'>rect</span>;
+  <span class='tp'>SIZE</span>                          sourceSize;
+  <span class='tp'>FLOAT</span>                         offsetX;
+  <span class='tp'>FLOAT</span>                         offsetY;
+  DWMPRIVATESOURCELAYER         layer;
+  DWM_THUMBNAIL_PROPERTIES      properties;
+  <span class='tp'>MAG_IDCompositionVisual</span>*      visual;
+  <span class='tp'>HTHUMBNAIL</span>                    thumbnail;
+} DWMPRIVATESOURCEVISUAL;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D2D_MATRIX_3X2_F
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>m11</span>;
+  <span class='tp'>FLOAT</span> m12;
+  <span class='tp'>FLOAT</span> m21;
+  <span class='tp'>FLOAT</span> m22;
+  <span class='tp'>FLOAT</span> dx;
+  <span class='tp'>FLOAT</span> dy;
+} MAG_D2D_MATRIX_3X2_F;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D2D_RECT_F
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>left</span>;
+  <span class='tp'>FLOAT</span> top;
+  <span class='tp'>FLOAT</span> right;
+  <span class='tp'>FLOAT</span> bottom;
+} MAG_D2D_RECT_F;
+
+<span class='kw'>struct</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>
+{
+  <span class='tp'>HWND</span>                                      hwndDestination;
+  <span class='tp'>HMODULE</span>                                   hDcomp;
+  <span class='tp'>HMODULE</span>                                   hDwmApi;
+  <span class='tp'>HMODULE</span>                                   hUser32;
+  PFN_DCOMPOSITIONCREATEDEVICE3             createDcompDevice;
+  PFN_DWMPCREATESHAREDTHUMBNAILVISUAL       createSharedThumbnailVisual;
+  PFN_DWMPQUERYWINDOWTHUMBNAILSOURCESIZE    queryWindowThumbnailSourceSize;
+  PFN_DWMPCREATESHAREDDESKTOPVISUAL         createSharedVisual;
+  FARPROC                                   updateSharedVisual;
+  PFN_SETWINDOWCOMPOSITIONATTRIBUTE         setWindowCompositionAttribute;
+  ID3D11Device*                             <span class='tp'>d3dDevice</span>;
+  ID3D11DeviceContext*                      d3dContext;
+  IDXGIDevice*                              dxgiDevice;
+  <span class='tp'>MAG_IDCompositionDesktopDevice</span>*           dcompDevice;
+  <span class='tp'>MAG_IDCompositionTarget</span>*                  dcompTarget;
+  <span class='tp'>MAG_IDCompositionVisual</span>*                  rootVisual;
+  <span class='tp'>MAG_IDCompositionVisual</span>*                  captureVisual;
+  <span class='tp'>MAG_IDCompositionVisual</span>*                  viewVisual;
+  <span class='tp'>MAG_IDCompositionVisual</span>*                  sharedVisual;
+  <span class='tp'>MAG_IDCompositionVisual</span>*                  overlayVisual;
+  <span class='tp'>MAG_IDCompositionSurface</span>*                overlaySurface;
+  <span class='tp'>HTHUMBNAIL</span>                                thumbnail;
+  <span class='tp'>DWORD</span>*                                    overlayPixels;
+  <span class='tp'>UINT</span>                                      overlayWidth;
+  <span class='tp'>UINT</span>                                      overlayHeight;
+  <span class='tp'>UINT</span>                                      overlayCapacityWidth;
+  <span class='tp'>UINT</span>                                      overlayCapacityHeight;
+  <span class='tp'>UINT64</span>                                    overlayResourceGeneration;
+  <span class='tp'>BOOL</span>                                      useMultiWindow;
+  <span class='tp'>BOOL</span>                                      livePreviewExcluded;
+  <span class='tp'>BOOL</span>                                      desktopConfigured;
+  <span class='tp'>BOOL</span>                                      viewConfigured;
+  <span class='tp'>BOOL</span>                                      viewVisible;
+  <span class='tp'>BOOL</span>                                      treeDirty;
+  <span class='tp'>BOOL</span>                                      overlayInitialized;
+  <span class='tp'>RECT</span>                                      desktopSource;
+  <span class='tp'>RECT</span>                                      viewDesktop;
+  <span class='tp'>RECT</span>                                      viewSource;
+  <span class='tp'>RECT</span>                                      viewDestination;
+  DWMPRIVATETOPWINDOW                       topWindows[<span class='mc'>DWM_PRIVATE_MAX_TOP_WINDOWS</span>];
+  <span class='tp'>UINT</span>                                      topWindowCount;
+  DWMPRIVATESOURCECANDIDATE                 sourceCandidates[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>UINT</span>                                      sourceCandidateCount;
+  DWMPRIVATESOURCEVISUAL                    sourceVisuals[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>UINT</span>                                      sourceVisualCount;
+  DWMPRIVATESOURCEVISUAL                    retiredSourceVisuals[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>UINT</span>                                      retiredSourceVisualCount;
+  <span class='tp'>HWND</span>                                      desktopExclusions[<span class='mc'>DWM_PRIVATE_MAX_EXCLUSIONS</span>];
+  <span class='tp'>UINT</span>                                      desktopExclusionCount;
+  <span class='tp'>UINT64</span>                                    sourceResourceGeneration;
+};
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>DwmPrivateReleaseUnknown</span>(<span class='kw'>void</span>** object)
+{
+  <span class='kw'>if</span> (object &amp;&amp; *object)
+  {
+    <span class='fn'>IUnknown_Release</span>((IUnknown*)*object);
+    *object = NULL;
+  }
+}
+
+<span class='kw'>static</span> <span class='tp'>LONG</span> <span class='fn'>DwmPrivateClampLong</span>(<span class='tp'>LONG</span> value, <span class='tp'>LONG</span> minimum, <span class='tp'>LONG</span> maximum)
+{
+  <span class='kw'>if</span> (value &lt; minimum)
+  {
+    <span class='kw'>return</span> minimum;
+  }
+  <span class='kw'>if</span> (value &gt; maximum)
+  {
+    <span class='kw'>return</span> maximum;
+  }
+  <span class='kw'>return</span> value;
+}
+
+<span class='kw'>static</span> <span class='tp'>BYTE</span> <span class='fn'>DwmPrivateFloatToByte</span>(<span class='tp'>FLOAT</span> value)
+{
+  <span class='kw'>if</span> (value &lt;= <span class='num'>0.0f</span>)
+  {
+    <span class='kw'>return</span> <span class='num'>0</span>;
+  }
+  <span class='kw'>if</span> (value &gt;= <span class='num'>1.0f</span>)
+  {
+    <span class='kw'>return</span> <span class='num'>255</span>;
+  }
+  <span class='kw'>return</span> (<span class='tp'>BYTE</span>)(value * <span class='num'>255.0f</span> + <span class='num'>0.5f</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>DWORD</span> <span class='fn'>DwmPrivatePremultiplyColor</span>(<span class='kw'>const</span> <span class='tp'>FLOAT</span> color[<span class='num'>4</span>])
+{
+  <span class='kw'>const</span> <span class='tp'>UINT</span> <span class='tp'>alpha</span> = <span class='fn'>DwmPrivateFloatToByte</span>(color[<span class='num'>3</span>]);
+  <span class='kw'>const</span> <span class='tp'>UINT</span> red = (<span class='fn'>DwmPrivateFloatToByte</span>(color[<span class='num'>0</span>]) * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> green = (<span class='fn'>DwmPrivateFloatToByte</span>(color[<span class='num'>1</span>]) * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> blue = (<span class='fn'>DwmPrivateFloatToByte</span>(color[<span class='num'>2</span>]) * <span class='tp'>alpha</span> + <span class='num'>127U</span>) / <span class='num'>255U</span>;
+  <span class='kw'>return</span> blue | (green &lt;&lt; <span class='num'>8</span>) | (red &lt;&lt; <span class='num'>16</span>) | (<span class='tp'>alpha</span> &lt;&lt; <span class='num'>24</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>DWORD</span> <span class='fn'>DwmPrivateBlendPixel</span>(<span class='tp'>DWORD</span> destination, <span class='tp'>DWORD</span> source)
+{
+  <span class='kw'>const</span> <span class='tp'>UINT</span> sourceAlpha = (source &gt;&gt; <span class='num'>24</span>) &amp; <span class='num'>0xffU</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> inverseAlpha = <span class='num'>255U</span> - sourceAlpha;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> destinationBlue = destination &amp; <span class='num'>0xffU</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> destinationGreen = (destination &gt;&gt; <span class='num'>8</span>) &amp; <span class='num'>0xffU</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> destinationRed = (destination &gt;&gt; <span class='num'>16</span>) &amp; <span class='num'>0xffU</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> destinationAlpha = (destination &gt;&gt; <span class='num'>24</span>) &amp; <span class='num'>0xffU</span>;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> blue = (source &amp; <span class='num'>0xffU</span>) +
+    ((destinationBlue * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+  <span class='kw'>const</span> <span class='tp'>UINT</span> green = ((source &gt;&gt; <span class='num'>8</span>) &amp; <span class='num'>0xffU</span>) +
+    ((destinationGreen * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+  <span class='kw'>const</span> <span class='tp'>UINT</span> red = ((source &gt;&gt; <span class='num'>16</span>) &amp; <span class='num'>0xffU</span>) +
+    ((destinationRed * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+  <span class='kw'>const</span> <span class='tp'>UINT</span> <span class='tp'>alpha</span> = sourceAlpha +
+    ((destinationAlpha * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+  <span class='kw'>return</span> blue | (green &lt;&lt; <span class='num'>8</span>) | (red &lt;&lt; <span class='num'>16</span>) | (<span class='tp'>alpha</span> &lt;&lt; <span class='num'>24</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>RECT</span> <span class='fn'>DwmPrivateClipRect</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>)
+{
+  <span class='tp'>RECT</span> clipped = *<span class='tp'>rect</span>;
+  clipped.<span class='tp'>left</span> = <span class='fn'>DwmPrivateClampLong</span>(
+    clipped.<span class='tp'>left</span>, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;overlayWidth);
+  clipped.top = <span class='fn'>DwmPrivateClampLong</span>(
+    clipped.top, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;overlayHeight);
+  clipped.right = <span class='fn'>DwmPrivateClampLong</span>(
+    clipped.right, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;overlayWidth);
+  clipped.bottom = <span class='fn'>DwmPrivateClampLong</span>(
+    clipped.bottom, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;overlayHeight);
+  <span class='kw'>return</span> clipped;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>DwmPrivateFillRect</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>,
+  <span class='tp'>DWORD</span> color)
+{
+  <span class='kw'>const</span> <span class='tp'>RECT</span> clipped = <span class='fn'>DwmPrivateClipRect</span>(<span class='tp'>state</span>, <span class='tp'>rect</span>);
+  <span class='tp'>LONG</span> y;
+
+  <span class='kw'>if</span> (clipped.right &lt;= clipped.<span class='tp'>left</span> || clipped.bottom &lt;= clipped.top)
+  {
+    <span class='kw'>return</span>;
+  }
+  <span class='kw'>for</span> (y = clipped.top; y &lt; clipped.bottom; ++y)
+  {
+    <span class='tp'>DWORD</span>* row = <span class='tp'>state</span>-&gt;overlayPixels +
+      (<span class='tp'>SIZE_T</span>)y * <span class='tp'>state</span>-&gt;overlayCapacityWidth;
+    <span class='tp'>LONG</span> <span class='tp'>x</span>;
+    <span class='kw'>for</span> (<span class='tp'>x</span> = clipped.<span class='tp'>left</span>; <span class='tp'>x</span> &lt; clipped.right; ++<span class='tp'>x</span>)
+    {
+      row[<span class='tp'>x</span>] = <span class='fn'>DwmPrivateBlendPixel</span>(row[<span class='tp'>x</span>], color);
+    }
+  }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>DwmPrivateClearRect</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>)
+{
+  <span class='kw'>const</span> <span class='tp'>RECT</span> clipped = <span class='fn'>DwmPrivateClipRect</span>(<span class='tp'>state</span>, <span class='tp'>rect</span>);
+  <span class='tp'>LONG</span> y;
+
+  <span class='kw'>if</span> (clipped.right &lt;= clipped.<span class='tp'>left</span> || clipped.bottom &lt;= clipped.top)
+  {
+    <span class='kw'>return</span>;
+  }
+  <span class='kw'>for</span> (y = clipped.top; y &lt; clipped.bottom; ++y)
+  {
+    <span class='tp'>DWORD</span>* row = <span class='tp'>state</span>-&gt;overlayPixels +
+      (<span class='tp'>SIZE_T</span>)y * <span class='tp'>state</span>-&gt;overlayCapacityWidth;
+    <span class='fn'>ZeroMemory</span>(
+      row + clipped.<span class='tp'>left</span>,
+      (<span class='tp'>SIZE_T</span>)(clipped.right - clipped.<span class='tp'>left</span>) * <span class='kw'>sizeof</span>(*row));
+  }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>DwmPrivateStrokeRect</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>,
+  <span class='tp'>UINT</span> thickness,
+  <span class='tp'>DWORD</span> color)
+{
+  <span class='kw'>const</span> <span class='tp'>RECT</span> clipped = <span class='fn'>DwmPrivateClipRect</span>(<span class='tp'>state</span>, <span class='tp'>rect</span>);
+  <span class='kw'>const</span> <span class='tp'>LONG</span> stroke = (<span class='tp'>LONG</span>)(thickness ? thickness : <span class='num'>1U</span>);
+  <span class='tp'>LONG</span> y;
+
+  <span class='kw'>if</span> (clipped.right &lt;= clipped.<span class='tp'>left</span> || clipped.bottom &lt;= clipped.top)
+  {
+    <span class='kw'>return</span>;
+  }
+  <span class='kw'>for</span> (y = clipped.top; y &lt; clipped.bottom; ++y)
+  {
+    <span class='tp'>DWORD</span>* row = <span class='tp'>state</span>-&gt;overlayPixels +
+      (<span class='tp'>SIZE_T</span>)y * <span class='tp'>state</span>-&gt;overlayCapacityWidth;
+    <span class='tp'>LONG</span> <span class='tp'>x</span>;
+    <span class='kw'>for</span> (<span class='tp'>x</span> = clipped.<span class='tp'>left</span>; <span class='tp'>x</span> &lt; clipped.right; ++<span class='tp'>x</span>)
+    {
+      <span class='kw'>if</span> (<span class='tp'>x</span> &lt; <span class='tp'>rect</span>-&gt;<span class='tp'>left</span> + stroke || <span class='tp'>x</span> &gt;= <span class='tp'>rect</span>-&gt;right - stroke ||
+          y &lt; <span class='tp'>rect</span>-&gt;top + stroke || y &gt;= <span class='tp'>rect</span>-&gt;bottom - stroke)
+      {
+        row[<span class='tp'>x</span>] = <span class='fn'>DwmPrivateBlendPixel</span>(row[<span class='tp'>x</span>], color);
+      }
+    }
+  }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>DwmPrivateIsMultiWindowBuild</span>(<span class='kw'>void</span>)
+{
+  <span class='tp'>HMODULE</span> hNtdll = <span class='fn'>GetModuleHandle</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;ntdll.dll&quot;</span>));
+  PFN_RTLGETVERSION rtlGetVersion = hNtdll
+    ? (PFN_RTLGETVERSION)<span class='fn'>GetProcAddress</span>(hNtdll, <span class='str'>&quot;RtlGetVersion&quot;</span>)
+    : NULL;
+  MAG_RTL_OSVERSIONINFOW <span class='tp'>version</span>;
+
+  <span class='fn'>ZeroMemory</span>(&amp;<span class='tp'>version</span>, <span class='kw'>sizeof</span>(<span class='tp'>version</span>));
+  <span class='tp'>version</span>.dwOSVersionInfoSize = <span class='kw'>sizeof</span>(<span class='tp'>version</span>);
+  <span class='kw'>if</span> (rtlGetVersion &amp;&amp; <span class='fn'>rtlGetVersion</span>(&amp;<span class='tp'>version</span>) &gt;= <span class='num'>0</span>)
+  {
+    <span class='kw'>return</span> <span class='tp'>version</span>.dwBuildNumber &gt;= <span class='mc'>DWM_PRIVATE_MULTIWINDOW_BUILD</span>;
+  }
+  <span class='kw'>return</span> <span class='kw'>sizeof</span>(<span class='kw'>void</span>*) == <span class='num'>8</span> ? TRUE : FALSE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>DwmPrivateSetExcludedFromLivePreview</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>BOOL</span> excluded)
+{
+  MAG_WINDOWCOMPOSITIONATTRIBDATA data;
+  <span class='tp'>BOOL</span> enabled = excluded;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;setWindowCompositionAttribute)
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  <span class='fn'>ZeroMemory</span>(&amp;data, <span class='kw'>sizeof</span>(data));
+  data.attrib = MAG_WCA_EXCLUDED_FROM_LIVEPREVIEW;
+  data.data = &amp;enabled;
+  data.dataSize = <span class='kw'>sizeof</span>(enabled);
+  <span class='kw'>return</span> <span class='tp'>state</span>-&gt;<span class='fn'>setWindowCompositionAttribute</span>(<span class='tp'>state</span>-&gt;hwndDestination, &amp;data);
+}
+
+<span class='kw'>static</span> DWMPRIVATETOPWINDOWKIND <span class='fn'>DwmPrivateClassifyTopWindow</span>(<span class='tp'>HWND</span> hwnd)
+{
+  <span class='tp'>WCHAR</span> className[<span class='num'>64</span>];
+
+  <span class='fn'>ZeroMemory</span>(className, <span class='kw'>sizeof</span>(className));
+  <span class='kw'>if</span> (!<span class='fn'>GetClassNameW</span>(hwnd, className, <span class='fn'>ARRAYSIZE</span>(className)))
+  {
+    <span class='kw'>return</span> DWM_PRIVATE_TOP_OTHER;
+  }
+  <span class='kw'>if</span> (!<span class='fn'>lstrcmpiW</span>(className, L<span class='str'>&quot;Progman&quot;</span>))
+  {
+    <span class='kw'>return</span> DWM_PRIVATE_TOP_PROGMAN;
+  }
+  <span class='kw'>if</span> (!<span class='fn'>lstrcmpiW</span>(className, L<span class='str'>&quot;WorkerW&quot;</span>))
+  {
+    <span class='kw'>return</span> DWM_PRIVATE_TOP_WORKER;
+  }
+  <span class='kw'>if</span> (!<span class='fn'>lstrcmpiW</span>(className, L<span class='str'>&quot;Shell_TrayWnd&quot;</span>) ||
+      !<span class='fn'>lstrcmpiW</span>(className, L<span class='str'>&quot;Shell_SecondaryTrayWnd&quot;</span>))
+  {
+    <span class='kw'>return</span> DWM_PRIVATE_TOP_TASKBAR;
+  }
+  <span class='kw'>return</span> DWM_PRIVATE_TOP_OTHER;
+}
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> DWMPRIVATEENUMCONTEXT
+{
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>;
+  <span class='tp'>BOOL</span>                    overflow;
+} DWMPRIVATEENUMCONTEXT;
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='kw'>CALLBACK</span> <span class='fn'>DwmPrivateEnumTopWindow</span>(<span class='tp'>HWND</span> hwnd, <span class='tp'>LPARAM</span> parameter)
+{
+  DWMPRIVATEENUMCONTEXT* context = (DWMPRIVATEENUMCONTEXT*)parameter;
+  DWMPRIVATETOPWINDOWKIND kind = <span class='fn'>DwmPrivateClassifyTopWindow</span>(hwnd);
+  DWMPRIVATETOPWINDOW* window;
+  <span class='kw'>const</span> <span class='tp'>BOOL</span> visible = <span class='fn'>IsWindowVisible</span>(hwnd);
+  <span class='kw'>const</span> <span class='tp'>BOOL</span> iconic = <span class='fn'>IsIconic</span>(hwnd);
+  <span class='tp'>DWORD</span> cloaked = <span class='num'>0</span>;
+  <span class='tp'>BOOL</span> isCloaked = FALSE;
+
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>DwmGetWindowAttribute</span>(
+        hwnd, DWMWA_CLOAKED, &amp;cloaked, <span class='kw'>sizeof</span>(cloaked))))
+  {
+    isCloaked = <span class='num'>0</span> != cloaked;
+  }
+  <span class='cm'>/* Shell ordering needs hidden Progman/WorkerW hosts.  Ordinary windows are
+     retained only while DWM can actually display them, keeping enumeration
+     and the live source set bounded by visible desktop content. */</span>
+  <span class='kw'>if</span> (DWM_PRIVATE_TOP_OTHER == kind &amp;&amp;
+      (hwnd == context-&gt;<span class='tp'>state</span>-&gt;hwndDestination ||
+       !visible || iconic || isCloaked))
+  {
+    <span class='kw'>return</span> TRUE;
+  }
+  <span class='kw'>if</span> (context-&gt;<span class='tp'>state</span>-&gt;topWindowCount &gt;= <span class='mc'>DWM_PRIVATE_MAX_TOP_WINDOWS</span>)
+  {
+    context-&gt;overflow = TRUE;
+    <span class='kw'>return</span> FALSE;
+  }
+  window = &amp;context-&gt;<span class='tp'>state</span>-&gt;topWindows[context-&gt;<span class='tp'>state</span>-&gt;topWindowCount];
+  <span class='fn'>ZeroMemory</span>(window, <span class='kw'>sizeof</span>(*window));
+  <span class='kw'>if</span> (!<span class='fn'>GetWindowRect</span>(hwnd, &amp;window-&gt;<span class='tp'>rect</span>))
+  {
+    <span class='kw'>return</span> TRUE;
+  }
+  window-&gt;hwnd = hwnd;
+  window-&gt;kind = kind;
+  window-&gt;visible = visible;
+  window-&gt;iconic = iconic;
+  window-&gt;cloaked = isCloaked;
+  window-&gt;hasDesktopView =
+    NULL != <span class='fn'>FindWindowExW</span>(hwnd, NULL, L<span class='str'>&quot;SHELLDLL_DefView&quot;</span>, NULL);
+  ++context-&gt;<span class='tp'>state</span>-&gt;topWindowCount;
+  <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>DwmPrivateIsWallpaperWorker</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>UINT</span> candidateIndex)
+{
+  <span class='tp'>UINT</span> hostIndex;
+  <span class='kw'>for</span> (hostIndex = <span class='num'>0</span>; hostIndex &lt; candidateIndex; ++hostIndex)
+  {
+    <span class='tp'>UINT</span> siblingIndex;
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;topWindows[hostIndex].hasDesktopView)
+    {
+      <span class='kw'>continue</span>;
+    }
+    <span class='kw'>for</span> (siblingIndex = hostIndex + <span class='num'>1</span>;
+         siblingIndex &lt; <span class='tp'>state</span>-&gt;topWindowCount;
+         ++siblingIndex)
+    {
+      <span class='kw'>if</span> (DWM_PRIVATE_TOP_WORKER == <span class='tp'>state</span>-&gt;topWindows[siblingIndex].kind)
+      {
+        <span class='kw'>if</span> (siblingIndex == candidateIndex)
+        {
+          <span class='kw'>return</span> TRUE;
+        }
+        <span class='kw'>break</span>;
+      }
+    }
+  }
+  <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateAppendSourceCandidate</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> DWMPRIVATETOPWINDOW* window,
+  DWMPRIVATESOURCELAYER layer,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource)
+{
+  <span class='tp'>RECT</span> intersection;
+  <span class='tp'>UINT</span> index;
+
+  <span class='kw'>if</span> (!<span class='fn'>IntersectRect</span>(&amp;intersection, &amp;window-&gt;<span class='tp'>rect</span>, desktopSource))
+  {
+    <span class='kw'>return</span> S_FALSE;
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;sourceCandidateCount; ++index)
+  {
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;sourceCandidates[index].hwnd == window-&gt;hwnd &amp;&amp;
+        <span class='tp'>state</span>-&gt;sourceCandidates[index].layer == layer)
+    {
+      <span class='kw'>return</span> S_FALSE;
+    }
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;sourceCandidateCount &gt;= <span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>)
+  {
+    <span class='kw'>return</span> <span class='fn'>HRESULT_FROM_WIN32</span>(ERROR_INSUFFICIENT_BUFFER);
+  }
+  <span class='tp'>state</span>-&gt;sourceCandidates[<span class='tp'>state</span>-&gt;sourceCandidateCount].hwnd = window-&gt;hwnd;
+  <span class='tp'>state</span>-&gt;sourceCandidates[<span class='tp'>state</span>-&gt;sourceCandidateCount].<span class='tp'>rect</span> = window-&gt;<span class='tp'>rect</span>;
+  <span class='tp'>state</span>-&gt;sourceCandidates[<span class='tp'>state</span>-&gt;sourceCandidateCount].layer = layer;
+  ++<span class='tp'>state</span>-&gt;sourceCandidateCount;
+  <span class='kw'>return</span> S_OK;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateBuildSourceCandidates</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource)
+{
+  DWMPRIVATEENUMCONTEXT context;
+  <span class='tp'>UINT</span> index;
+
+  <span class='fn'>ZeroMemory</span>(&amp;context, <span class='kw'>sizeof</span>(context));
+  context.<span class='tp'>state</span> = <span class='tp'>state</span>;
+  <span class='tp'>state</span>-&gt;topWindowCount = <span class='num'>0</span>;
+  <span class='tp'>state</span>-&gt;sourceCandidateCount = <span class='num'>0</span>;
+  <span class='kw'>if</span> (!<span class='fn'>EnumWindows</span>(DwmPrivateEnumTopWindow, (<span class='tp'>LPARAM</span>)&amp;context) &amp;&amp;
+      context.overflow)
+  {
+    <span class='kw'>return</span> <span class='fn'>HRESULT_FROM_WIN32</span>(ERROR_INSUFFICIENT_BUFFER);
+  }
+
+  <span class='cm'>/* EnumWindows is top-to-bottom.  Building the retained source list in the
+     reverse direction gives DirectComposition an exact bottom-to-top stack
+     without creating or destroying resources when only z-order changes. */</span>
+  index = <span class='tp'>state</span>-&gt;topWindowCount;
+  <span class='kw'>while</span> (index-- &gt; <span class='num'>0</span>)
+  {
+    <span class='kw'>const</span> DWMPRIVATETOPWINDOW* window = &amp;<span class='tp'>state</span>-&gt;topWindows[index];
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> isDesktop =
+      DWM_PRIVATE_TOP_PROGMAN == window-&gt;kind ||
+      (DWM_PRIVATE_TOP_WORKER == window-&gt;kind &amp;&amp;
+       (window-&gt;hasDesktopView || <span class='fn'>DwmPrivateIsWallpaperWorker</span>(<span class='tp'>state</span>, index)));
+    <span class='kw'>if</span> (isDesktop)
+    {
+      <span class='tp'>HRESULT</span> hr = <span class='fn'>DwmPrivateAppendSourceCandidate</span>(
+        <span class='tp'>state</span>, window, DWM_PRIVATE_SHELL_DESKTOP, desktopSource);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='kw'>return</span> hr;
+      }
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (DWM_PRIVATE_TOP_TASKBAR == window-&gt;kind &amp;&amp;
+             window-&gt;visible &amp;&amp; !window-&gt;iconic &amp;&amp; !window-&gt;cloaked)
+    {
+      <span class='tp'>HRESULT</span> hr = <span class='fn'>DwmPrivateAppendSourceCandidate</span>(
+        <span class='tp'>state</span>, window, DWM_PRIVATE_SHELL_TASKBAR, desktopSource);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='kw'>return</span> hr;
+      }
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (DWM_PRIVATE_TOP_OTHER == window-&gt;kind &amp;&amp;
+             window-&gt;hwnd != <span class='tp'>state</span>-&gt;hwndDestination &amp;&amp;
+             window-&gt;visible &amp;&amp; !window-&gt;iconic &amp;&amp; !window-&gt;cloaked)
+    {
+      <span class='tp'>HRESULT</span> hr = <span class='fn'>DwmPrivateAppendSourceCandidate</span>(
+        <span class='tp'>state</span>, window, DWM_PRIVATE_APPLICATION, desktopSource);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='kw'>return</span> hr;
+      }
+    }
+  }
+  <span class='kw'>return</span> S_OK;
+}
+
+<span class='kw'>static</span> <span class='tp'>SIZE</span> <span class='fn'>DwmPrivateQuerySourceSize</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>HWND</span> hwnd,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* windowRect)
+{
+  <span class='tp'>SIZE</span> size;
+  <span class='tp'>SIZE</span> queriedSize;
+
+  size.cx = windowRect-&gt;right - windowRect-&gt;<span class='tp'>left</span>;
+  size.cy = windowRect-&gt;bottom - windowRect-&gt;top;
+  <span class='fn'>ZeroMemory</span>(&amp;queriedSize, <span class='kw'>sizeof</span>(queriedSize));
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;queryWindowThumbnailSourceSize &amp;&amp;
+      <span class='fn'>SUCCEEDED</span>(<span class='tp'>state</span>-&gt;<span class='fn'>queryWindowThumbnailSourceSize</span>(
+        hwnd, FALSE, &amp;queriedSize)) &amp;&amp;
+      queriedSize.cx &gt; <span class='num'>0</span> &amp;&amp; queriedSize.cy &gt; <span class='num'>0</span>)
+  {
+    size = queriedSize;
+  }
+  <span class='kw'>return</span> size;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateBuildSourceThumbnailProperties</span>(
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* windowRect,
+  <span class='tp'>SIZE</span> sourceSize,
+  DWM_THUMBNAIL_PROPERTIES* properties,
+  <span class='tp'>FLOAT</span>* offsetX,
+  <span class='tp'>FLOAT</span>* offsetY)
+{
+  <span class='kw'>const</span> <span class='tp'>LONG</span> windowWidth = windowRect-&gt;right - windowRect-&gt;<span class='tp'>left</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> windowHeight = windowRect-&gt;bottom - windowRect-&gt;top;
+  <span class='tp'>RECT</span> intersection;
+
+  <span class='kw'>if</span> (!properties || !offsetX || !offsetY ||
+      windowWidth &lt; <span class='num'>1</span> || windowHeight &lt; <span class='num'>1</span> ||
+      sourceSize.cx &lt; <span class='num'>1</span> || sourceSize.cy &lt; <span class='num'>1</span> ||
+      !<span class='fn'>IntersectRect</span>(&amp;intersection, windowRect, desktopSource))
+  {
+    <span class='kw'>return</span> E_INVALIDARG;
+  }
+  <span class='fn'>ZeroMemory</span>(properties, <span class='kw'>sizeof</span>(*properties));
+  properties-&gt;dwFlags = DWM_TNP_RECTDESTINATION |
+    DWM_TNP_RECTSOURCE | DWM_TNP_OPACITY | DWM_TNP_VISIBLE |
+    DWM_TNP_SOURCECLIENTAREAONLY | <span class='mc'>DWM_TNP_ENABLE3D</span>;
+  <span class='cm'>/* Ordinal 147 requires a local destination anchored at (0,0).  Position the
+     returned zero-copy visual in desktop space instead of baking its screen
+     coordinates into DWM_THUMBNAIL_PROPERTIES. */</span>
+  properties-&gt;rcDestination.<span class='tp'>left</span> = <span class='num'>0</span>;
+  properties-&gt;rcDestination.top = <span class='num'>0</span>;
+  properties-&gt;rcDestination.right = intersection.right - intersection.<span class='tp'>left</span>;
+  properties-&gt;rcDestination.bottom = intersection.bottom - intersection.top;
+  properties-&gt;rcSource.<span class='tp'>left</span> = <span class='fn'>MulDiv</span>(
+    intersection.<span class='tp'>left</span> - windowRect-&gt;<span class='tp'>left</span>, sourceSize.cx, windowWidth);
+  properties-&gt;rcSource.top = <span class='fn'>MulDiv</span>(
+    intersection.top - windowRect-&gt;top, sourceSize.cy, windowHeight);
+  properties-&gt;rcSource.right = <span class='fn'>MulDiv</span>(
+    intersection.right - windowRect-&gt;<span class='tp'>left</span>, sourceSize.cx, windowWidth);
+  properties-&gt;rcSource.bottom = <span class='fn'>MulDiv</span>(
+    intersection.bottom - windowRect-&gt;top, sourceSize.cy, windowHeight);
+  properties-&gt;opacity = <span class='num'>255</span>;
+  properties-&gt;fVisible = TRUE;
+  properties-&gt;fSourceClientAreaOnly = FALSE;
+  *offsetX = (<span class='tp'>FLOAT</span>)(intersection.<span class='tp'>left</span> - desktopSource-&gt;<span class='tp'>left</span>);
+  *offsetY = (<span class='tp'>FLOAT</span>)(intersection.top - desktopSource-&gt;top);
+  <span class='kw'>if</span> (properties-&gt;rcSource.right &lt;= properties-&gt;rcSource.<span class='tp'>left</span> ||
+      properties-&gt;rcSource.bottom &lt;= properties-&gt;rcSource.top)
+  {
+    <span class='kw'>return</span> E_INVALIDARG;
+  }
+  <span class='kw'>return</span> S_OK;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>DwmPrivateEqualThumbnailProperties</span>(
+  <span class='kw'>const</span> DWM_THUMBNAIL_PROPERTIES* <span class='tp'>left</span>,
+  <span class='kw'>const</span> DWM_THUMBNAIL_PROPERTIES* right)
+{
+  <span class='kw'>return</span> <span class='tp'>left</span>-&gt;dwFlags == right-&gt;dwFlags &amp;&amp;
+    <span class='fn'>EqualRect</span>(&amp;<span class='tp'>left</span>-&gt;rcDestination, &amp;right-&gt;rcDestination) &amp;&amp;
+    <span class='fn'>EqualRect</span>(&amp;<span class='tp'>left</span>-&gt;rcSource, &amp;right-&gt;rcSource) &amp;&amp;
+    <span class='tp'>left</span>-&gt;opacity == right-&gt;opacity &amp;&amp;
+    <span class='tp'>left</span>-&gt;fVisible == right-&gt;fVisible &amp;&amp;
+    <span class='tp'>left</span>-&gt;fSourceClientAreaOnly == right-&gt;fSourceClientAreaOnly;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>DwmPrivateDestroySourceVisual</span>(DWMPRIVATESOURCEVISUAL* sourceVisual)
+{
+  <span class='kw'>if</span> (sourceVisual-&gt;thumbnail)
+  {
+    <span class='fn'>DwmUnregisterThumbnail</span>(sourceVisual-&gt;thumbnail);
+  }
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;sourceVisual-&gt;visual);
+  <span class='fn'>ZeroMemory</span>(sourceVisual, <span class='kw'>sizeof</span>(*sourceVisual));
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateCreateSourceVisual</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> DWMPRIVATESOURCECANDIDATE* candidate,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource,
+  DWMPRIVATESOURCEVISUAL* sourceVisual)
+{
+  <span class='tp'>HRESULT</span> hr;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;createSharedThumbnailVisual)
+  {
+    <span class='kw'>return</span> E_NOINTERFACE;
+  }
+  <span class='fn'>ZeroMemory</span>(sourceVisual, <span class='kw'>sizeof</span>(*sourceVisual));
+  sourceVisual-&gt;hwnd = candidate-&gt;hwnd;
+  sourceVisual-&gt;<span class='tp'>rect</span> = candidate-&gt;<span class='tp'>rect</span>;
+  sourceVisual-&gt;layer = candidate-&gt;layer;
+  sourceVisual-&gt;sourceSize = <span class='fn'>DwmPrivateQuerySourceSize</span>(
+    <span class='tp'>state</span>, candidate-&gt;hwnd, &amp;candidate-&gt;<span class='tp'>rect</span>);
+  hr = <span class='fn'>DwmPrivateBuildSourceThumbnailProperties</span>(
+    desktopSource,
+    &amp;candidate-&gt;<span class='tp'>rect</span>,
+    sourceVisual-&gt;sourceSize,
+    &amp;sourceVisual-&gt;properties,
+    &amp;sourceVisual-&gt;offsetX,
+    &amp;sourceVisual-&gt;offsetY);
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;<span class='fn'>createSharedThumbnailVisual</span>(
+      <span class='tp'>state</span>-&gt;hwndDestination,
+      candidate-&gt;hwnd,
+      <span class='mc'>DWM_PRIVATE_THUMBNAIL_TYPE_ICONIC</span>,
+      &amp;sourceVisual-&gt;properties,
+      <span class='tp'>state</span>-&gt;dcompDevice,
+      (<span class='kw'>void</span>**)&amp;sourceVisual-&gt;visual,
+      &amp;sourceVisual-&gt;thumbnail);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = sourceVisual-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetOffsetXValue</span>(
+      sourceVisual-&gt;visual, sourceVisual-&gt;offsetX);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = sourceVisual-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetOffsetYValue</span>(
+      sourceVisual-&gt;visual, sourceVisual-&gt;offsetY);
+  }
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='fn'>DwmPrivateDestroySourceVisual</span>(sourceVisual);
+  }
+  <span class='kw'>else</span>
+  {
+    ++<span class='tp'>state</span>-&gt;sourceResourceGeneration;
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateUpdateSourceVisual</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> DWMPRIVATESOURCECANDIDATE* candidate,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource,
+  DWMPRIVATESOURCEVISUAL* sourceVisual)
+{
+  DWM_THUMBNAIL_PROPERTIES properties;
+  <span class='tp'>SIZE</span> sourceSize = sourceVisual-&gt;sourceSize;
+  <span class='tp'>FLOAT</span> offsetX;
+  <span class='tp'>FLOAT</span> offsetY;
+  <span class='tp'>HRESULT</span> hr;
+
+  <span class='kw'>if</span> (!<span class='fn'>EqualRect</span>(&amp;sourceVisual-&gt;<span class='tp'>rect</span>, &amp;candidate-&gt;<span class='tp'>rect</span>))
+  {
+    sourceSize = <span class='fn'>DwmPrivateQuerySourceSize</span>(
+      <span class='tp'>state</span>, candidate-&gt;hwnd, &amp;candidate-&gt;<span class='tp'>rect</span>);
+  }
+  hr = <span class='fn'>DwmPrivateBuildSourceThumbnailProperties</span>(
+    desktopSource,
+    &amp;candidate-&gt;<span class='tp'>rect</span>,
+    sourceSize,
+    &amp;properties,
+    &amp;offsetX,
+    &amp;offsetY);
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp;
+      !<span class='fn'>DwmPrivateEqualThumbnailProperties</span>(&amp;sourceVisual-&gt;properties, &amp;properties))
+  {
+    hr = <span class='fn'>DwmUpdateThumbnailProperties</span>(sourceVisual-&gt;thumbnail, &amp;properties);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; sourceVisual-&gt;offsetX != offsetX)
+  {
+    hr = sourceVisual-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetOffsetXValue</span>(
+      sourceVisual-&gt;visual, offsetX);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; sourceVisual-&gt;offsetY != offsetY)
+  {
+    hr = sourceVisual-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetOffsetYValue</span>(
+      sourceVisual-&gt;visual, offsetY);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    sourceVisual-&gt;<span class='tp'>rect</span> = candidate-&gt;<span class='tp'>rect</span>;
+    sourceVisual-&gt;sourceSize = sourceSize;
+    sourceVisual-&gt;offsetX = offsetX;
+    sourceVisual-&gt;offsetY = offsetY;
+    sourceVisual-&gt;properties = properties;
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivatePopulateViewChildren</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> DWMPRIVATESOURCEVISUAL* sourceVisuals,
+  <span class='tp'>UINT</span> sourceVisualCount)
+{
+  <span class='tp'>HRESULT</span> hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>RemoveAllVisuals</span>(<span class='tp'>state</span>-&gt;viewVisual);
+  <span class='tp'>UINT</span> index;
+
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; index &lt; sourceVisualCount; ++index)
+  {
+    <span class='kw'>if</span> (DWM_PRIVATE_SHELL_DESKTOP == sourceVisuals[index].layer)
+    {
+      <span class='cm'>/* The candidates are already bottom-to-top.  Adding each new source at
+         the top preserves that order while keeping wallpaper below the
+         shared fallback. */</span>
+      hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+        <span class='tp'>state</span>-&gt;viewVisual, sourceVisuals[index].visual, FALSE, NULL);
+    }
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='cm'>/* With no reference visual, insertAbove=FALSE inserts at the top. */</span>
+    hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+      <span class='tp'>state</span>-&gt;viewVisual, <span class='tp'>state</span>-&gt;sharedVisual, FALSE, NULL);
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; <span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; index &lt; sourceVisualCount; ++index)
+  {
+    <span class='kw'>if</span> (DWM_PRIVATE_SHELL_DESKTOP != sourceVisuals[index].layer)
+    {
+      <span class='cm'>/* Every visible application and taskbar has its own retained ENABLE3D
+         source.  This is the path that carries Chromium/Electron child
+         DirectComposition swapchains which the shared desktop visual omits. */</span>
+      hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+        <span class='tp'>state</span>-&gt;viewVisual, sourceVisuals[index].visual, FALSE, NULL);
+    }
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateConfigureSourceVisuals</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource)
+{
+  DWMPRIVATESOURCEVISUAL pending[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>BOOL</span> pendingNew[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>BOOL</span> activeUsed[<span class='mc'>DWM_PRIVATE_MAX_SOURCE_VISUALS</span>];
+  <span class='tp'>BOOL</span> orderChanged;
+  <span class='tp'>HRESULT</span> hr;
+  <span class='tp'>UINT</span> candidateIndex;
+
+  <span class='fn'>ZeroMemory</span>(pending, <span class='kw'>sizeof</span>(pending));
+  <span class='fn'>ZeroMemory</span>(pendingNew, <span class='kw'>sizeof</span>(pendingNew));
+  <span class='fn'>ZeroMemory</span>(activeUsed, <span class='kw'>sizeof</span>(activeUsed));
+  hr = <span class='fn'>DwmPrivateBuildSourceCandidates</span>(<span class='tp'>state</span>, desktopSource);
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='kw'>return</span> hr;
+  }
+
+  <span class='kw'>for</span> (candidateIndex = <span class='num'>0</span>;
+       candidateIndex &lt; <span class='tp'>state</span>-&gt;sourceCandidateCount;
+       ++candidateIndex)
+  {
+    <span class='kw'>const</span> DWMPRIVATESOURCECANDIDATE* candidate =
+      &amp;<span class='tp'>state</span>-&gt;sourceCandidates[candidateIndex];
+    <span class='tp'>UINT</span> activeIndex;
+    <span class='tp'>BOOL</span> found = FALSE;
+
+    <span class='kw'>for</span> (activeIndex = <span class='num'>0</span>;
+         activeIndex &lt; <span class='tp'>state</span>-&gt;sourceVisualCount;
+         ++activeIndex)
+    {
+      <span class='kw'>if</span> (!activeUsed[activeIndex] &amp;&amp;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].hwnd == candidate-&gt;hwnd &amp;&amp;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].layer == candidate-&gt;layer)
+      {
+        pending[candidateIndex] = <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex];
+        hr = <span class='fn'>DwmPrivateUpdateSourceVisual</span>(
+          <span class='tp'>state</span>, candidate, desktopSource, &amp;pending[candidateIndex]);
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+        {
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].<span class='tp'>rect</span> = pending[candidateIndex].<span class='tp'>rect</span>;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].sourceSize =
+            pending[candidateIndex].sourceSize;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].offsetX =
+            pending[candidateIndex].offsetX;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].offsetY =
+            pending[candidateIndex].offsetY;
+          <span class='tp'>state</span>-&gt;sourceVisuals[activeIndex].properties =
+            pending[candidateIndex].properties;
+        }
+        activeUsed[activeIndex] = TRUE;
+        found = TRUE;
+        <span class='kw'>break</span>;
+      }
+    }
+    <span class='kw'>if</span> (!found)
+    {
+      hr = <span class='fn'>DwmPrivateCreateSourceVisual</span>(
+        <span class='tp'>state</span>, candidate, desktopSource, &amp;pending[candidateIndex]);
+      pendingNew[candidateIndex] = <span class='fn'>SUCCEEDED</span>(hr);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='tp'>UINT</span> cleanupIndex;
+      <span class='kw'>for</span> (cleanupIndex = <span class='num'>0</span>;
+           cleanupIndex &lt;= candidateIndex;
+           ++cleanupIndex)
+      {
+        <span class='kw'>if</span> (pendingNew[cleanupIndex])
+        {
+          <span class='fn'>DwmPrivateDestroySourceVisual</span>(&amp;pending[cleanupIndex]);
+        }
+      }
+      <span class='kw'>return</span> hr;
+    }
+  }
+
+  orderChanged = <span class='tp'>state</span>-&gt;sourceVisualCount != <span class='tp'>state</span>-&gt;sourceCandidateCount;
+  <span class='kw'>if</span> (!orderChanged)
+  {
+    <span class='kw'>for</span> (candidateIndex = <span class='num'>0</span>;
+         candidateIndex &lt; <span class='tp'>state</span>-&gt;sourceCandidateCount;
+         ++candidateIndex)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].hwnd != pending[candidateIndex].hwnd ||
+          <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].layer != pending[candidateIndex].layer)
+      {
+        orderChanged = TRUE;
+        <span class='kw'>break</span>;
+      }
+    }
+  }
+  <span class='kw'>if</span> (!orderChanged)
+  {
+    <span class='kw'>for</span> (candidateIndex = <span class='num'>0</span>;
+         candidateIndex &lt; <span class='tp'>state</span>-&gt;sourceCandidateCount;
+         ++candidateIndex)
+    {
+      <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].<span class='tp'>rect</span> = pending[candidateIndex].<span class='tp'>rect</span>;
+      <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].sourceSize =
+        pending[candidateIndex].sourceSize;
+      <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].offsetX =
+        pending[candidateIndex].offsetX;
+      <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].offsetY =
+        pending[candidateIndex].offsetY;
+      <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex].properties =
+        pending[candidateIndex].properties;
+    }
+    <span class='kw'>return</span> S_OK;
+  }
+
+  hr = <span class='fn'>DwmPrivatePopulateViewChildren</span>(
+    <span class='tp'>state</span>, pending, <span class='tp'>state</span>-&gt;sourceCandidateCount);
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='fn'>DwmPrivatePopulateViewChildren</span>(
+      <span class='tp'>state</span>, <span class='tp'>state</span>-&gt;sourceVisuals, <span class='tp'>state</span>-&gt;sourceVisualCount);
+    <span class='kw'>for</span> (candidateIndex = <span class='num'>0</span>;
+         candidateIndex &lt; <span class='tp'>state</span>-&gt;sourceCandidateCount;
+         ++candidateIndex)
+    {
+      <span class='kw'>if</span> (pendingNew[candidateIndex])
+      {
+        <span class='fn'>DwmPrivateDestroySourceVisual</span>(&amp;pending[candidateIndex]);
+      }
+    }
+    <span class='kw'>return</span> hr;
+  }
+
+  <span class='tp'>state</span>-&gt;retiredSourceVisualCount = <span class='num'>0</span>;
+  <span class='kw'>for</span> (candidateIndex = <span class='num'>0</span>;
+       candidateIndex &lt; <span class='tp'>state</span>-&gt;sourceVisualCount;
+       ++candidateIndex)
+  {
+    <span class='kw'>if</span> (!activeUsed[candidateIndex])
+    {
+      <span class='tp'>state</span>-&gt;retiredSourceVisuals[<span class='tp'>state</span>-&gt;retiredSourceVisualCount++] =
+        <span class='tp'>state</span>-&gt;sourceVisuals[candidateIndex];
+    }
+  }
+  <span class='fn'>ZeroMemory</span>(<span class='tp'>state</span>-&gt;sourceVisuals, <span class='kw'>sizeof</span>(<span class='tp'>state</span>-&gt;sourceVisuals));
+  <span class='fn'>CopyMemory</span>(
+    <span class='tp'>state</span>-&gt;sourceVisuals,
+    pending,
+    <span class='tp'>state</span>-&gt;sourceCandidateCount * <span class='kw'>sizeof</span>(pending[<span class='num'>0</span>]));
+  <span class='tp'>state</span>-&gt;sourceVisualCount = <span class='tp'>state</span>-&gt;sourceCandidateCount;
+  <span class='tp'>state</span>-&gt;treeDirty = TRUE;
+  <span class='kw'>return</span> S_OK;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>DwmPrivateWindowArrayEqual</span>(
+  <span class='kw'>const</span> <span class='tp'>HWND</span>* <span class='tp'>left</span>,
+  <span class='tp'>UINT</span> leftCount,
+  <span class='kw'>const</span> <span class='tp'>HWND</span>* right,
+  <span class='tp'>UINT</span> rightCount)
+{
+  <span class='kw'>return</span> leftCount == rightCount &amp;&amp;
+    !<span class='fn'>memcmp</span>(<span class='tp'>left</span>, right, leftCount * <span class='kw'>sizeof</span>(<span class='tp'>left</span>[<span class='num'>0</span>]));
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateConfigureDesktop</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktopSource)
+{
+  <span class='tp'>HWND</span> exclusions[<span class='mc'>DWM_PRIVATE_MAX_EXCLUSIONS</span>];
+  <span class='tp'>UINT</span> exclusionCount = <span class='num'>1</span>;
+  <span class='tp'>RECT</span> sourceCopy = *desktopSource;
+  <span class='tp'>SIZE</span> destinationSize;
+  <span class='tp'>HRESULT</span> hr;
+  <span class='tp'>UINT</span> sourceIndex;
+
+  <span class='cm'>/* This runs before the desktop fast-path deliberately.  External windows
+     can move or change z-order while MAG's own desktop/view rectangle stays
+     constant, so their retained visuals must be reconciled every vblank. */</span>
+  hr = <span class='fn'>DwmPrivateConfigureSourceVisuals</span>(<span class='tp'>state</span>, desktopSource);
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='kw'>return</span> hr;
+  }
+  destinationSize.cx = sourceCopy.right - sourceCopy.<span class='tp'>left</span>;
+  destinationSize.cy = sourceCopy.bottom - sourceCopy.top;
+  <span class='kw'>if</span> (destinationSize.cx &lt; <span class='num'>1</span> || destinationSize.cy &lt; <span class='num'>1</span>)
+  {
+    <span class='kw'>return</span> E_INVALIDARG;
+  }
+
+  exclusions[<span class='num'>0</span>] = <span class='tp'>state</span>-&gt;hwndDestination;
+  <span class='kw'>for</span> (sourceIndex = <span class='num'>0</span>;
+       sourceIndex &lt; <span class='tp'>state</span>-&gt;sourceVisualCount;
+       ++sourceIndex)
+  {
+    <span class='tp'>UINT</span> existingIndex;
+    <span class='tp'>BOOL</span> exists = FALSE;
+    <span class='kw'>for</span> (existingIndex = <span class='num'>0</span>;
+         existingIndex &lt; exclusionCount;
+         ++existingIndex)
+    {
+      <span class='kw'>if</span> (exclusions[existingIndex] == <span class='tp'>state</span>-&gt;sourceVisuals[sourceIndex].hwnd)
+      {
+        exists = TRUE;
+        <span class='kw'>break</span>;
+      }
+    }
+    <span class='kw'>if</span> (!exists)
+    {
+      exclusions[exclusionCount++] = <span class='tp'>state</span>-&gt;sourceVisuals[sourceIndex].hwnd;
+    }
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;desktopConfigured &amp;&amp;
+      <span class='fn'>EqualRect</span>(&amp;<span class='tp'>state</span>-&gt;desktopSource, desktopSource) &amp;&amp;
+      <span class='fn'>DwmPrivateWindowArrayEqual</span>(
+        <span class='tp'>state</span>-&gt;desktopExclusions,
+        <span class='tp'>state</span>-&gt;desktopExclusionCount,
+        exclusions,
+        exclusionCount))
+  {
+    <span class='kw'>return</span> S_OK;
+  }
+
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;useMultiWindow)
+  {
+    PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL update =
+      (PFN_DWMPUPDATESHAREDMULTIWINDOWVISUAL)<span class='tp'>state</span>-&gt;updateSharedVisual;
+    hr = <span class='fn'>update</span>(
+      <span class='tp'>state</span>-&gt;thumbnail,
+      NULL,
+      <span class='num'>0</span>,
+      exclusions,
+      exclusionCount,
+      &amp;sourceCopy,
+      &amp;destinationSize,
+      <span class='num'>1</span>);
+  }
+  <span class='kw'>else</span>
+  {
+    PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL update =
+      (PFN_DWMPUPDATESHAREDVIRTUALDESKTOPVISUAL)<span class='tp'>state</span>-&gt;updateSharedVisual;
+    hr = <span class='fn'>update</span>(
+      <span class='tp'>state</span>-&gt;thumbnail,
+      NULL,
+      <span class='num'>0</span>,
+      exclusions,
+      exclusionCount,
+      &amp;sourceCopy,
+      &amp;destinationSize);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='tp'>state</span>-&gt;desktopSource = *desktopSource;
+    <span class='fn'>CopyMemory</span>(
+      <span class='tp'>state</span>-&gt;desktopExclusions,
+      exclusions,
+      exclusionCount * <span class='kw'>sizeof</span>(exclusions[<span class='num'>0</span>]));
+    <span class='tp'>state</span>-&gt;desktopExclusionCount = exclusionCount;
+    <span class='tp'>state</span>-&gt;desktopConfigured = TRUE;
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateEnsureOverlay</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>UINT</span> width,
+  <span class='tp'>UINT</span> height)
+{
+  <span class='tp'>MAG_IDCompositionSurface</span>* surface = NULL;
+  <span class='tp'>DWORD</span>* <span class='tp'>pixels</span> = NULL;
+  <span class='tp'>SIZE</span> minimumSize;
+  <span class='tp'>SIZE</span> reservoirSize;
+  <span class='tp'>UINT</span> capacityWidth;
+  <span class='tp'>UINT</span> capacityHeight;
+  <span class='tp'>SIZE_T</span> pixelCount;
+  <span class='tp'>HRESULT</span> hr = S_OK;
+
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;overlaySurface &amp;&amp;
+      width &lt;= <span class='tp'>state</span>-&gt;overlayCapacityWidth &amp;&amp;
+      height &lt;= <span class='tp'>state</span>-&gt;overlayCapacityHeight)
+  {
+    <span class='tp'>state</span>-&gt;overlayWidth = width;
+    <span class='tp'>state</span>-&gt;overlayHeight = height;
+    <span class='kw'>return</span> S_OK;
+  }
+  <span class='kw'>if</span> (!width || !height)
+  {
+    <span class='kw'>return</span> E_INVALIDARG;
+  }
+  minimumSize.cx = (<span class='tp'>LONG</span>)width;
+  minimumSize.cy = (<span class='tp'>LONG</span>)height;
+  reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(
+    <span class='tp'>state</span>-&gt;hwndDestination, minimumSize);
+  capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+  capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+  pixelCount = (<span class='tp'>SIZE_T</span>)capacityWidth * capacityHeight;
+  <span class='kw'>if</span> (!capacityWidth || !capacityHeight ||
+      capacityWidth &gt; D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      capacityHeight &gt; D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      pixelCount &gt; ((<span class='tp'>SIZE_T</span>)-<span class='num'>1</span>) / <span class='kw'>sizeof</span>(*<span class='tp'>pixels</span>))
+  {
+    <span class='kw'>return</span> E_INVALIDARG;
+  }
+  <span class='tp'>pixels</span> = (<span class='tp'>DWORD</span>*)<span class='fn'>HeapAlloc</span>(
+    <span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, pixelCount * <span class='kw'>sizeof</span>(*<span class='tp'>pixels</span>));
+  <span class='kw'>if</span> (!<span class='tp'>pixels</span>)
+  {
+    <span class='kw'>return</span> E_OUTOFMEMORY;
+  }
+
+  hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateSurface</span>(
+    <span class='tp'>state</span>-&gt;dcompDevice,
+    capacityWidth,
+    capacityHeight,
+    DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_ALPHA_MODE_PREMULTIPLIED,
+    &amp;surface);
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;overlayVisual-&gt;lpVtbl-&gt;<span class='fn'>SetContent</span>(
+      <span class='tp'>state</span>-&gt;overlayVisual, (IUnknown*)surface);
+  }
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;surface);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>pixels</span>);
+    <span class='kw'>return</span> hr;
+  }
+
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;overlaySurface);
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;overlayPixels)
+  {
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>-&gt;overlayPixels);
+  }
+  <span class='tp'>state</span>-&gt;overlaySurface = surface;
+  <span class='tp'>state</span>-&gt;overlayPixels = <span class='tp'>pixels</span>;
+  <span class='tp'>state</span>-&gt;overlayWidth = width;
+  <span class='tp'>state</span>-&gt;overlayHeight = height;
+  <span class='tp'>state</span>-&gt;overlayCapacityWidth = capacityWidth;
+  <span class='tp'>state</span>-&gt;overlayCapacityHeight = capacityHeight;
+  <span class='tp'>state</span>-&gt;overlayInitialized = FALSE;
+  <span class='tp'>state</span>-&gt;treeDirty = TRUE;
+  ++<span class='tp'>state</span>-&gt;overlayResourceGeneration;
+  <span class='kw'>return</span> S_OK;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateUpdateOverlay</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* captureDestination,
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>* drawCommands,
+  <span class='tp'>UINT</span> drawCommandCount)
+{
+  IDXGISurface* updateSurface = NULL;
+  ID3D11Texture2D* updateTexture = NULL;
+  <span class='kw'>const</span> <span class='tp'>DWORD</span> opaqueBlack = <span class='num'>0xff000000U</span>;
+  D3D11_TEXTURE2D_DESC textureDesc;
+  D3D11_BOX updateBox;
+  <span class='tp'>RECT</span> updateRect;
+  <span class='tp'>POINT</span> updateOffset;
+  <span class='tp'>HRESULT</span> endHr;
+  <span class='tp'>HRESULT</span> hr;
+  <span class='tp'>BOOL</span> drawBegun = FALSE;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> updateWidth = <span class='tp'>state</span>-&gt;overlayInitialized
+    ? <span class='tp'>state</span>-&gt;overlayWidth
+    : <span class='tp'>state</span>-&gt;overlayCapacityWidth;
+  <span class='kw'>const</span> <span class='tp'>UINT</span> updateHeight = <span class='tp'>state</span>-&gt;overlayInitialized
+    ? <span class='tp'>state</span>-&gt;overlayHeight
+    : <span class='tp'>state</span>-&gt;overlayCapacityHeight;
+  <span class='tp'>UINT</span> y;
+  <span class='tp'>UINT</span> i;
+
+  <span class='cm'>/* The first update initializes the complete reservoir.  DWM may expose an
+     area beyond the old client extent before WM_WINDOWPOSCHANGED publishes
+     the new geometry; transparent reservoir pixels would reveal the HWND's
+     redirection surface for one composition and visibly flash. */</span>
+  <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; updateHeight; ++y)
+  {
+    <span class='tp'>DWORD</span>* row = <span class='tp'>state</span>-&gt;overlayPixels +
+      (<span class='tp'>SIZE_T</span>)y * <span class='tp'>state</span>-&gt;overlayCapacityWidth;
+    <span class='tp'>UINT</span> <span class='tp'>x</span>;
+    <span class='kw'>for</span> (<span class='tp'>x</span> = <span class='num'>0</span>; <span class='tp'>x</span> &lt; updateWidth; ++<span class='tp'>x</span>)
+    {
+      row[<span class='tp'>x</span>] = opaqueBlack;
+    }
+  }
+  <span class='kw'>if</span> (captureDestination)
+  {
+    <span class='fn'>DwmPrivateClearRect</span>(<span class='tp'>state</span>, captureDestination);
+  }
+  <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; drawCommandCount; ++i)
+  {
+    <span class='kw'>const</span> <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>* command = &amp;drawCommands[i];
+    <span class='kw'>const</span> <span class='tp'>DWORD</span> color = <span class='fn'>DwmPrivatePremultiplyColor</span>(command-&gt;color);
+    <span class='kw'>if</span> (DWM_PRIVATE_DRAW_FILL == command-&gt;<span class='tp'>type</span>)
+    {
+      <span class='fn'>DwmPrivateFillRect</span>(<span class='tp'>state</span>, &amp;command-&gt;<span class='tp'>rc</span>, color);
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (DWM_PRIVATE_DRAW_STROKE == command-&gt;<span class='tp'>type</span>)
+    {
+      <span class='fn'>DwmPrivateStrokeRect</span>(
+        <span class='tp'>state</span>, &amp;command-&gt;<span class='tp'>rc</span>, command-&gt;thickness, color);
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='kw'>return</span> E_INVALIDARG;
+    }
+  }
+
+  <span class='fn'>SetRect</span>(
+    &amp;updateRect,
+    <span class='num'>0</span>,
+    <span class='num'>0</span>,
+    (<span class='tp'>LONG</span>)updateWidth,
+    (<span class='tp'>LONG</span>)updateHeight);
+  <span class='fn'>ZeroMemory</span>(&amp;updateOffset, <span class='kw'>sizeof</span>(updateOffset));
+  hr = <span class='tp'>state</span>-&gt;overlaySurface-&gt;lpVtbl-&gt;<span class='fn'>BeginDraw</span>(
+    <span class='tp'>state</span>-&gt;overlaySurface,
+    &amp;updateRect,
+    &amp;IID_IDXGISurface,
+    (<span class='kw'>void</span>**)&amp;updateSurface,
+    &amp;updateOffset);
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='kw'>return</span> hr;
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    drawBegun = TRUE;
+    hr = <span class='fn'>IDXGISurface_QueryInterface</span>(
+      updateSurface, &amp;IID_ID3D11Texture2D, (<span class='kw'>void</span>**)&amp;updateTexture);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='fn'>ID3D11Texture2D_GetDesc</span>(updateTexture, &amp;textureDesc);
+    <span class='kw'>if</span> (updateWidth &gt; textureDesc.Width)
+    {
+      hr = E_INVALIDARG;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (updateHeight &gt; textureDesc.Height)
+    {
+      hr = E_INVALIDARG;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (updateOffset.<span class='tp'>x</span> &lt; <span class='num'>0</span> || updateOffset.y &lt; <span class='num'>0</span>)
+    {
+      hr = E_INVALIDARG;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> ((<span class='tp'>UINT</span>)updateOffset.<span class='tp'>x</span> &gt;
+             textureDesc.Width - updateWidth)
+    {
+      hr = E_INVALIDARG;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> ((<span class='tp'>UINT</span>)updateOffset.y &gt;
+             textureDesc.Height - updateHeight)
+    {
+      hr = E_INVALIDARG;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='fn'>ZeroMemory</span>(&amp;updateBox, <span class='kw'>sizeof</span>(updateBox));
+      updateBox.<span class='tp'>left</span> = (<span class='tp'>UINT</span>)updateOffset.<span class='tp'>x</span>;
+      updateBox.top = (<span class='tp'>UINT</span>)updateOffset.y;
+      updateBox.right = updateBox.<span class='tp'>left</span> + updateWidth;
+      updateBox.bottom = updateBox.top + updateHeight;
+      updateBox.back = <span class='num'>1</span>;
+      <span class='fn'>ID3D11DeviceContext_UpdateSubresource</span>(
+        <span class='tp'>state</span>-&gt;d3dContext,
+        (ID3D11Resource*)updateTexture,
+        <span class='num'>0</span>,
+        &amp;updateBox,
+        <span class='tp'>state</span>-&gt;overlayPixels,
+        <span class='tp'>state</span>-&gt;overlayCapacityWidth * <span class='kw'>sizeof</span>(<span class='tp'>DWORD</span>),
+        <span class='num'>0</span>);
+    }
+  }
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;updateTexture);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;updateSurface);
+  <span class='kw'>if</span> (drawBegun)
+  {
+    endHr = <span class='tp'>state</span>-&gt;overlaySurface-&gt;lpVtbl-&gt;<span class='fn'>EndDraw</span>(<span class='tp'>state</span>-&gt;overlaySurface);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = endHr;
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        <span class='tp'>state</span>-&gt;overlayInitialized = TRUE;
+      }
+    }
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>void</span> <span class='fn'>DwmPrivateCaptureDestroy</span>(<span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>)
+{
+  <span class='tp'>UINT</span> index;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span>)
+  {
+    <span class='kw'>return</span>;
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;dcompTarget)
+  {
+    <span class='tp'>state</span>-&gt;dcompTarget-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(<span class='tp'>state</span>-&gt;dcompTarget, NULL);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;dcompDevice)
+  {
+    <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(<span class='tp'>state</span>-&gt;dcompDevice);
+    <span class='fn'>DwmFlush</span>();
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;livePreviewExcluded)
+  {
+    <span class='fn'>DwmPrivateSetExcludedFromLivePreview</span>(<span class='tp'>state</span>, FALSE);
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;sourceVisualCount; ++index)
+  {
+    <span class='fn'>DwmPrivateDestroySourceVisual</span>(&amp;<span class='tp'>state</span>-&gt;sourceVisuals[index]);
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;retiredSourceVisualCount; ++index)
+  {
+    <span class='fn'>DwmPrivateDestroySourceVisual</span>(&amp;<span class='tp'>state</span>-&gt;retiredSourceVisuals[index]);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;thumbnail)
+  {
+    <span class='fn'>DwmUnregisterThumbnail</span>(<span class='tp'>state</span>-&gt;thumbnail);
+  }
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;overlaySurface);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;overlayVisual);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;sharedVisual);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;viewVisual);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;captureVisual);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;rootVisual);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;dcompTarget);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;dcompDevice);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;dxgiDevice);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;d3dContext);
+  <span class='fn'>DwmPrivateReleaseUnknown</span>((<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>);
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;overlayPixels)
+  {
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>-&gt;overlayPixels);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hUser32)
+  {
+    <span class='fn'>FreeLibrary</span>(<span class='tp'>state</span>-&gt;hUser32);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDwmApi)
+  {
+    <span class='fn'>FreeLibrary</span>(<span class='tp'>state</span>-&gt;hDwmApi);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDcomp)
+  {
+    <span class='fn'>FreeLibrary</span>(<span class='tp'>state</span>-&gt;hDcomp);
+  }
+  <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>** stateOut)
+{
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>;
+  D3D_FEATURE_LEVEL featureLevel;
+  <span class='tp'>HRESULT</span> hr;
+
+  <span class='kw'>if</span> (!hWnd || !stateOut)
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  *stateOut = NULL;
+  <span class='tp'>state</span> = (<span class='tp'>DWMPRIVATECAPTURESTATE</span>*)<span class='fn'>HeapAlloc</span>(
+    <span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+  <span class='kw'>if</span> (!<span class='tp'>state</span>)
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  <span class='tp'>state</span>-&gt;hwndDestination = hWnd;
+  <span class='tp'>state</span>-&gt;hDcomp = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;dcomp.dll&quot;</span>));
+  <span class='tp'>state</span>-&gt;hDwmApi = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;dwmapi.dll&quot;</span>));
+  <span class='tp'>state</span>-&gt;hUser32 = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;user32.dll&quot;</span>));
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDcomp)
+  {
+    <span class='tp'>state</span>-&gt;createDcompDevice = (PFN_DCOMPOSITIONCREATEDEVICE3)<span class='fn'>GetProcAddress</span>(
+      <span class='tp'>state</span>-&gt;hDcomp, <span class='str'>&quot;DCompositionCreateDevice3&quot;</span>);
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDwmApi)
+  {
+    <span class='tp'>state</span>-&gt;createSharedThumbnailVisual =
+      (PFN_DWMPCREATESHAREDTHUMBNAILVISUAL)<span class='fn'>GetProcAddress</span>(
+        <span class='tp'>state</span>-&gt;hDwmApi,
+        <span class='fn'>MAKEINTRESOURCEA</span>(<span class='mc'>DWM_ORD_CREATE_SHARED_THUMBNAIL_VISUAL</span>));
+    <span class='tp'>state</span>-&gt;queryWindowThumbnailSourceSize =
+      (PFN_DWMPQUERYWINDOWTHUMBNAILSOURCESIZE)<span class='fn'>GetProcAddress</span>(
+        <span class='tp'>state</span>-&gt;hDwmApi,
+        <span class='fn'>MAKEINTRESOURCEA</span>(<span class='mc'>DWM_ORD_QUERY_WINDOW_THUMBNAIL_SOURCE_SIZE</span>));
+    <span class='tp'>state</span>-&gt;createSharedVisual =
+      (PFN_DWMPCREATESHAREDDESKTOPVISUAL)<span class='fn'>GetProcAddress</span>(
+        <span class='tp'>state</span>-&gt;hDwmApi,
+        <span class='fn'>MAKEINTRESOURCEA</span>(<span class='mc'>DWM_ORD_CREATE_SHARED_DESKTOP_VISUAL</span>));
+    <span class='tp'>state</span>-&gt;updateSharedVisual = <span class='fn'>GetProcAddress</span>(
+      <span class='tp'>state</span>-&gt;hDwmApi,
+      <span class='fn'>MAKEINTRESOURCEA</span>(<span class='mc'>DWM_ORD_UPDATE_SHARED_DESKTOP_VISUAL</span>));
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hUser32)
+  {
+    <span class='tp'>state</span>-&gt;setWindowCompositionAttribute =
+      (PFN_SETWINDOWCOMPOSITIONATTRIBUTE)<span class='fn'>GetProcAddress</span>(
+        <span class='tp'>state</span>-&gt;hUser32, <span class='str'>&quot;SetWindowCompositionAttribute&quot;</span>);
+  }
+  <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;createDcompDevice || !<span class='tp'>state</span>-&gt;createSharedThumbnailVisual ||
+      !<span class='tp'>state</span>-&gt;createSharedVisual || !<span class='tp'>state</span>-&gt;updateSharedVisual)
+  {
+    <span class='fn'>DwmPrivateCaptureDestroy</span>(<span class='tp'>state</span>);
+    <span class='kw'>return</span> FALSE;
+  }
+
+  hr = <span class='fn'>D3D11CreateDevice</span>(
+    NULL,
+    D3D_DRIVER_TYPE_HARDWARE,
+    NULL,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    NULL,
+    <span class='num'>0</span>,
+    D3D11_SDK_VERSION,
+    &amp;<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>,
+    &amp;featureLevel,
+    &amp;<span class='tp'>state</span>-&gt;d3dContext);
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    hr = <span class='fn'>D3D11CreateDevice</span>(
+      NULL,
+      D3D_DRIVER_TYPE_WARP,
+      NULL,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+      NULL,
+      <span class='num'>0</span>,
+      D3D11_SDK_VERSION,
+      &amp;<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>,
+      &amp;featureLevel,
+      &amp;<span class='tp'>state</span>-&gt;d3dContext);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='fn'>ID3D11Device_QueryInterface</span>(
+      <span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>, &amp;IID_IDXGIDevice, (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;dxgiDevice);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;<span class='fn'>createDcompDevice</span>(
+      (IUnknown*)<span class='tp'>state</span>-&gt;dxgiDevice,
+      &amp;IID_MAG_IDCompositionDesktopDevice,
+      (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;dcompDevice);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;<span class='fn'>createSharedVisual</span>(
+      hWnd,
+      <span class='tp'>state</span>-&gt;dcompDevice,
+      (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;sharedVisual,
+      &amp;<span class='tp'>state</span>-&gt;thumbnail);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+      <span class='tp'>state</span>-&gt;dcompDevice, &amp;<span class='tp'>state</span>-&gt;rootVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+      <span class='tp'>state</span>-&gt;dcompDevice, &amp;<span class='tp'>state</span>-&gt;captureVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+      <span class='tp'>state</span>-&gt;dcompDevice, &amp;<span class='tp'>state</span>-&gt;viewVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+      <span class='tp'>state</span>-&gt;dcompDevice, &amp;<span class='tp'>state</span>-&gt;overlayVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>CreateTargetForHwnd</span>(
+      <span class='tp'>state</span>-&gt;dcompDevice, hWnd, TRUE, &amp;<span class='tp'>state</span>-&gt;dcompTarget);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+      <span class='tp'>state</span>-&gt;viewVisual, <span class='tp'>state</span>-&gt;sharedVisual, TRUE, NULL);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;captureVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+      <span class='tp'>state</span>-&gt;captureVisual, <span class='tp'>state</span>-&gt;viewVisual, TRUE, NULL);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;rootVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+      <span class='tp'>state</span>-&gt;rootVisual, <span class='tp'>state</span>-&gt;captureVisual, TRUE, NULL);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;rootVisual-&gt;lpVtbl-&gt;<span class='fn'>AddVisual</span>(
+      <span class='tp'>state</span>-&gt;rootVisual,
+      <span class='tp'>state</span>-&gt;overlayVisual,
+      TRUE,
+      <span class='tp'>state</span>-&gt;captureVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='tp'>state</span>-&gt;dcompTarget-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(
+      <span class='tp'>state</span>-&gt;dcompTarget, <span class='tp'>state</span>-&gt;rootVisual);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='tp'>state</span>-&gt;livePreviewExcluded =
+      <span class='fn'>DwmPrivateSetExcludedFromLivePreview</span>(<span class='tp'>state</span>, TRUE);
+    <span class='tp'>state</span>-&gt;useMultiWindow = <span class='fn'>DwmPrivateIsMultiWindowBuild</span>();
+    <span class='cm'>/* SetRoot and the empty child tree stay pending.  The first Update adds
+       the complete desktop/window/taskbar stack, initialized overlay, view
+       transform, and clip before publishing one atomic transaction. */</span>
+  }
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='fn'>DwmPrivateCaptureDestroy</span>(<span class='tp'>state</span>);
+    <span class='kw'>return</span> FALSE;
+  }
+  *stateOut = <span class='tp'>state</span>;
+  <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCalculateViewTransform</span>(
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktop,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewDestination,
+  <span class='tp'>DWMPRIVATEVIEWTRANSFORM</span>* transform)
+{
+  <span class='kw'>const</span> <span class='tp'>LONG</span> desktopWidth = desktop ? desktop-&gt;right - desktop-&gt;<span class='tp'>left</span> : <span class='num'>0</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> desktopHeight = desktop ? desktop-&gt;bottom - desktop-&gt;top : <span class='num'>0</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> sourceWidth = viewSource
+    ? viewSource-&gt;right - viewSource-&gt;<span class='tp'>left</span> : <span class='num'>0</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> sourceHeight = viewSource
+    ? viewSource-&gt;bottom - viewSource-&gt;top : <span class='num'>0</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> destinationWidth = viewDestination
+    ? viewDestination-&gt;right - viewDestination-&gt;<span class='tp'>left</span> : <span class='num'>0</span>;
+  <span class='kw'>const</span> <span class='tp'>LONG</span> destinationHeight = viewDestination
+    ? viewDestination-&gt;bottom - viewDestination-&gt;top : <span class='num'>0</span>;
+
+  <span class='kw'>if</span> (!transform || desktopWidth &lt; <span class='num'>1</span> || desktopHeight &lt; <span class='num'>1</span> ||
+      sourceWidth &lt; <span class='num'>1</span> || sourceHeight &lt; <span class='num'>1</span> ||
+      destinationWidth &lt; <span class='num'>1</span> || destinationHeight &lt; <span class='num'>1</span> ||
+      viewSource-&gt;<span class='tp'>left</span> &lt; desktop-&gt;<span class='tp'>left</span> || viewSource-&gt;top &lt; desktop-&gt;top ||
+      viewSource-&gt;right &gt; desktop-&gt;right ||
+      viewSource-&gt;bottom &gt; desktop-&gt;bottom)
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  transform-&gt;<span class='tp'>m11</span> = (<span class='tp'>FLOAT</span>)destinationWidth / sourceWidth;
+  transform-&gt;m12 = <span class='num'>0.0f</span>;
+  transform-&gt;m21 = <span class='num'>0.0f</span>;
+  transform-&gt;m22 = (<span class='tp'>FLOAT</span>)destinationHeight / sourceHeight;
+  transform-&gt;dx = (<span class='tp'>FLOAT</span>)viewDestination-&gt;<span class='tp'>left</span> -
+    (<span class='tp'>FLOAT</span>)(viewSource-&gt;<span class='tp'>left</span> - desktop-&gt;<span class='tp'>left</span>) * transform-&gt;<span class='tp'>m11</span>;
+  transform-&gt;dy = (<span class='tp'>FLOAT</span>)viewDestination-&gt;top -
+    (<span class='tp'>FLOAT</span>)(viewSource-&gt;top - desktop-&gt;top) * transform-&gt;m22;
+  transform-&gt;clip = *viewDestination;
+  <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>DwmPrivateConfigureView</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktop,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewDestination)
+{
+  <span class='kw'>const</span> <span class='tp'>BOOL</span> visible = viewSource &amp;&amp; viewDestination;
+  <span class='tp'>HRESULT</span> hr = S_OK;
+
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;viewConfigured &amp;&amp; <span class='tp'>state</span>-&gt;viewVisible == visible &amp;&amp;
+      (!visible ||
+       (<span class='fn'>EqualRect</span>(&amp;<span class='tp'>state</span>-&gt;viewDesktop, desktop) &amp;&amp;
+        <span class='fn'>EqualRect</span>(&amp;<span class='tp'>state</span>-&gt;viewSource, viewSource) &amp;&amp;
+        <span class='fn'>EqualRect</span>(&amp;<span class='tp'>state</span>-&gt;viewDestination, viewDestination))))
+  {
+    <span class='kw'>return</span> S_OK;
+  }
+  <span class='kw'>if</span> (visible)
+  {
+    <span class='tp'>DWMPRIVATEVIEWTRANSFORM</span> properties;
+    MAG_D2D_MATRIX_3X2_F matrix;
+    MAG_D2D_RECT_F clip;
+
+    <span class='kw'>if</span> (!<span class='fn'>DwmPrivateCalculateViewTransform</span>(
+          desktop, viewSource, viewDestination, &amp;properties))
+    {
+      <span class='kw'>return</span> E_INVALIDARG;
+    }
+    matrix.<span class='tp'>m11</span> = properties.<span class='tp'>m11</span>;
+    matrix.m12 = properties.m12;
+    matrix.m21 = properties.m21;
+    matrix.m22 = properties.m22;
+    matrix.dx = properties.dx;
+    matrix.dy = properties.dy;
+    clip.<span class='tp'>left</span> = (<span class='tp'>FLOAT</span>)properties.clip.<span class='tp'>left</span>;
+    clip.top = (<span class='tp'>FLOAT</span>)properties.clip.top;
+    clip.right = (<span class='tp'>FLOAT</span>)properties.clip.right;
+    clip.bottom = (<span class='tp'>FLOAT</span>)properties.clip.bottom;
+    hr = <span class='tp'>state</span>-&gt;viewVisual-&gt;lpVtbl-&gt;<span class='fn'>SetTransformMatrix</span>(
+      <span class='tp'>state</span>-&gt;viewVisual, &amp;matrix);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> hr;
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='tp'>state</span>-&gt;captureVisual-&gt;lpVtbl-&gt;<span class='fn'>SetClipRect</span>(
+        <span class='tp'>state</span>-&gt;captureVisual, &amp;clip);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='kw'>return</span> hr;
+      }
+    }
+  }
+  <span class='kw'>else</span>
+  {
+    MAG_D2D_RECT_F emptyClip;
+    <span class='fn'>ZeroMemory</span>(&amp;emptyClip, <span class='kw'>sizeof</span>(emptyClip));
+    hr = <span class='tp'>state</span>-&gt;captureVisual-&gt;lpVtbl-&gt;<span class='fn'>SetClipRect</span>(
+      <span class='tp'>state</span>-&gt;captureVisual, &amp;emptyClip);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='tp'>state</span>-&gt;viewConfigured = TRUE;
+    <span class='tp'>state</span>-&gt;viewVisible = visible;
+    <span class='tp'>state</span>-&gt;viewDesktop = *desktop;
+    <span class='kw'>if</span> (visible)
+    {
+      <span class='tp'>state</span>-&gt;viewSource = *viewSource;
+      <span class='tp'>state</span>-&gt;viewDestination = *viewDestination;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='fn'>SetRectEmpty</span>(&amp;<span class='tp'>state</span>-&gt;viewSource);
+      <span class='fn'>SetRectEmpty</span>(&amp;<span class='tp'>state</span>-&gt;viewDestination);
+    }
+    <span class='tp'>state</span>-&gt;treeDirty = TRUE;
+  }
+  <span class='kw'>return</span> hr;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureUpdate</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* desktop,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* viewDestination,
+  <span class='tp'>SIZE</span> targetSize,
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>* drawCommands,
+  <span class='tp'>UINT</span> drawCommandCount,
+  <span class='tp'>BOOL</span> <span class='tp'>restartSequence</span>,
+  <span class='tp'>BOOL</span> synchronize)
+{
+  <span class='tp'>HRESULT</span> hr;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span> || !desktop || <span class='fn'>IsRectEmpty</span>(desktop) ||
+      targetSize.cx &lt; <span class='num'>1</span> || targetSize.cy &lt; <span class='num'>1</span> ||
+      (drawCommandCount &amp;&amp; !drawCommands) ||
+      drawCommandCount &gt; <span class='mc'>DWM_PRIVATE_MAX_DRAW_COMMANDS</span> ||
+      (!!viewSource != !!viewDestination))
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  hr = <span class='fn'>DwmPrivateEnsureOverlay</span>(
+    <span class='tp'>state</span>, (<span class='tp'>UINT</span>)targetSize.cx, (<span class='tp'>UINT</span>)targetSize.cy);
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='fn'>DwmPrivateConfigureDesktop</span>(<span class='tp'>state</span>, desktop);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='fn'>DwmPrivateConfigureView</span>(
+      <span class='tp'>state</span>, desktop, viewSource, viewDestination);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    hr = <span class='fn'>DwmPrivateUpdateOverlay</span>(
+      <span class='tp'>state</span>,
+      viewDestination,
+      drawCommands,
+      drawCommandCount);
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+  {
+    <span class='tp'>UINT</span> index;
+
+    hr = <span class='tp'>state</span>-&gt;dcompDevice-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(<span class='tp'>state</span>-&gt;dcompDevice);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='tp'>state</span>-&gt;treeDirty = FALSE;
+      <span class='kw'>for</span> (index = <span class='num'>0</span>;
+           index &lt; <span class='tp'>state</span>-&gt;retiredSourceVisualCount;
+           ++index)
+      {
+        <span class='fn'>DwmPrivateDestroySourceVisual</span>(&amp;<span class='tp'>state</span>-&gt;retiredSourceVisuals[index]);
+        ++<span class='tp'>state</span>-&gt;sourceResourceGeneration;
+      }
+      <span class='tp'>state</span>-&gt;retiredSourceVisualCount = <span class='num'>0</span>;
+    }
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; synchronize)
+  {
+    hr = <span class='fn'>DwmFlush</span>();
+  }
+  <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+  {
+    <span class='fn'>SetLastError</span>((<span class='tp'>DWORD</span>)hr);
+    <span class='kw'>return</span> FALSE;
+  }
+  <span class='fn'>UNREFERENCED_PARAMETER</span>(<span class='tp'>restartSequence</span>);
+  <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>UINT64</span> <span class='fn'>DwmPrivateCaptureGetResourceGeneration</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>)
+{
+  <span class='kw'>return</span> <span class='tp'>state</span>
+    ? <span class='tp'>state</span>-&gt;overlayResourceGeneration + <span class='tp'>state</span>-&gt;sourceResourceGeneration
+    : <span class='num'>0</span>;
+}
+
+<span class='tp'>UINT</span> <span class='fn'>DwmPrivateCaptureGetWindowCoverage</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>HWND</span> hwnd)
+{
+  <span class='tp'>UINT</span> coverage = DWM_PRIVATE_WINDOW_COVERAGE_NONE;
+  <span class='tp'>UINT</span> index;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span> || !hwnd || !<span class='fn'>IsWindow</span>(hwnd))
+  {
+    <span class='kw'>return</span> coverage;
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;desktopExclusionCount; ++index)
+  {
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;desktopExclusions[index] == hwnd)
+    {
+      coverage |= DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED;
+      <span class='kw'>break</span>;
+    }
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;sourceVisualCount; ++index)
+  {
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;sourceVisuals[index].hwnd == hwnd)
+    {
+      <span class='kw'>if</span> (DWM_PRIVATE_SHELL_DESKTOP == <span class='tp'>state</span>-&gt;sourceVisuals[index].layer)
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP;
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (DWM_PRIVATE_SHELL_TASKBAR == <span class='tp'>state</span>-&gt;sourceVisuals[index].layer)
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR;
+      }
+      <span class='kw'>else</span>
+      {
+        coverage |= DWM_PRIVATE_WINDOW_COVERAGE_APPLICATION;
+      }
+      <span class='kw'>return</span> coverage;
+    }
+  }
+  <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;desktopConfigured &amp;&amp;
+      !(coverage &amp; DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED))
+  {
+    <span class='cm'>/* The shared multi-window visual remains a background safety layer for
+       surfaces that are not eligible for a retained source visual. */</span>
+    coverage |= DWM_PRIVATE_WINDOW_COVERAGE_SHARED;
+  }
+  <span class='kw'>return</span> coverage;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureGetWindowVisualPlacement</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>,
+  <span class='tp'>HWND</span> hwnd,
+  <span class='tp'>RECT</span>* windowRect,
+  <span class='tp'>POINT</span>* visualOffset,
+  <span class='tp'>UINT</span>* zOrder)
+{
+  <span class='tp'>UINT</span> index;
+
+  <span class='kw'>if</span> (!<span class='tp'>state</span> || !hwnd || !windowRect || !visualOffset || !zOrder)
+  {
+    <span class='kw'>return</span> FALSE;
+  }
+  <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>state</span>-&gt;sourceVisualCount; ++index)
+  {
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;sourceVisuals[index].hwnd == hwnd)
+    {
+      *windowRect = <span class='tp'>state</span>-&gt;sourceVisuals[index].<span class='tp'>rect</span>;
+      visualOffset-&gt;<span class='tp'>x</span> = (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;sourceVisuals[index].offsetX;
+      visualOffset-&gt;y = (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;sourceVisuals[index].offsetY;
+      *zOrder = index;
+      <span class='kw'>return</span> TRUE;
+    }
+  }
+  <span class='kw'>return</span> FALSE;
+}
+</pre>
+<p class="source-nav"><a href='dwmapix_h.htm'>&larr; dwmapix.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmprivate_h.htm'>dwmprivate.h &rarr;</a></p>
+</body>
+</html>

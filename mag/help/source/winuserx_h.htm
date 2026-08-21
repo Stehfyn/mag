@@ -3,38 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>winuserx.h - Source Code</title>
+  <title>winuserx.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; winuserx.h</p>
 <h1>winuserx.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>27 lines</strong> &middot; 547 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='winuserx_c.htm'>&larr; winuserx.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; last file &rarr;</p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
 
-BOOL <span class='fn'>SetWindowAlwaysOnTop</span>(HWND hWnd, BOOL fEnable);
+<span class='tp'>BOOL</span> <span class='fn'>SetWindowAlwaysOnTop</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>BOOL</span> fEnable);
 
-BOOL <span class='fn'>SetWindowOwner</span>(HWND hWnd, HWND hWndOwner);
+<span class='tp'>BOOL</span> <span class='fn'>SetWindowOwner</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>HWND</span> hWndOwner);
 
-BOOL <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>);
+<span class='tp'>BOOL</span> <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>);
 
-BOOL <span class='fn'>InMenu</span>(<span class='kw'>void</span>);
+<span class='tp'>BOOL</span> <span class='fn'>InMenu</span>(<span class='kw'>void</span>);
 
-HMENU <span class='fn'>LoadPopupMenu</span>(HINSTANCE hInstance, LPCTSTR lpMenuName);
+<span class='tp'>HMENU</span> <span class='fn'>LoadPopupMenu</span>(<span class='tp'>HINSTANCE</span> hInstance, <span class='tp'>LPCTSTR</span> lpMenuName);
 
 <span class='kw'>void</span> <span class='fn'>ForceTimerMessagesToBeCreatedIfNecessary</span>(LPMSG lpMsg);
 
-HANDLE
+<span class='tp'>HANDLE</span>
 <span class='fn'>UnloadFile</span>(
     LPTSTR  lpszName,
-    LPCVOID lpBuffer,
-    DWORD   nNumberOfBytesToWrite);
+    <span class='tp'>LPCVOID</span> lpBuffer,
+    <span class='tp'>DWORD</span>   nNumberOfBytesToWrite);
 
-HANDLE
+<span class='tp'>HANDLE</span>
 <span class='fn'>UnloadResource</span>(
-    HMODULE hModule, 
-    UINT    nResourceId, 
+    <span class='tp'>HMODULE</span> hModule,&#32;
+    <span class='tp'>UINT</span>    nResourceId,&#32;
     LPTSTR  lpszName);</pre>
+<p class="source-nav"><a href='winuserx_c.htm'>&larr; winuserx.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; last file &rarr;</p>
 </body>
 </html>

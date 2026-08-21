@@ -19,6 +19,7 @@ typedef enum GRAPHICSAPI
   GRAPHICS_API_D3D11,
   GRAPHICS_API_D3D12,
   GRAPHICS_API_VULKAN,
+  GRAPHICS_API_GDIPLUS,
   GRAPHICS_API_COUNT
 } GRAPHICSAPI;
 
@@ -188,6 +189,7 @@ BOOL magGraphicsIsInputDesktop(void);
 
 extern const MAGGRAPHICSBACKEND g_magGraphicsOpenGLBackend;
 extern const MAGGRAPHICSBACKEND g_magGraphicsGdiBackend;
+extern const MAGGRAPHICSBACKEND g_magGraphicsGdiPlusBackend;
 extern const MAGGRAPHICSBACKEND g_magGraphicsD3D9Backend;
 extern const MAGGRAPHICSBACKEND g_magGraphicsD3D11Backend;
 extern const MAGGRAPHICSBACKEND g_magGraphicsD3D12Backend;

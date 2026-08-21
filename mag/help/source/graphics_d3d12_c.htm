@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_d3d12.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_d3d12.c</p>
+<h1>graphics_d3d12.c</h1>
+<p>Direct3D 12 command, resource, fence, and DXGI presentation backend.</p>
+<div class="source-meta"><strong>977 lines</strong> &middot; 27986 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_d3d11_c.htm'>&larr; graphics_d3d11.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_d3d9_c.htm'>graphics_d3d9.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;graphics_dcomp.h&quot;</span>
+<span class='pp'>#include &quot;graphics_presentation_manager.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d11on12.h&gt;</span>
+<span class='pp'>#include &lt;d3d12.h&gt;</span>
+<span class='pp'>#include &lt;dxgi1_4.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;d3d12&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;dxgi&quot;)</span>
+
+<span class='pp'>#define MAG_D3D12_MAX_BUFFER_COUNT 16</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGD3D12FRAME
+{
+  ID3D12Resource*       backBuffer;
+  ID3D12Resource*       upload;
+  ID3D12CommandAllocator* allocator;
+  <span class='tp'>BYTE</span>*                 mappedUpload;
+  <span class='tp'>UINT64</span>                fenceValue;
+} MAGD3D12FRAME;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGD3D12STATE
+{
+  IDXGIFactory4*        factory;
+  <span class='tp'>MAGDCOMPPRESENTER</span>*    composition;
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presentationManager;
+  ID3D12Device*         device;
+  ID3D12CommandQueue*   queue;
+  ID3D11Device*         on12Device11;
+  ID3D11DeviceContext*  on12Context11;
+  ID3D11On12Device2*    on12Device;
+  IDXGISwapChain3*      swapChain;
+  ID3D12GraphicsCommandList* commandList;
+  ID3D12Fence*          fence;
+  <span class='tp'>HANDLE</span>                fenceEvent;
+  <span class='tp'>HANDLE</span>                frameWaitHandle;
+  MAGD3D12FRAME         frames[<span class='mc'>MAG_D3D12_MAX_BUFFER_COUNT</span>];
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT uploadFootprint;
+  <span class='tp'>UINT64</span>                nextFenceValue;
+  <span class='tp'>MAGCPUCOMPOSITOR</span>      compositor;
+  <span class='tp'>UINT</span>                  width;
+  <span class='tp'>UINT</span>                  height;
+  <span class='tp'>UINT</span>                  capacityWidth;
+  <span class='tp'>UINT</span>                  capacityHeight;
+  <span class='tp'>UINT64</span>                resourceGeneration;
+  <span class='tp'>UINT</span>                  bufferCount;
+  <span class='tp'>UINT</span>                  syncInterval;
+  <span class='tp'>UINT</span>                  presentFlags;
+  <span class='tp'>UINT</span>                  swapChainFlags;
+  <span class='tp'>BOOL</span>                  warp;
+  <span class='tp'>BOOL</span>                  compositionHost;
+  <span class='tp'>BOOL</span>                  presentationManagerHost;
+  <span class='tp'>BOOL</span>                  waitableSwapChain;
+  <span class='tp'>BOOL</span>                  presentationEnabled;
+} MAGD3D12STATE;
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12IsAvailable</span>(LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='tp'>HMODULE</span> module = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;d3d12.dll&quot;</span>));
+
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>if</span> (module)
+      {
+        <span class='fn'>FreeLibrary</span>(module);
+      }
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 12 composition presentation is unavailable on the private non-input test desktop.&quot;</span>), reasonCount);
+      }
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (module)
+    {
+      <span class='fn'>FreeLibrary</span>(module);
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+      }
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 12 is not installed.&quot;</span>), reasonCount);
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D12ReleaseResource</span>(ID3D12Resource** resource)
+{
+    <span class='kw'>if</span> (*resource)
+    {
+      <span class='fn'>ID3D12Resource_Release</span>(*resource);
+      *resource = NULL;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12WaitForFence</span>(MAGD3D12STATE* <span class='tp'>state</span>, <span class='tp'>UINT64</span> value)
+{
+    <span class='kw'>if</span> (!value || <span class='fn'>ID3D12Fence_GetCompletedValue</span>(<span class='tp'>state</span>-&gt;fence) &gt;= value)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12Fence_SetEventOnCompletion</span>(<span class='tp'>state</span>-&gt;fence, value, <span class='tp'>state</span>-&gt;fenceEvent)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(<span class='tp'>state</span>-&gt;fenceEvent, INFINITE);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12WaitIdle</span>(MAGD3D12STATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>const</span> <span class='tp'>UINT64</span> value = <span class='tp'>state</span>-&gt;nextFenceValue++;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;queue || !<span class='tp'>state</span>-&gt;fence ||
+        <span class='fn'>FAILED</span>(<span class='fn'>ID3D12CommandQueue_Signal</span>(<span class='tp'>state</span>-&gt;queue, <span class='tp'>state</span>-&gt;fence, value)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> <span class='fn'>magGraphicsD3D12WaitForFence</span>(<span class='tp'>state</span>, value);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D12ReleaseFrameResources</span>(MAGD3D12STATE* <span class='tp'>state</span>)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='tp'>state</span>-&gt;bufferCount; ++i)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].upload &amp;&amp; <span class='tp'>state</span>-&gt;frames[i].mappedUpload)
+      {
+        <span class='fn'>ID3D12Resource_Unmap</span>(<span class='tp'>state</span>-&gt;frames[i].upload, <span class='num'>0</span>, NULL);
+        <span class='tp'>state</span>-&gt;frames[i].mappedUpload = NULL;
+      }
+      <span class='fn'>magGraphicsD3D12ReleaseResource</span>(&amp;<span class='tp'>state</span>-&gt;frames[i].upload);
+      <span class='fn'>magGraphicsD3D12ReleaseResource</span>(&amp;<span class='tp'>state</span>-&gt;frames[i].backBuffer);
+      <span class='tp'>state</span>-&gt;frames[i].fenceValue = <span class='num'>0</span>;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12CreateUploadBuffer</span>(
+  MAGD3D12STATE* <span class='tp'>state</span>,
+  MAGD3D12FRAME* frame,
+  <span class='tp'>UINT64</span> size)
+{
+    D3D12_HEAP_PROPERTIES heap = { <span class='num'>0</span> };
+    D3D12_RESOURCE_DESC desc = { <span class='num'>0</span> };
+    D3D12_RANGE readRange = { <span class='num'>0</span>, <span class='num'>0</span> };
+    <span class='tp'>HRESULT</span> hr;
+
+    heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+    heap.CreationNodeMask = <span class='num'>1</span>;
+    heap.VisibleNodeMask = <span class='num'>1</span>;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width = size;
+    desc.Height = <span class='num'>1</span>;
+    desc.DepthOrArraySize = <span class='num'>1</span>;
+    desc.MipLevels = <span class='num'>1</span>;
+    desc.SampleDesc.Count = <span class='num'>1</span>;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    hr = <span class='fn'>ID3D12Device_CreateCommittedResource</span>(
+      <span class='tp'>state</span>-&gt;device,
+      &amp;heap,
+      D3D12_HEAP_FLAG_NONE,
+      &amp;desc,
+      D3D12_RESOURCE_STATE_GENERIC_READ,
+      NULL,
+      &amp;IID_ID3D12Resource,
+      (<span class='kw'>void</span>**)&amp;frame-&gt;upload);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>ID3D12Resource_Map</span>(frame-&gt;upload, <span class='num'>0</span>, &amp;readRange, (<span class='kw'>void</span>**)&amp;frame-&gt;mappedUpload);
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12CreateFrameResources</span>(MAGD3D12STATE* <span class='tp'>state</span>, <span class='tp'>SIZE</span> clientSize)
+{
+    D3D12_RESOURCE_DESC textureDesc = { <span class='num'>0</span> };
+    <span class='tp'>UINT</span> rows;
+    <span class='tp'>UINT64</span> rowSize;
+    <span class='tp'>UINT64</span> uploadSize;
+    <span class='tp'>UINT</span> i;
+
+    textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    textureDesc.Width = (<span class='tp'>UINT64</span>)clientSize.cx;
+    textureDesc.Height = (<span class='tp'>UINT</span>)clientSize.cy;
+    textureDesc.DepthOrArraySize = <span class='num'>1</span>;
+    textureDesc.MipLevels = <span class='num'>1</span>;
+    textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    textureDesc.SampleDesc.Count = <span class='num'>1</span>;
+
+    <span class='fn'>ID3D12Device_GetCopyableFootprints</span>(
+      <span class='tp'>state</span>-&gt;device,
+      &amp;textureDesc,
+      <span class='num'>0</span>,
+      <span class='num'>1</span>,
+      <span class='num'>0</span>,
+      &amp;<span class='tp'>state</span>-&gt;uploadFootprint,
+      &amp;rows,
+      &amp;rowSize,
+      &amp;uploadSize);
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='tp'>state</span>-&gt;bufferCount; ++i)
+    {
+      <span class='kw'>if</span> ((!<span class='tp'>state</span>-&gt;presentationManagerHost &amp;&amp;
+           <span class='fn'>FAILED</span>(<span class='fn'>IDXGISwapChain3_GetBuffer</span>(
+             <span class='tp'>state</span>-&gt;swapChain,
+             i,
+             &amp;IID_ID3D12Resource,
+             (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;frames[i].backBuffer))) ||
+          !<span class='fn'>magGraphicsD3D12CreateUploadBuffer</span>(<span class='tp'>state</span>, &amp;<span class='tp'>state</span>-&gt;frames[i], uploadSize))
+      {
+        <span class='fn'>magGraphicsD3D12ReleaseFrameResources</span>(<span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    <span class='tp'>state</span>-&gt;capacityWidth = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;capacityHeight = (<span class='tp'>UINT</span>)clientSize.cy;
+    ++<span class='tp'>state</span>-&gt;resourceGeneration;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12SelectDevice</span>(
+  MAGD3D12STATE* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation)
+{
+    IDXGIAdapter1* adapter = NULL;
+    <span class='tp'>BOOL</span> selected;
+
+    <span class='kw'>if</span> (!presentation)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;warp = MAG_HARDWARE_ADAPTER_WARP == presentation-&gt;hardware.<span class='tp'>mode</span>;
+    selected = <span class='tp'>state</span>-&gt;warp
+      ? <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory4_EnumWarpAdapter</span>(
+          <span class='tp'>state</span>-&gt;factory,
+          &amp;IID_IDXGIAdapter1,
+          (<span class='kw'>void</span>**)&amp;adapter))
+      : <span class='fn'>magAdapterOpenDxgi</span>(presentation-&gt;hardware.adapterLuid, &amp;adapter);
+
+    <span class='kw'>if</span> (selected &amp;&amp; adapter &amp;&amp; <span class='fn'>SUCCEEDED</span>(<span class='fn'>D3D12CreateDevice</span>(
+          (IUnknown*)adapter,
+          D3D_FEATURE_LEVEL_11_0,
+          &amp;IID_ID3D12Device,
+          (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;device)))
+    {
+      <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>if</span> (adapter)
+    {
+      <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D12Destroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState);
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12Create</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  <span class='kw'>void</span>** stateOut)
+{
+    MAGD3D12STATE* <span class='tp'>state</span>;
+    D3D12_COMMAND_QUEUE_DESC queueDesc = { <span class='num'>0</span> };
+    DXGI_SWAP_CHAIN_DESC1 swapDesc = { <span class='num'>0</span> };
+    IDXGISwapChain1* swapChain1 = NULL;
+    IDXGIFactory5* factory5 = NULL;
+    <span class='tp'>SIZE</span> reservoirSize;
+    <span class='tp'>UINT</span> i;
+    <span class='tp'>BOOL</span> allowTearing = FALSE;
+    <span class='tp'>BOOL</span> compositionHost;
+    <span class='tp'>BOOL</span> presentationManagerHost;
+    <span class='tp'>BOOL</span> waitableSwapChain;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!stateOut || !presentation || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span> ||
+        presentation-&gt;bufferCount &lt; <span class='num'>2</span> ||
+        presentation-&gt;bufferCount &gt; <span class='mc'>MAG_D3D12_MAX_BUFFER_COUNT</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *stateOut = NULL;
+    <span class='fn'>SetLastError</span>(ERROR_SUCCESS);
+
+    <span class='tp'>state</span> = (MAGD3D12STATE*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;nextFenceValue = <span class='num'>1</span>;
+    <span class='tp'>state</span>-&gt;bufferCount = presentation-&gt;bufferCount;
+    compositionHost = MAG_HOST_DIRECTCOMPOSITION == presentation-&gt;host;
+    presentationManagerHost = MAG_HOST_PRESENTATION_MANAGER == presentation-&gt;host;
+    waitableSwapChain = !presentationManagerHost &amp;&amp;
+      MAG_WAITABLE_SWAP_CHAIN_ENABLED == presentation-&gt;waitableSwapChainMode;
+    <span class='tp'>state</span>-&gt;compositionHost = compositionHost;
+    <span class='tp'>state</span>-&gt;presentationManagerHost = presentationManagerHost;
+    <span class='tp'>state</span>-&gt;waitableSwapChain = waitableSwapChain;
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+
+    hr = <span class='fn'>CreateDXGIFactory1</span>(&amp;IID_IDXGIFactory4, (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;factory);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !<span class='fn'>magGraphicsD3D12SelectDevice</span>(<span class='tp'>state</span>, presentation))
+    {
+      <span class='fn'>SetLastError</span>(<span class='fn'>FAILED</span>(hr) ? (<span class='tp'>DWORD</span>)hr : ERROR_NOT_SUPPORTED);
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12Device_CreateCommandQueue</span>(
+          <span class='tp'>state</span>-&gt;device,
+          &amp;queueDesc,
+          &amp;IID_ID3D12CommandQueue,
+          (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;queue)))
+    {
+      <span class='fn'>SetLastError</span>(ERROR_INVALID_FUNCTION);
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (presentationManagerHost)
+    {
+      IUnknown* queues[] = { (IUnknown*)<span class='tp'>state</span>-&gt;queue };
+      <span class='tp'>TCHAR</span> managerReason[<span class='num'>256</span>];
+
+      hr = <span class='fn'>D3D11On12CreateDevice</span>(
+        (IUnknown*)<span class='tp'>state</span>-&gt;device,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+          D3D11_CREATE_DEVICE_SINGLETHREADED |
+          D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+        NULL,
+        <span class='num'>0</span>,
+        queues,
+        <span class='fn'>ARRAYSIZE</span>(queues),
+        <span class='num'>0</span>,
+        &amp;<span class='tp'>state</span>-&gt;on12Device11,
+        &amp;<span class='tp'>state</span>-&gt;on12Context11,
+        NULL);
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        hr = <span class='fn'>ID3D11Device_QueryInterface</span>(
+          <span class='tp'>state</span>-&gt;on12Device11,
+          &amp;IID_ID3D11On12Device2,
+          (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;on12Device);
+      }
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp;
+          !<span class='fn'>magPresentationManagerPresenterCreate</span>(
+            hWnd,
+            <span class='tp'>state</span>-&gt;on12Device11,
+            reservoirSize,
+            presentation,
+            &amp;<span class='tp'>state</span>-&gt;presentationManager,
+            managerReason,
+            <span class='fn'>ARRAYSIZE</span>(managerReason)))
+      {
+        hr = E_FAIL;
+      }
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='fn'>SetLastError</span>((<span class='tp'>DWORD</span>)hr);
+        <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+      <span class='tp'>state</span>-&gt;capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+      <span class='tp'>state</span>-&gt;capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+      <span class='tp'>state</span>-&gt;syncInterval = presentation-&gt;syncInterval;
+      <span class='tp'>state</span>-&gt;presentFlags = <span class='num'>0</span>;
+      <span class='tp'>state</span>-&gt;presentationEnabled = TRUE;
+    }
+    <span class='kw'>else</span>
+    {
+    swapDesc.Width = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    swapDesc.Height = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    swapDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swapDesc.SampleDesc.Count = <span class='num'>1</span>;
+    swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapDesc.BufferCount = <span class='tp'>state</span>-&gt;bufferCount;
+    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapDesc.Scaling = DXGI_SCALING_STRETCH;
+    swapDesc.AlphaMode = compositionHost &amp;&amp;
+      MAG_LAYER_ALPHA_OPAQUE != presentation-&gt;alphaMode
+      ? DXGI_ALPHA_MODE_PREMULTIPLIED
+      : DXGI_ALPHA_MODE_IGNORE;
+    swapDesc.Flags = waitableSwapChain
+      ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+      : <span class='num'>0</span>;
+
+    <span class='kw'>if</span> (presentation-&gt;allowTearing &amp;&amp; <span class='num'>0</span> == presentation-&gt;syncInterval &amp;&amp;
+        <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory4_QueryInterface</span>(
+          <span class='tp'>state</span>-&gt;factory,
+          &amp;IID_IDXGIFactory5,
+          (<span class='kw'>void</span>**)&amp;factory5)))
+    {
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>IDXGIFactory5_CheckFeatureSupport</span>(
+            factory5,
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+            &amp;allowTearing,
+            <span class='kw'>sizeof</span>(allowTearing))))
+      {
+        allowTearing = FALSE;
+      }
+      <span class='fn'>IDXGIFactory5_Release</span>(factory5);
+      <span class='kw'>if</span> (allowTearing)
+      {
+        swapDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+      }
+    }
+
+    <span class='kw'>if</span> (compositionHost)
+    {
+      hr = <span class='fn'>IDXGIFactory4_CreateSwapChainForComposition</span>(
+        <span class='tp'>state</span>-&gt;factory,
+        (IUnknown*)<span class='tp'>state</span>-&gt;queue,
+        &amp;swapDesc,
+        NULL,
+        &amp;swapChain1);
+    }
+    <span class='kw'>else</span>
+    {
+      hr = <span class='fn'>IDXGIFactory4_CreateSwapChainForHwnd</span>(
+        <span class='tp'>state</span>-&gt;factory,
+        (IUnknown*)<span class='tp'>state</span>-&gt;queue,
+        hWnd,
+        &amp;swapDesc,
+        NULL,
+        NULL,
+        &amp;swapChain1);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDXGISwapChain1_QueryInterface</span>(
+        swapChain1,
+        &amp;IID_IDXGISwapChain3,
+        (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;swapChain);
+      <span class='fn'>IDXGISwapChain1_Release</span>(swapChain1);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>SetLastError</span>((<span class='tp'>DWORD</span>)hr);
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>IDXGISwapChain2_SetSourceSize</span>(
+          (IDXGISwapChain2*)<span class='tp'>state</span>-&gt;swapChain,
+          (<span class='tp'>UINT</span>)clientSize.cx,
+          (<span class='tp'>UINT</span>)clientSize.cy)) ||
+        (compositionHost &amp;&amp;
+         !<span class='fn'>magDCompPresenterCreate</span>(
+           hWnd,
+           (IUnknown*)<span class='tp'>state</span>-&gt;swapChain,
+           &amp;<span class='tp'>state</span>-&gt;composition)))
+    {
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (waitableSwapChain)
+    {
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>IDXGISwapChain2_SetMaximumFrameLatency</span>(
+            (IDXGISwapChain2*)<span class='tp'>state</span>-&gt;swapChain,
+            presentation-&gt;maximumFrameLatency)))
+      {
+        <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+      <span class='tp'>state</span>-&gt;frameWaitHandle = <span class='fn'>IDXGISwapChain2_GetFrameLatencyWaitableObject</span>(
+        (IDXGISwapChain2*)<span class='tp'>state</span>-&gt;swapChain);
+      <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;frameWaitHandle)
+      {
+        <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='tp'>state</span>-&gt;syncInterval = presentation-&gt;syncInterval;
+    <span class='tp'>state</span>-&gt;presentFlags = allowTearing ? DXGI_PRESENT_ALLOW_TEARING : <span class='num'>0</span>;
+    <span class='tp'>state</span>-&gt;swapChainFlags = swapDesc.Flags;
+    <span class='tp'>state</span>-&gt;presentationEnabled = TRUE;
+    }
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='tp'>state</span>-&gt;bufferCount; ++i)
+    {
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12Device_CreateCommandAllocator</span>(
+            <span class='tp'>state</span>-&gt;device,
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            &amp;IID_ID3D12CommandAllocator,
+            (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;frames[i].allocator)))
+      {
+        <span class='fn'>SetLastError</span>(ERROR_INVALID_FUNCTION);
+        <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    hr = <span class='fn'>ID3D12Device_CreateCommandList</span>(
+      <span class='tp'>state</span>-&gt;device,
+      <span class='num'>0</span>,
+      D3D12_COMMAND_LIST_TYPE_DIRECT,
+      <span class='tp'>state</span>-&gt;frames[<span class='num'>0</span>].allocator,
+      NULL,
+      &amp;IID_ID3D12GraphicsCommandList,
+      (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;commandList);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || <span class='fn'>FAILED</span>(<span class='fn'>ID3D12GraphicsCommandList_Close</span>(<span class='tp'>state</span>-&gt;commandList)) ||
+        <span class='fn'>FAILED</span>(<span class='fn'>ID3D12Device_CreateFence</span>(
+          <span class='tp'>state</span>-&gt;device,
+          <span class='num'>0</span>,
+          D3D12_FENCE_FLAG_NONE,
+          &amp;IID_ID3D12Fence,
+          (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;fence)))
+    {
+      <span class='fn'>SetLastError</span>(<span class='fn'>FAILED</span>(hr) ? (<span class='tp'>DWORD</span>)hr : ERROR_INVALID_FUNCTION);
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;fenceEvent = <span class='fn'>CreateEvent</span>(NULL, FALSE, FALSE, NULL);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;fenceEvent || !<span class='fn'>magGraphicsD3D12CreateFrameResources</span>(<span class='tp'>state</span>, reservoirSize) ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(
+          &amp;<span class='tp'>state</span>-&gt;compositor,
+          (<span class='tp'>UINT</span>)reservoirSize.cx,
+          (<span class='tp'>UINT</span>)reservoirSize.cy))
+    {
+      <span class='kw'>if</span> (ERROR_SUCCESS == <span class='fn'>GetLastError</span>())
+      {
+        <span class='fn'>SetLastError</span>(ERROR_INVALID_DATA);
+      }
+      <span class='fn'>magGraphicsD3D12Destroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    *stateOut = <span class='tp'>state</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D12Destroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='tp'>UINT</span> i;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;queue &amp;&amp; <span class='tp'>state</span>-&gt;fence &amp;&amp; <span class='tp'>state</span>-&gt;fenceEvent)
+    {
+      <span class='fn'>magGraphicsD3D12WaitIdle</span>(<span class='tp'>state</span>);
+    }
+    <span class='fn'>magPresentationManagerPresenterDestroy</span>(<span class='tp'>state</span>-&gt;presentationManager);
+    <span class='tp'>state</span>-&gt;presentationManager = NULL;
+    <span class='fn'>magDCompPresenterDestroy</span>(<span class='tp'>state</span>-&gt;composition);
+    <span class='tp'>state</span>-&gt;composition = NULL;
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;swapChain)
+    {
+      <span class='fn'>DwmFlush</span>();
+    }
+    <span class='fn'>magGraphicsD3D12ReleaseFrameResources</span>(<span class='tp'>state</span>);
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;commandList)
+    {
+      <span class='fn'>ID3D12GraphicsCommandList_Release</span>(<span class='tp'>state</span>-&gt;commandList);
+    }
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='tp'>state</span>-&gt;bufferCount; ++i)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].allocator)
+      {
+        <span class='fn'>ID3D12CommandAllocator_Release</span>(<span class='tp'>state</span>-&gt;frames[i].allocator);
+      }
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;fence)
+    {
+      <span class='fn'>ID3D12Fence_Release</span>(<span class='tp'>state</span>-&gt;fence);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;fenceEvent)
+    {
+      <span class='fn'>CloseHandle</span>(<span class='tp'>state</span>-&gt;fenceEvent);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frameWaitHandle)
+    {
+      <span class='fn'>CloseHandle</span>(<span class='tp'>state</span>-&gt;frameWaitHandle);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;swapChain)
+    {
+      <span class='fn'>IDXGISwapChain3_Release</span>(<span class='tp'>state</span>-&gt;swapChain);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;on12Context11)
+    {
+      <span class='fn'>ID3D11DeviceContext_ClearState</span>(<span class='tp'>state</span>-&gt;on12Context11);
+      <span class='fn'>ID3D11DeviceContext_Flush</span>(<span class='tp'>state</span>-&gt;on12Context11);
+      <span class='fn'>ID3D11DeviceContext_Release</span>(<span class='tp'>state</span>-&gt;on12Context11);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;on12Device)
+    {
+      <span class='fn'>ID3D11On12Device2_Release</span>(<span class='tp'>state</span>-&gt;on12Device);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;on12Device11)
+    {
+      <span class='fn'>ID3D11Device_Release</span>(<span class='tp'>state</span>-&gt;on12Device11);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;queue)
+    {
+      <span class='fn'>ID3D12CommandQueue_Release</span>(<span class='tp'>state</span>-&gt;queue);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='fn'>ID3D12Device_Release</span>(<span class='tp'>state</span>-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;factory)
+    {
+      <span class='fn'>IDXGIFactory4_Release</span>(<span class='tp'>state</span>-&gt;factory);
+    }
+    <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;<span class='tp'>state</span>-&gt;compositor);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12Resize</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>SIZE</span> clientSize)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      <span class='kw'>return</span> <span class='fn'>magPresentationManagerPresenterResize</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        clientSize);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;width &lt;= <span class='tp'>state</span>-&gt;capacityWidth &amp;&amp; <span class='tp'>state</span>-&gt;height &lt;= <span class='tp'>state</span>-&gt;capacityHeight)
+    {
+      <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGISwapChain2_SetSourceSize</span>(
+        (IDXGISwapChain2*)<span class='tp'>state</span>-&gt;swapChain,
+        <span class='tp'>state</span>-&gt;width,
+        <span class='tp'>state</span>-&gt;height));
+    }
+
+    {
+    <span class='tp'>SIZE</span> reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+    reservoirSize.cx = <span class='fn'>max</span>(reservoirSize.cx, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityWidth);
+    reservoirSize.cy = <span class='fn'>max</span>(reservoirSize.cy, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityHeight);
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsD3D12WaitIdle</span>(<span class='tp'>state</span>))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>magGraphicsD3D12ReleaseFrameResources</span>(<span class='tp'>state</span>);
+    hr = <span class='fn'>IDXGISwapChain3_ResizeBuffers</span>(
+      <span class='tp'>state</span>-&gt;swapChain,
+      <span class='tp'>state</span>-&gt;bufferCount,
+      (<span class='tp'>UINT</span>)reservoirSize.cx,
+      (<span class='tp'>UINT</span>)reservoirSize.cy,
+      DXGI_FORMAT_B8G8R8A8_UNORM,
+      <span class='tp'>state</span>-&gt;swapChainFlags);
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr) &amp;&amp;
+      <span class='fn'>magGraphicsD3D12CreateFrameResources</span>(<span class='tp'>state</span>, reservoirSize) &amp;&amp;
+      <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGISwapChain2_SetSourceSize</span>(
+        (IDXGISwapChain2*)<span class='tp'>state</span>-&gt;swapChain,
+        <span class='tp'>state</span>-&gt;width,
+        <span class='tp'>state</span>-&gt;height));
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12SetPresentationEnabled</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>BOOL</span> enabled)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost &amp;&amp;
+        !<span class='fn'>magPresentationManagerPresenterSetEnabled</span>(
+          <span class='tp'>state</span>-&gt;presentationManager,
+          enabled))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;compositionHost &amp;&amp;
+        !<span class='fn'>magDCompPresenterSetEnabled</span>(<span class='tp'>state</span>-&gt;composition, enabled))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;presentationEnabled = enabled;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12Render</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='tp'>MAGPIXELBUFFER</span> composed;
+    MAGD3D12FRAME* current;
+    D3D12_RESOURCE_BARRIER barriers[<span class='num'>2</span>] = { <span class='num'>0</span> };
+    D3D12_TEXTURE_COPY_LOCATION destination = { <span class='num'>0</span> };
+    D3D12_TEXTURE_COPY_LOCATION source = { <span class='num'>0</span> };
+    D3D12_BOX sourceBox;
+    ID3D12CommandList* commandLists[<span class='num'>1</span>];
+    <span class='tp'>UINT</span> frameIndex;
+    <span class='tp'>UINT</span> y;
+    <span class='tp'>UINT64</span> fenceValue;
+    <span class='tp'>HRESULT</span> hr;
+    ID3D11Texture2D* presentationTexture = NULL;
+    ID3D12Resource* presentationResource = NULL;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !frame || frame-&gt;width != <span class='tp'>state</span>-&gt;width || frame-&gt;height != <span class='tp'>state</span>-&gt;height ||
+        !<span class='fn'>magGraphicsComposeFrame</span>(&amp;<span class='tp'>state</span>-&gt;compositor, frame, ui, &amp;composed))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      <span class='kw'>if</span> (!<span class='fn'>magPresentationManagerPresenterAcquire</span>(
+            <span class='tp'>state</span>-&gt;presentationManager,
+            !intent || intent-&gt;synchronize,
+            &amp;presentationTexture,
+            &amp;frameIndex) ||
+          <span class='fn'>FAILED</span>(<span class='fn'>ID3D11On12Device2_UnwrapUnderlyingResource</span>(
+            <span class='tp'>state</span>-&gt;on12Device,
+            (ID3D11Resource*)presentationTexture,
+            <span class='tp'>state</span>-&gt;queue,
+            &amp;IID_ID3D12Resource,
+            (<span class='kw'>void</span>**)&amp;presentationResource)))
+      {
+        <span class='kw'>if</span> (presentationTexture)
+        {
+          <span class='fn'>ID3D11Texture2D_Release</span>(presentationTexture);
+        }
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='kw'>else</span>
+    {
+      frameIndex = <span class='fn'>IDXGISwapChain3_GetCurrentBackBufferIndex</span>(<span class='tp'>state</span>-&gt;swapChain);
+    }
+    current = &amp;<span class='tp'>state</span>-&gt;frames[frameIndex];
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsD3D12WaitForFence</span>(<span class='tp'>state</span>, current-&gt;fenceValue))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; composed.height; ++y)
+    {
+      <span class='fn'>CopyMemory</span>(
+        current-&gt;mappedUpload + <span class='tp'>state</span>-&gt;uploadFootprint.Offset +
+          (<span class='tp'>SIZE_T</span>)y * <span class='tp'>state</span>-&gt;uploadFootprint.Footprint.RowPitch,
+        composed.<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)y * composed.stride,
+        (<span class='tp'>SIZE_T</span>)composed.width * <span class='num'>4U</span>);
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12CommandAllocator_Reset</span>(current-&gt;allocator)) ||
+        <span class='fn'>FAILED</span>(<span class='fn'>ID3D12GraphicsCommandList_Reset</span>(<span class='tp'>state</span>-&gt;commandList, current-&gt;allocator, NULL)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    barriers[<span class='num'>0</span>].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barriers[<span class='num'>0</span>].Transition.pResource = <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? presentationResource
+      : current-&gt;backBuffer;
+    barriers[<span class='num'>0</span>].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barriers[<span class='num'>0</span>].Transition.StateBefore = <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? D3D12_RESOURCE_STATE_COMMON
+      : D3D12_RESOURCE_STATE_PRESENT;
+    barriers[<span class='num'>0</span>].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    barriers[<span class='num'>1</span>] = barriers[<span class='num'>0</span>];
+    barriers[<span class='num'>1</span>].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    barriers[<span class='num'>1</span>].Transition.StateAfter = <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? D3D12_RESOURCE_STATE_COMMON
+      : D3D12_RESOURCE_STATE_PRESENT;
+
+    destination.pResource = <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? presentationResource
+      : current-&gt;backBuffer;
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    destination.SubresourceIndex = <span class='num'>0</span>;
+    source.pResource = current-&gt;upload;
+    source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    source.PlacedFootprint = <span class='tp'>state</span>-&gt;uploadFootprint;
+    sourceBox.<span class='tp'>left</span> = <span class='num'>0</span>;
+    sourceBox.top = <span class='num'>0</span>;
+    sourceBox.front = <span class='num'>0</span>;
+    sourceBox.right = <span class='tp'>state</span>-&gt;width;
+    sourceBox.bottom = <span class='tp'>state</span>-&gt;height;
+    sourceBox.back = <span class='num'>1</span>;
+
+    <span class='fn'>ID3D12GraphicsCommandList_ResourceBarrier</span>(<span class='tp'>state</span>-&gt;commandList, <span class='num'>1</span>, &amp;barriers[<span class='num'>0</span>]);
+    <span class='fn'>ID3D12GraphicsCommandList_CopyTextureRegion</span>(
+      <span class='tp'>state</span>-&gt;commandList,
+      &amp;destination,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      &amp;source,
+      &amp;sourceBox);
+    <span class='fn'>ID3D12GraphicsCommandList_ResourceBarrier</span>(<span class='tp'>state</span>-&gt;commandList, <span class='num'>1</span>, &amp;barriers[<span class='num'>1</span>]);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12GraphicsCommandList_Close</span>(<span class='tp'>state</span>-&gt;commandList)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    commandLists[<span class='num'>0</span>] = (ID3D12CommandList*)<span class='tp'>state</span>-&gt;commandList;
+    <span class='fn'>ID3D12CommandQueue_ExecuteCommandLists</span>(<span class='tp'>state</span>-&gt;queue, <span class='num'>1</span>, commandLists);
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      fenceValue = <span class='tp'>state</span>-&gt;nextFenceValue++;
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12CommandQueue_Signal</span>(<span class='tp'>state</span>-&gt;queue, <span class='tp'>state</span>-&gt;fence, fenceValue)) ||
+          <span class='fn'>FAILED</span>(<span class='fn'>ID3D11On12Device2_ReturnUnderlyingResource</span>(
+            <span class='tp'>state</span>-&gt;on12Device,
+            (ID3D11Resource*)presentationTexture,
+            <span class='num'>1</span>,
+            &amp;fenceValue,
+            &amp;<span class='tp'>state</span>-&gt;fence)))
+      {
+        <span class='fn'>ID3D12Resource_Release</span>(presentationResource);
+        <span class='fn'>ID3D11Texture2D_Release</span>(presentationTexture);
+        <span class='kw'>return</span> FALSE;
+      }
+      current-&gt;fenceValue = fenceValue;
+      <span class='fn'>ID3D12Resource_Release</span>(presentationResource);
+      <span class='fn'>ID3D11Texture2D_Release</span>(presentationTexture);
+      <span class='kw'>return</span> <span class='fn'>magPresentationManagerPresenterPresent</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        frameIndex,
+        (<span class='tp'>SIZE</span>){ (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;width, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;height },
+        intent);
+    }
+    <span class='kw'>if</span> (intent &amp;&amp; intent-&gt;<span class='tp'>restartSequence</span>)
+    {
+      <span class='tp'>HRESULT</span> first = <span class='fn'>IDXGISwapChain3_Present</span>(
+        <span class='tp'>state</span>-&gt;swapChain,
+        <span class='num'>0</span>,
+        <span class='tp'>state</span>-&gt;presentFlags | DXGI_PRESENT_RESTART |
+          (<span class='tp'>state</span>-&gt;waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : <span class='num'>0</span>));
+
+      <span class='kw'>if</span> (!intent-&gt;synchronize &amp;&amp; !<span class='tp'>state</span>-&gt;waitableSwapChain)
+      {
+        <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(first);
+      }
+      hr = <span class='fn'>IDXGISwapChain3_Present</span>(
+        <span class='tp'>state</span>-&gt;swapChain,
+        intent-&gt;synchronize ? <span class='num'>1</span> : <span class='num'>0</span>,
+        intent-&gt;synchronize
+          ? DXGI_PRESENT_DO_NOT_SEQUENCE
+          : <span class='tp'>state</span>-&gt;presentFlags | DXGI_PRESENT_DO_NOT_WAIT);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(first) &amp;&amp; DXGI_ERROR_WAS_STILL_DRAWING != first)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (intent &amp;&amp; !intent-&gt;synchronize)
+    {
+      hr = <span class='fn'>IDXGISwapChain3_Present</span>(
+        <span class='tp'>state</span>-&gt;swapChain,
+        <span class='num'>0</span>,
+        <span class='tp'>state</span>-&gt;presentFlags |
+          (<span class='tp'>state</span>-&gt;waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : <span class='num'>0</span>));
+    }
+    <span class='kw'>else</span>
+    {
+      hr = <span class='fn'>IDXGISwapChain3_Present</span>(
+        <span class='tp'>state</span>-&gt;swapChain,
+        <span class='tp'>state</span>-&gt;syncInterval,
+        <span class='tp'>state</span>-&gt;presentFlags);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    fenceValue = <span class='tp'>state</span>-&gt;nextFenceValue++;
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>ID3D12CommandQueue_Signal</span>(<span class='tp'>state</span>-&gt;queue, <span class='tp'>state</span>-&gt;fence, fenceValue)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    current-&gt;fenceValue = fenceValue;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>HANDLE</span> <span class='fn'>magGraphicsD3D12GetFrameWaitHandle</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>return</span> <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? <span class='fn'>magPresentationManagerPresenterGetFrameWaitHandle</span>(
+          <span class='tp'>state</span>-&gt;presentationManager)
+      : <span class='tp'>state</span>-&gt;frameWaitHandle;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magGraphicsD3D12GetResourceGeneration</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span>
+      ? <span class='tp'>state</span>-&gt;resourceGeneration + <span class='tp'>state</span>-&gt;compositor.generation +
+        <span class='fn'>magPresentationManagerPresenterGetResourceGeneration</span>(
+          <span class='tp'>state</span>-&gt;presentationManager)
+      : <span class='num'>0</span>;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12GetNextEstimatedFrameTime</span>(
+  <span class='kw'>void</span>* opaqueState,
+  LONGLONG* frameTime)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> <span class='tp'>state</span>-&gt;presentationManagerHost
+      ? <span class='fn'>magPresentationManagerPresenterGetNextEstimatedFrameTime</span>(
+          <span class='tp'>state</span>-&gt;presentationManager,
+          frameTime)
+      : <span class='fn'>magDCompPresenterGetNextEstimatedFrameTime</span>(
+          <span class='tp'>state</span>-&gt;composition,
+          frameTime);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D12GetObservedPresentationTarget</span>(
+  <span class='kw'>void</span>* opaqueState,
+  <span class='tp'>UINT</span>* target)
+{
+    MAGD3D12STATE* <span class='tp'>state</span> = (MAGD3D12STATE*)opaqueState;
+
+    <span class='kw'>if</span> (<span class='tp'>state</span> &amp;&amp; <span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      <span class='kw'>return</span> <span class='fn'>magPresentationManagerPresenterGetObservedTarget</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        target);
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsD3D12Backend =
+{
+  GRAPHICS_API_D3D12,
+  <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 12&quot;</span>),
+  TRUE,
+  magGraphicsD3D12IsAvailable,
+  magGraphicsD3D12Create,
+  magGraphicsD3D12Destroy,
+  magGraphicsD3D12Resize,
+  magGraphicsD3D12SetPresentationEnabled,
+  magGraphicsD3D12Render,
+  magGraphicsD3D12GetFrameWaitHandle,
+  magGraphicsD3D12GetResourceGeneration,
+  magGraphicsD3D12GetNextEstimatedFrameTime,
+  magGraphicsD3D12GetObservedPresentationTarget,
+};
+</pre>
+<p class="source-nav"><a href='graphics_d3d11_c.htm'>&larr; graphics_d3d11.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_d3d9_c.htm'>graphics_d3d9.c &rarr;</a></p>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_presentation_manager.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_presentation_manager.h</p>
+<h1>graphics_presentation_manager.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>54 lines</strong> &middot; 1576 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_presentation_manager_c.htm'>&larr; graphics_presentation_manager.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_vulkan_c.htm'>graphics_vulkan.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d11.h&gt;</span>
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='kw'>extern</span> <span class='str'>&quot;C&quot;</span> {
+<span class='pp'>#endif</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span> <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>;
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  ID3D11Device* device,
+  <span class='tp'>SIZE</span> reservoirSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings,
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>** presenterOut,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
+<span class='kw'>void</span> <span class='fn'>magPresentationManagerPresenterDestroy</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterSetEnabled</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>BOOL</span> enabled);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterResize</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>SIZE</span> clientSize);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterAcquire</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>BOOL</span> allowWait,
+  ID3D11Texture2D** textureOut,
+  <span class='tp'>UINT</span>* bufferIndexOut);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterPresent</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>UINT</span> bufferIndex,
+  <span class='tp'>SIZE</span> contentSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent);
+<span class='tp'>HANDLE</span> <span class='fn'>magPresentationManagerPresenterGetFrameWaitHandle</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterGetNextEstimatedFrameTime</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  LONGLONG* frameTime);
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterGetObservedTarget</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>UINT</span>* target);
+<span class='tp'>UINT64</span> <span class='fn'>magPresentationManagerPresenterGetResourceGeneration</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter);
+
+<span class='pp'>#ifdef __cplusplus</span>
+}
+<span class='pp'>#endif</span>
+</pre>
+<p class="source-nav"><a href='graphics_presentation_manager_c.htm'>&larr; graphics_presentation_manager.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_vulkan_c.htm'>graphics_vulkan.c &rarr;</a></p>
+</body>
+</html>

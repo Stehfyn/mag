@@ -3,28 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>help.c - Source Code</title>
+  <title>help.c - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; help.c</p>
 <h1>help.c</h1>
-<pre class="source-code"><span class='pp'>#include "help.h"</span>
+<p>Project-owned C implementation.</p>
+<div class="source-meta"><strong>42 lines</strong> &middot; 984 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_vulkan_c.htm'>&larr; graphics_vulkan.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='help_h.htm'>help.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;help.h&quot;</span>
 
-<span class='pp'>#pragma comment(lib, "htmlhelp")</span>
-<span class='pp'>#pragma comment(lib, "Shlwapi")</span>
+<span class='pp'>#pragma comment(lib, &quot;htmlhelp&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;Shlwapi&quot;)</span>
 
-<span class='kw'>static</span> TCHAR s_szChmPath[MAX_PATH + <span class='num'>1</span>];
+<span class='kw'>static</span> <span class='tp'>TCHAR</span> s_szChmPath[MAX_PATH + <span class='num'>1</span>];
 
-<span class='kw'>void</span> <span class='fn'>help_Show</span>(HWND hWnd)
+<span class='kw'>void</span> <span class='fn'>help_Show</span>(<span class='tp'>HWND</span> hWnd)
 {
     <span class='kw'>if</span> (!s_szChmPath[<span class='num'>0</span>])
     {
-        TCHAR szImageDir[MAX_PATH + <span class='num'>1</span>];
+        <span class='tp'>TCHAR</span> szImageDir[MAX_PATH + <span class='num'>1</span>];
 
         <span class='kw'>if</span> (!<span class='fn'>GetModuleFileName</span>(NULL, szImageDir, MAX_PATH + <span class='num'>1</span>) ||
             !<span class='fn'>PathRemoveFileSpec</span>(szImageDir)                     ||
-            !<span class='fn'>PathCombine</span>(s_szChmPath, szImageDir, <span class='fn'>TEXT</span>(<span class='str'>"mag.chm"</span>)))
+            !<span class='fn'>PathCombine</span>(s_szChmPath, szImageDir, <span class='fn'>TEXT</span>(<span class='str'>&quot;mag.chm&quot;</span>)))
         {
             s_szChmPath[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
             <span class='kw'>return</span>;
@@ -32,7 +35,7 @@
     }
 
     {
-        HANDLE hFile = <span class='fn'>UnloadResource</span>(<span class='fn'>GetModuleHandle</span>(NULL), IDR_CHM, s_szChmPath);
+        <span class='tp'>HANDLE</span> hFile = <span class='fn'>UnloadResource</span>(<span class='fn'>GetModuleHandle</span>(NULL), <span class='mc'>IDR_CHM</span>, s_szChmPath);
 
         <span class='kw'>if</span> (hFile &amp;&amp; INVALID_HANDLE_VALUE != hFile)
             <span class='fn'>CloseHandle</span>(hFile);
@@ -51,5 +54,6 @@
     }
 }
 </pre>
+<p class="source-nav"><a href='graphics_vulkan_c.htm'>&larr; graphics_vulkan.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='help_h.htm'>help.h &rarr;</a></p>
 </body>
 </html>

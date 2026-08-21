@@ -3,84 +3,103 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Controls &amp; Keyboard Shortcuts - MAG Screen Magnifier Help</title>
+  <title>Controls and Shortcuts - MAG Screen Magnifier Help</title>
   <link rel="stylesheet" type="text/css" href="help.css">
 </head>
 <body>
 
-<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Controls &amp; Keyboard Shortcuts</p>
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Controls and Shortcuts</p>
 
-<h1>Controls &amp; Keyboard Shortcuts</h1>
+<h1>Controls and Shortcuts</h1>
 
-<h2>Mouse Controls</h2>
-<table>
-  <tr>
-    <th>Action</th>
-    <th>Effect</th>
-  </tr>
-  <tr>
-    <td class="key">Mouse Wheel</td>
-    <td>Zoom in or out in smaller, non-linear steps for fine control at high magnification.</td>
-  </tr>
-  <tr>
-    <td class="key">Mouse Wheel with mouse-relative zoom enabled</td>
-    <td>Zoom around the cursor position instead of the current view center. This setting is off by default and only applies outside tracking modes.</td>
-  </tr>
-  <tr>
-    <td class="key">Drag the frame</td>
-    <td>Move the magnifier window to a new position on screen.</td>
-  </tr>
-  <tr>
-    <td class="key">Drag any edge or corner</td>
-    <td>Resize the magnifier window. Rendering continues on vblank while the modal resize loop is active.</td>
-  </tr>
-  <tr>
-    <td class="key">Left-click and drag minimap</td>
-    <td>Pan the visible source rectangle inside the captured desktop area. The minimap is available while zoomed in, while dragging or resizing, and in the pinned 1.0x state after panning.</td>
-  </tr>
-  <tr>
-    <td class="key">Right-click</td>
-    <td>Open the context menu. See <a href="context_menu.htm">Context Menu</a> for details.</td>
-  </tr>
-</table>
-
-<h2>Keyboard Shortcuts</h2>
-<table>
-  <tr>
-    <th>Key</th>
-    <th>Effect</th>
-  </tr>
-  <tr>
-    <td class="key">Space</td>
-    <td>Stop <em>Follow Mouse</em> mode and return to <em>Window</em> mode. Only active outside <em>Lens</em> mode.</td>
-  </tr>
-  <tr>
-    <td class="key">Escape</td>
-    <td>Close MAG. Only active when the magnifier window has focus.</td>
-  </tr>
-</table>
-
-<div class="note">
-  <strong>Note:</strong> In <em>Follow Mouse</em> mode the window remains interactive.
-  Clicking the minimap pans the view without leaving follow mode. In <em>Lens</em>
-  mode, the window is click-through and the overlay UI is disabled.
+<div class="hero">
+  <p class="lead">The MAG frame remains live during move and resize. Input behavior changes by mode, but the selected capture/render/presentation route remains the same.</p>
 </div>
 
-<h2>Zoom Behaviour</h2>
+<h2>Mouse controls</h2>
+<table>
+  <tr><th>Action</th><th>Effect</th></tr>
+  <tr><td class="key">Mouse wheel</td><td>Zooms in or out using nonlinear steps: fast across low magnification and finer at high magnification.</td></tr>
+  <tr><td class="key">Mouse-relative wheel zoom</td><td>When enabled in Settings, keeps the desktop point under the pointer stable while zooming in Window mode.</td></tr>
+  <tr><td class="key">Drag the frame</td><td>Moves MAG. The presented source is updated while the move loop is active.</td></tr>
+  <tr><td class="key">Drag an edge or corner</td><td>Resizes MAG. Capture, overlay layout, and presentation continue during the modal resize loop.</td></tr>
+  <tr><td class="key">Drag inside the minimap</td><td>Pans the visible source rectangle inside the captured desktop. At 1.0&times;, panning pins the selected source until MAG itself is moved.</td></tr>
+  <tr><td class="key">Right-click the frame</td><td>Opens the <a href="context_menu.htm">context menu</a>.</td></tr>
+  <tr><td class="key">Right-click the tray icon</td><td>Opens the same context menu at the pointer.</td></tr>
+</table>
+
+<h2>Keyboard shortcuts</h2>
+<table>
+  <tr><th>Key</th><th>Effect</th></tr>
+  <tr><td class="key">Space</td><td>Leaves Follow Mouse mode and returns to Window mode. It does not apply in click-through Lens mode.</td></tr>
+  <tr><td class="key">Escape</td><td>Closes MAG when its window has focus. It does not intercept input in Lens mode.</td></tr>
+</table>
+
+<h2>Mode-specific input</h2>
+<table>
+  <tr><th>Mode</th><th>Input behavior</th></tr>
+  <tr><td class="key">Window</td><td>Frame dragging, resizing, wheel zoom, minimap interaction, keyboard shortcuts, and the context menu are available.</td></tr>
+  <tr><td class="key">Follow Mouse</td><td>The capture follows the pointer while MAG remains interactive. Minimap panning is available without leaving the mode.</td></tr>
+  <tr><td class="key">Lens</td><td>MAG is topmost, non-activating, and click-through. Overlay controls are disabled and input goes to the underlying window.</td></tr>
+</table>
+
+<h2>Select and confirm a mode</h2>
+<div class="steps">
+  <div class="step">Right-click MAG's frame. In Lens mode, use the tray icon because the lens intentionally does not take pointer input.</div>
+  <div class="step">Select Window, Follow Mouse, or Lens. The check moves immediately to the selected item.</div>
+  <div class="step">Confirm the behavior: Window follows frame geometry, Follow Mouse changes the source center, and Lens moves the click-through HWND with the pointer.</div>
+</div>
+
+<table class="gallery-table">
+  <tr>
+    <td style="width:33%">
+      <img src="images/mag-context-menu.png" alt="MAG context menu with Window checked.">
+      <p class="caption"><strong>Window:</strong> the interactive framed magnifier.</p>
+    </td>
+    <td style="width:33%">
+      <img src="images/mag-mode-follow-mouse.png" alt="MAG context menu with Follow Mouse checked.">
+      <p class="caption"><strong>Follow Mouse:</strong> MAG stays put while the source follows the pointer.</p>
+    </td>
+    <td style="width:33%">
+      <img src="images/mag-mode-lens.png" alt="MAG context menu with Lens checked.">
+      <p class="caption"><strong>Lens:</strong> the topmost click-through lens follows the pointer.</p>
+    </td>
+  </tr>
+</table>
+
+<div class="help-figure">
+  <img src="images/view-modes.png" width="760" alt="Window, Follow Mouse, and Lens behavior illustrated from left to right.">
+  <p class="caption">From left to right: Window mode anchors the view to MAG; Follow Mouse keeps MAG fixed while the source follows the pointer; Lens moves the click-through magnifier with the pointer.</p>
+</div>
+
+<h2>Minimap overlay</h2>
 <p>
-  The zoom level ranges from minimum (the window shows an area close in size to itself)
-  to maximum (each screen pixel fills a large portion of the window). The zoom step size
-  scales automatically so that coarse changes are fast when zoomed out and fine changes
-  are precise when zoomed in. At 1.0x scale, panning with the minimap pins the source
-  view until the actual window is moved.
+  The minimap shows capture bounds, monitor boundaries, the visible source rectangle,
+  and the MAG window rectangle. It appears during relevant mouse activity, move/resize,
+  zoom, and pinned-source interaction, then fades when it is no longer needed.
 </p>
 
-<h2>Minimap Overlay</h2>
+<h3>Pan with the minimap</h3>
+<div class="steps">
+  <div class="step">Move the pointer inside MAG until the minimap appears.</div>
+  <div class="step">Press within the minimap's visible-source rectangle and drag it over the capture bounds.</div>
+  <div class="step">Release to keep the new source origin. At 1.0&times; in Window mode, the origin remains pinned until MAG itself moves.</div>
+</div>
+
+<h2>Zoom behavior</h2>
 <p>
-  The minimap shows the capture area, monitor boundaries, the current visible source
-  rectangle, and the window rectangle. It fades like video playback controls after
-  mouse activity stops, but remains visible while dragging or resizing when a zoomed or
-  pinned view needs it.
+  MAG clips the source to the active capture bounds and keeps the requested view filled
+  without stretching stale geometry. Follow Mouse and Lens center the source on the
+  pointer subject to monitor/capture edges. Window mode normally anchors the source to
+  the MAG window unless minimap panning has pinned another origin.
+</p>
+
+<h3>Resize without waiting for the modal loop</h3>
+<p>
+  Drag any edge or corner continuously. MAG handles the move/size timer while User32 owns the
+  modal loop, recalculates the source and UI rectangles for each published client size, and presents
+  before the loop ends. Long-lived graphics objects and capacity reservoirs are retained when the
+  new size fits; only size-dependent buffers that cannot contain the frame are replaced.
 </p>
 
 </body>

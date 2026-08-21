@@ -31,10 +31,13 @@ typedef UINT32 DWRITE_MEASURING_MODE;
 #define D2D1_DRAW_TEXT_OPTIONS_CLIP 2U
 #define DWRITE_FACTORY_TYPE_SHARED 0U
 #define DWRITE_FONT_WEIGHT_NORMAL 400U
+#define DWRITE_FONT_WEIGHT_SEMI_BOLD 600U
 #define DWRITE_FONT_STYLE_NORMAL 0U
 #define DWRITE_FONT_STRETCH_NORMAL 5U
 #define DWRITE_TEXT_ALIGNMENT_LEADING 0U
+#define DWRITE_PARAGRAPH_ALIGNMENT_NEAR 0U
 #define DWRITE_PARAGRAPH_ALIGNMENT_CENTER 2U
+#define DWRITE_WORD_WRAPPING_WRAP 0U
 #define DWRITE_WORD_WRAPPING_NO_WRAP 1U
 #define DWRITE_MEASURING_MODE_NATURAL 0U
 #define MAG_DXGI_FORMAT_B8G8R8A8_UNORM 87U
@@ -70,6 +73,19 @@ typedef struct D2D1_RECT_F
   FLOAT right;
   FLOAT bottom;
 } D2D1_RECT_F;
+
+typedef struct D2D1_POINT_2F
+{
+  FLOAT x;
+  FLOAT y;
+} D2D1_POINT_2F;
+
+typedef struct D2D1_ROUNDED_RECT
+{
+  D2D1_RECT_F rect;
+  FLOAT radiusX;
+  FLOAT radiusY;
+} D2D1_ROUNDED_RECT;
 
 typedef struct DWRITE_TEXT_METRICS
 {
@@ -133,7 +149,13 @@ typedef struct ID2D1DCRenderTargetVtbl
     const void*,
     ID2D1SolidColorBrush**);
   void* CreateResourcesAfterSolidBrush[6];
-  void* DrawLine;
+  void (STDMETHODCALLTYPE* DrawLine)(
+    ID2D1DCRenderTarget*,
+    D2D1_POINT_2F,
+    D2D1_POINT_2F,
+    ID2D1SolidColorBrush*,
+    FLOAT,
+    void*);
   void (STDMETHODCALLTYPE* DrawRectangle)(
     ID2D1DCRenderTarget*,
     const D2D1_RECT_F*,
@@ -144,7 +166,17 @@ typedef struct ID2D1DCRenderTargetVtbl
     ID2D1DCRenderTarget*,
     const D2D1_RECT_F*,
     ID2D1SolidColorBrush*);
-  void* ShapesBeforeDrawText[9];
+  void (STDMETHODCALLTYPE* DrawRoundedRectangle)(
+    ID2D1DCRenderTarget*,
+    const D2D1_ROUNDED_RECT*,
+    ID2D1SolidColorBrush*,
+    FLOAT,
+    void*);
+  void (STDMETHODCALLTYPE* FillRoundedRectangle)(
+    ID2D1DCRenderTarget*,
+    const D2D1_ROUNDED_RECT*,
+    ID2D1SolidColorBrush*);
+  void* ShapesAfterRoundedRectangleBeforeDrawText[7];
   void (STDMETHODCALLTYPE* DrawText)(
     ID2D1DCRenderTarget*,
     const WCHAR*,
@@ -258,4 +290,3 @@ HRESULT WINAPI DWriteCreateFactory(
   DWRITE_FACTORY_TYPE factoryType,
   REFIID iid,
   IUnknown** factory);
-

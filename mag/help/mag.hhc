@@ -1,107 +1,77 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
-<HTML>
-<HEAD>
-<meta name="GENERATOR" content="Microsoft&reg; HTML Help Workshop 4.1">
+<HTML><HEAD>
+<meta name="GENERATOR" content="MAG Help source generator">
 <!-- Sitemap 1.0 -->
 </HEAD><BODY>
-<OBJECT type="text/site properties">
-  <param name="Window Styles" value="0x800025">
-  <param name="ImageType" value="Folder">
-</OBJECT>
+<OBJECT type="text/site properties"><param name="Window Styles" value="0x800025"><param name="ImageType" value="Folder"></OBJECT>
 <UL>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="MAG Screen Magnifier">
-    <param name="Local" value="index.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Controls &amp; Keyboard Shortcuts">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Context Menu">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Source Code">
-    <param name="Local" value="source.htm">
-  </OBJECT>
-  <UL>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="d3dkmtx.c">
-    <param name="Local" value="source/d3dkmtx_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="d3dkmtx.h">
-    <param name="Local" value="source/d3dkmtx_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="dwmapix.c">
-    <param name="Local" value="source/dwmapix_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="dwmapix.h">
-    <param name="Local" value="source/dwmapix_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="framework.h">
-    <param name="Local" value="source/framework_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="help.c">
-    <param name="Local" value="source/help_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="help.h">
-    <param name="Local" value="source/help_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="mag.c">
-    <param name="Local" value="source/mag_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="mag.h">
-    <param name="Local" value="source/mag_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="main.c">
-    <param name="Local" value="source/main_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="render.c">
-    <param name="Local" value="source/render_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="render.h">
-    <param name="Local" value="source/render_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="resource.h">
-    <param name="Local" value="source/resource_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Resource.rc">
-    <param name="Local" value="source/Resource_rc.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="targetver.h">
-    <param name="Local" value="source/targetver_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="wingdix.c">
-    <param name="Local" value="source/wingdix_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="wingdix.h">
-    <param name="Local" value="source/wingdix_h.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="winuserx.c">
-    <param name="Local" value="source/winuserx_c.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="winuserx.h">
-    <param name="Local" value="source/winuserx_h.htm">
-  </OBJECT>
-  </UL>
+  <LI><OBJECT type="text/sitemap"><param name="Name" value="MAG Screen Magnifier"><param name="Local" value="index.htm"></OBJECT></LI>
+  <LI><OBJECT type="text/sitemap"><param name="Name" value="Using MAG"></OBJECT>
+    <UL>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Controls and Shortcuts"><param name="Local" value="controls.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Context Menu and Help"><param name="Local" value="context_menu.htm"></OBJECT></LI>
+    </UL>
+  </LI>
+  <LI><OBJECT type="text/sitemap"><param name="Name" value="Settings"><param name="Local" value="settings.htm"></OBJECT>
+    <UL>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Capture and Rendering"><param name="Local" value="capture_rendering.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Presentation and Composition"><param name="Local" value="presentation.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Windows Graphics Architecture"><param name="Local" value="graphics_architecture.htm"></OBJECT></LI>
+    </UL>
+  </LI>
+  <LI><OBJECT type="text/sitemap"><param name="Name" value="Troubleshooting"><param name="Local" value="troubleshooting.htm"></OBJECT></LI>
+  <LI><OBJECT type="text/sitemap"><param name="Name" value="Developer Reference"></OBJECT>
+    <UL>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Embedded Source Code"><param name="Local" value="source.htm"></OBJECT>
+        <UL>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="d2dwriteabi.h"><param name="Local" value="source/d2dwriteabi_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="d3dkmtx.c"><param name="Local" value="source/d3dkmtx_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="d3dkmtx.h"><param name="Local" value="source/d3dkmtx_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="dcompabi.h"><param name="Local" value="source/dcompabi_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="dwmapix.c"><param name="Local" value="source/dwmapix_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="dwmapix.h"><param name="Local" value="source/dwmapix_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="dwmprivate.c"><param name="Local" value="source/dwmprivate_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="dwmprivate.h"><param name="Local" value="source/dwmprivate_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="framework.h"><param name="Local" value="source/framework_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="gdiplusabi.h"><param name="Local" value="source/gdiplusabi_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics.c"><param name="Local" value="source/graphics_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics.h"><param name="Local" value="source/graphics_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_d3d11.c"><param name="Local" value="source/graphics_d3d11_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_d3d12.c"><param name="Local" value="source/graphics_d3d12_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_d3d9.c"><param name="Local" value="source/graphics_d3d9_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_dcomp.c"><param name="Local" value="source/graphics_dcomp_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_dcomp.h"><param name="Local" value="source/graphics_dcomp_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_gdi.c"><param name="Local" value="source/graphics_gdi_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_gdiplus.c"><param name="Local" value="source/graphics_gdiplus_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_layered.c"><param name="Local" value="source/graphics_layered_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_layered.h"><param name="Local" value="source/graphics_layered_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_opengl.c"><param name="Local" value="source/graphics_opengl_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_presentation_manager.c"><param name="Local" value="source/graphics_presentation_manager_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_presentation_manager.h"><param name="Local" value="source/graphics_presentation_manager_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="graphics_vulkan.c"><param name="Local" value="source/graphics_vulkan_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="help.c"><param name="Local" value="source/help_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="help.h"><param name="Local" value="source/help_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="mag.c"><param name="Local" value="source/mag_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="mag.h"><param name="Local" value="source/mag_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="main.c"><param name="Local" value="source/main_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="presentation.c"><param name="Local" value="source/presentation_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="presentation.h"><param name="Local" value="source/presentation_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="presentation_observer.c"><param name="Local" value="source/presentation_observer_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="presentation_observer.h"><param name="Local" value="source/presentation_observer_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="render.c"><param name="Local" value="source/render_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="render.h"><param name="Local" value="source/render_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="resource.h"><param name="Local" value="source/resource_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="Resource.rc"><param name="Local" value="source/Resource_rc.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="targetver.h"><param name="Local" value="source/targetver_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="ui_renderer.c"><param name="Local" value="source/ui_renderer_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="ui_renderer.h"><param name="Local" value="source/ui_renderer_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="wingdix.c"><param name="Local" value="source/wingdix_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="wingdix.h"><param name="Local" value="source/wingdix_h.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="winuserx.c"><param name="Local" value="source/winuserx_c.htm"></OBJECT></LI>
+      <LI><OBJECT type="text/sitemap"><param name="Name" value="winuserx.h"><param name="Local" value="source/winuserx_h.htm"></OBJECT></LI>
+        </UL>
+      </LI>
+    </UL>
+  </LI>
 </UL>
 </BODY></HTML>

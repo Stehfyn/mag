@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Settings Reference - MAG Screen Magnifier Help</title>
+  <link rel="stylesheet" type="text/css" href="help.css">
+</head>
+<body>
+
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Settings Reference</p>
+
+<h1>Settings Reference</h1>
+
+<p>
+  Open <strong>Settings...</strong> from the context menu. MAG validates the entire
+  renderer, capture, presentation, composition, adapter, and copy-policy route as one
+  configuration. Every compatible change is activated and saved immediately. An unavailable
+  choice is still visible for inspection, but it cannot replace the last working route; the
+  status area explains the exact failed prerequisite.
+</p>
+
+<div class="help-figure figure-wide">
+  <img src="images/mag-settings.png" width="1020" alt="MAG Settings Route tab with an interactive directed acyclic graph from capture through transfer, renderer, host, target, and display.">
+  <p class="caption"><strong>Route:</strong> this is the live pipeline, not a decorative picture. Each combo box is the setting for its node; clicking the node title or border opens that setting too. Layering and Pacing open their detail tabs.</p>
+</div>
+
+<div class="tip">
+  <strong>Recommended:</strong> Select the <em>Auto (presentation preset)</em>, then choose
+  the Capture, Renderer, UI, and Text nodes you want. Auto resets the presentation, surface,
+  host, transfer, adapter, layering, and pacing fields to their fastest-compatible defaults;
+  it does not erase your independently selected capture or rendering APIs.
+</div>
+
+<div class="note">
+  <strong>Atomic route change:</strong> a node request enters the compatibility solver. A
+  valid candidate receives a first complete frame before it replaces the active route; an
+  unavailable candidate leaves the active route untouched and publishes its reason.
+</div>
+
+<h2>Safe configuration workflow</h2>
+<div class="steps">
+  <div class="step">Use the Route tab directly: select Capture, Transfer, Renderer, Host, Target, Display, Hardware, Surface, Text, or UI in its node.</div>
+  <div class="step">Green means the closed selection is available. Open any node to see an Available/Unavailable badge for every choice; unavailable rows include the reason.</div>
+  <div class="step">A compatible selection changes the live route immediately and changes the preset indicator to Custom. There is no Apply step.</div>
+  <div class="step">If a request is unavailable, read the persistent status area. The graph continues to show the active working pipeline while the changed request is outlined in red.</div>
+  <div class="step">Select Auto at any time to restore the fastest-compatible presentation defaults while retaining your capture, graphics, UI, and text selections.</div>
+</div>
+
+<h2>Interactive Route DAG</h2>
+<table>
+  <tr><th>Node</th><th>What changing it controls</th></tr>
+  <tr><td class="key">Capture</td><td>GDI BitBlt, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, or DWM Private Visual.</td></tr>
+  <tr><td class="key">Transfer</td><td>Fastest valid, strict zero-copy, GPU-local copy, or CPU diagnostic copy policy.</td></tr>
+  <tr><td class="key">Renderer</td><td>GDI, GDI+, OpenGL, Direct3D 9, Direct3D 11, Direct3D 12, or Vulkan.</td></tr>
+  <tr><td class="key">Host / Surface</td><td>Redirected HWND, traditional layered HWND, DirectComposition, or Presentation Manager with redirected/no-redirection ownership.</td></tr>
+  <tr><td class="key">Target</td><td>The requested Windows presentation model.</td></tr>
+  <tr><td class="key">Display / Hardware</td><td>The presentation output and render-device adapter identities.</td></tr>
+  <tr><td class="key">Text / UI</td><td>DirectWrite, glyph-atlas, or GDI text and Direct2D or native overlay drawing.</td></tr>
+  <tr><td class="key">Layering / Pacing</td><td>Open the detail tabs for alpha/color-key controls or buffer/latency/sync sliders and the waitable-chain policy.</td></tr>
+</table>
+
+<p>The count in each node is <em>available choices / total choices</em> for the current active route. Blue arrows are active dependencies. For compositor-owned DWM capture, the graph shows the visual pass-through branch around the pixel renderer.</p>
+
+<h2>Rendering</h2>
+<table>
+  <tr><th>Control</th><th>Choices and purpose</th></tr>
+  <tr>
+    <td class="key">Graphics API</td>
+    <td>OpenGL, GDI, GDI+, Direct3D 9, Direct3D 11, Direct3D 12, or Vulkan. This selects the backend that composes and presents pixel-backed frames. GDI+ uses the flat <code>Gdiplus.dll</code> ABI from C; MAG does not use the C++ wrapper API.</td>
+  </tr>
+  <tr>
+    <td class="key">Capture API</td>
+    <td>GDI BitBlt, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, or DWM Private Visual. See <a href="capture_rendering.htm">Capture and Rendering</a>.</td>
+  </tr>
+  <tr>
+    <td class="key">UI API</td>
+    <td><em>Native draw list</em> lets the selected graphics backend draw MAG's overlay. <em>Direct2D</em> uses the Direct2D overlay renderer.</td>
+  </tr>
+  <tr>
+    <td class="key">Text renderer</td>
+    <td>DirectWrite, <em>Glyph atlas (OpenGL GPU / CPU)</em>, or GDI. The glyph-atlas path is GPU-backed with OpenGL and uses its CPU implementation on other routes.</td>
+  </tr>
+  <tr>
+    <td class="key">Mouse-relative wheel zoom</td>
+    <td>On the Pacing tab, zooms around the pointer instead of the view center in Window mode. It is disabled by default and does not replace cursor tracking in Follow Mouse or Lens mode.</td>
+  </tr>
+</table>
+
+<p class="note">The enlarged Settings dialog and its standard controls use the Windows Common Controls version 6 visual style embedded in MAG's application manifest. Combo lists use native Windows popup placement; MAG does not move an open list to a monitor edge.</p>
+
+<h2>Presentation and composition</h2>
+<table>
+  <tr><th>Control</th><th>Purpose</th></tr>
+  <tr><td class="key">Target</td><td>Requests a Windows presentation model. Auto selects the fastest valid target for the active backend and host.</td></tr>
+  <tr><td class="key">Surface</td><td>Selects a DWM redirection surface, a no-redirection surface, or host-owned automatic selection.</td></tr>
+  <tr><td class="key">Host</td><td>Selects redirected HWND, traditional layered window, DirectComposition, Presentation Manager, or automatic selection.</td></tr>
+  <tr><td class="key">Copy policy</td><td>Controls whether compositor-visual, GPU-copy, or CPU round-trip routes are permitted.</td></tr>
+  <tr><td class="key">Alpha mode</td><td>Selects opaque, constant alpha, color key, or per-pixel premultiplied alpha where the chosen host supports it.</td></tr>
+  <tr><td class="key">Display adapter</td><td>Selects the output that owns presentation: the window's output, the captured output, or an explicit monitor/output.</td></tr>
+  <tr><td class="key">Hardware adapter</td><td>Selects the render adapter automatically, matches display/capture, names a physical adapter explicitly, or selects WARP where supported.</td></tr>
+  <tr><td class="key">Require exact target</td><td>Continues checking the presentation mode observed by Windows. A mismatch marks the route unsupported instead of silently accepting another model.</td></tr>
+  <tr><td class="key">Allow tearing</td><td>Allows tearing only when the active API, driver, window state, and sync interval support it. A nonzero sync interval prevents tearing.</td></tr>
+</table>
+
+<p>See <a href="presentation.htm">Presentation and Composition</a> for every choice and its compatibility rules.</p>
+
+<h2>Pacing values</h2>
+<div class="help-figure figure-wide">
+  <img src="images/mag-settings-pacing.png" width="1020" alt="MAG Pacing tab with aligned sliders for buffers, frame latency, and sync interval plus the waitable swap-chain selector.">
+  <p class="caption">Buffers, latency, and sync interval are sliders with aligned live values. Waitable selects Auto, Enabled, or Disabled. Dragging previews a value; releasing commits a compatible route.</p>
+</div>
+<table>
+  <tr><th>Value</th><th>Allowed</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td class="key">Buffers</td><td>2&ndash;16</td><td>3</td><td>Requested number of presentable images. Individual APIs may impose a smaller valid range.</td></tr>
+  <tr><td class="key">Latency</td><td>1&ndash;16</td><td>1</td><td>Maximum queued-frame latency for waitable presenters that expose the control.</td></tr>
+  <tr><td class="key">Sync</td><td>0&ndash;4</td><td>1</td><td>Presentation synchronization interval. Zero requests immediate/tearing-capable behavior where available.</td></tr>
+  <tr><td class="key">Waitable</td><td>Auto / Enabled / Disabled</td><td>Auto</td><td>Controls the DXGI frame-latency wait object. Auto enables it only for an eligible D3D11/D3D12 flip route; Presentation Manager uses its own availability event. D3D12 latency is driver-managed when Disabled.</td></tr>
+</table>
+
+<h2>Layered composition</h2>
+<div class="help-figure figure-wide">
+  <img src="images/mag-settings-layering.png" width="1020" alt="MAG Layering tab with alpha mode, window alpha slider, and color-key picker.">
+  <p class="caption">Layering uses a dropdown, slider, and Windows color picker; there are no oversized numeric text-entry fields.</p>
+</div>
+<table>
+  <tr><th>Control</th><th>Allowed</th><th>Use</th></tr>
+  <tr><td class="key">Constant alpha</td><td>0&ndash;255</td><td>Overall window opacity for constant-alpha capable hosts. 255 is fully opaque.</td></tr>
+  <tr><td class="key">Color key</td><td>Windows color picker</td><td>Makes the selected color transparent on a supported color-key route. The button displays the current RRGGBB value.</td></tr>
+  <tr><td class="key">Per-pixel alpha</td><td>Premultiplied BGRA</td><td>Uses each pixel's alpha channel. Straight-alpha pixels must not be supplied to this mode.</td></tr>
+</table>
+
+<h2>Configuration status</h2>
+<p>
+  The status box is authoritative. It identifies the active copy class or explains an
+  unavailable API, host/surface conflict, adapter failure, copy-policy failure, or exact-target
+  mismatch. Compatible changes are saved as they activate. <strong>Close</strong> only closes
+  the dialog; it does not defer or roll back already active choices.
+</p>
+
+<p>
+  Presentation status has four deliberately separate layers: requested Target, configured
+  presenter, current output/geometry eligibility, and the mode Windows actually observed.
+  The Output planes node summarizes DirectFlip, Independent Flip, MPO plane counts, WDDM 3
+  displayable support, and cross-adapter tier. The expanded status also names MPO transforms,
+  filters, scaling limits, secondary-display/HUD support, hardware flip queue state, and the
+  observation source. <em>No observer</em> means no exact runtime result has arrived; it does
+  not mean the configured route is inactive and it never promotes eligibility into a claim.
+</p>
+
+<table class="gallery-table">
+  <tr>
+    <td>
+      <img src="images/mag-settings-compositor-status.png" alt="MAG Settings with DWM Private Visual selected and a successful compositor visual configuration status.">
+      <p class="caption"><strong>Accepted compositor route:</strong> selecting DWM Private Visual on the Capture node changes the live graph to Custom and reports the compositor-visual route immediately.</p>
+    </td>
+    <td>
+      <img src="images/mag-settings-target-options.png" alt="MAG Target node dropdown showing Available and Unavailable badges with compatibility reasons.">
+      <p class="caption"><strong>Availability before selection:</strong> each row is labeled Available or Unavailable. An unavailable row includes the resolver's reason; selecting it leaves the active graph unchanged and repeats the full reason in status.</p>
+    </td>
+  </tr>
+</table>
+
+<div class="status-good">
+  A successful status identifies the resolved copy class and confirms the implemented host,
+  pacing, and resize-capacity gates. It does not imply that every different combination of
+  target, surface, host, alpha, and adapters would also be valid.
+</div>
+
+<div class="status-bad">
+  A rejected status is deliberate. MAG does not silently replace an explicitly requested
+  incompatible host/target or weaken a strict copy policy. Restore Auto or select the compatible
+  route named by the status and architecture topics.
+</div>
+
+</body>
+</html>

@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>resource.h - Source Code</title>
+  <title>resource.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; resource.h</p>
 <h1>resource.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>80 lines</strong> &middot; 3346 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='render_h.htm'>&larr; render.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='Resource_rc.htm'>Resource.rc &rarr;</a></p>
 <pre class="source-code"><span class='cm'>//{{NO_DEPENDENCIES}}</span>
 <span class='cm'>// Microsoft Visual C++ generated include file.</span>
 <span class='cm'>// Used by Resource.rc</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 <span class='pp'>#define IDR_MENU1                       101</span>
 <span class='pp'>#define IDR_CHM                         102</span>
 <span class='pp'>#define IDD_SETTINGS                    103</span>
@@ -21,6 +24,54 @@
 <span class='pp'>#define IDC_SETTINGS_CAPTURE_API        1002</span>
 <span class='pp'>#define IDC_SETTINGS_STATUS             1003</span>
 <span class='pp'>#define IDC_SETTINGS_MOUSE_RELATIVE_ZOOM 1004</span>
+<span class='pp'>#define IDC_SETTINGS_UI_API             1005</span>
+<span class='pp'>#define IDC_SETTINGS_TEXT_RENDERER      1006</span>
+<span class='pp'>#define IDC_SETTINGS_PRESENT_TARGET     1007</span>
+<span class='pp'>#define IDC_SETTINGS_SURFACE_OWNERSHIP  1008</span>
+<span class='pp'>#define IDC_SETTINGS_COMPOSITION_HOST   1009</span>
+<span class='pp'>#define IDC_SETTINGS_COPY_REQUIREMENT   1010</span>
+<span class='pp'>#define IDC_SETTINGS_ALPHA_MODE         1011</span>
+<span class='pp'>#define IDC_SETTINGS_DISPLAY_ADAPTER    1012</span>
+<span class='pp'>#define IDC_SETTINGS_HARDWARE_ADAPTER   1013</span>
+<span class='pp'>#define IDC_SETTINGS_STRICT_TARGET      1014</span>
+<span class='pp'>#define IDC_SETTINGS_ALLOW_TEARING      1015</span>
+<span class='pp'>#define IDC_SETTINGS_BUFFER_COUNT       1016</span>
+<span class='pp'>#define IDC_SETTINGS_FRAME_LATENCY      1017</span>
+<span class='pp'>#define IDC_SETTINGS_SYNC_INTERVAL      1018</span>
+<span class='pp'>#define IDC_SETTINGS_CONSTANT_ALPHA     1019</span>
+<span class='pp'>#define IDC_SETTINGS_COLOR_KEY          1020</span>
+<span class='pp'>#define IDC_SETTINGS_TAB                1021</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_GRAPHICS_API 1022</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_CAPTURE_API  1023</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_UI_API       1024</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_TEXT_RENDERER 1025</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_PRESENT_TARGET 1026</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_SURFACE_OWNERSHIP 1027</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_COMPOSITION_HOST 1028</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_COPY_REQUIREMENT 1029</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_ALPHA_MODE   1030</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_DISPLAY_ADAPTER 1031</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_HARDWARE_ADAPTER 1032</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_CONSTANT_ALPHA 1033</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_COLOR_KEY    1034</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_ALPHA_NOTE   1035</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_BUFFER_COUNT 1036</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_FRAME_LATENCY 1037</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_SYNC_INTERVAL 1038</span>
+<span class='pp'>#define IDC_SETTINGS_VALUE_CONSTANT_ALPHA 1039</span>
+<span class='pp'>#define IDC_SETTINGS_VALUE_BUFFER_COUNT  1040</span>
+<span class='pp'>#define IDC_SETTINGS_VALUE_FRAME_LATENCY 1041</span>
+<span class='pp'>#define IDC_SETTINGS_VALUE_SYNC_INTERVAL 1042</span>
+<span class='pp'>#define IDC_SETTINGS_PRESET             1043</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_PRESET       1044</span>
+<span class='pp'>#define IDC_SETTINGS_ROUTE_DIAGRAM      1045</span>
+<span class='pp'>#define IDC_SETTINGS_ROUTE_PACING       1046</span>
+<span class='pp'>#define IDC_SETTINGS_ROUTE_LAYERING     1047</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_STRICT_TARGET 1048</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_ALLOW_TEARING 1049</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_MOUSE_RELATIVE_ZOOM 1050</span>
+<span class='pp'>#define IDC_SETTINGS_WAITABLE_SWAP_CHAIN 1051</span>
+<span class='pp'>#define IDC_SETTINGS_LABEL_WAITABLE_SWAP_CHAIN 1052</span>
 <span class='pp'>#define ID_CONTEXTMENU_FOCUS            40005</span>
 <span class='pp'>#define ID_CONTEXTMENU_HELP             40006</span>
 <span class='pp'>#define ID_CONTEXTMENU_CLOSE            40007</span>
@@ -36,10 +87,11 @@
 <span class='pp'>#ifndef APSTUDIO_READONLY_SYMBOLS</span>
 <span class='pp'>#define _APS_NEXT_RESOURCE_VALUE        105</span>
 <span class='pp'>#define _APS_NEXT_COMMAND_VALUE         40012</span>
-<span class='pp'>#define _APS_NEXT_CONTROL_VALUE         1005</span>
+<span class='pp'>#define _APS_NEXT_CONTROL_VALUE         1053</span>
 <span class='pp'>#define _APS_NEXT_SYMED_VALUE           101</span>
 <span class='pp'>#endif</span>
 <span class='pp'>#endif</span>
 </pre>
+<p class="source-nav"><a href='render_h.htm'>&larr; render.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='Resource_rc.htm'>Resource.rc &rarr;</a></p>
 </body>
 </html>

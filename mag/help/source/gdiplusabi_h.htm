@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>gdiplusabi.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; gdiplusabi.h</p>
+<h1>gdiplusabi.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>112 lines</strong> &middot; 3159 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='framework_h.htm'>&larr; framework.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_c.htm'>graphics.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &lt;windows.h&gt;</span>
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='pp'>#error gdiplusabi.h is the C-only GDI+ flat ABI used by MAG</span>
+<span class='pp'>#endif</span>
+
+<span class='cm'>/*
+ * The Windows SDK's gdiplus.h family wraps these exports in C++ classes and
+ * namespaces.  MAG uses the same Gdiplus.dll flat ABI directly so the entire
+ * renderer remains C.  Keep this surface limited to functions MAG consumes.
+ */</span>
+
+<span class='kw'>typedef</span> <span class='tp'>INT</span> <span class='tp'>MAGGDIPSTATUS</span>;
+<span class='kw'>typedef</span> <span class='tp'>DWORD</span> <span class='tp'>MAGGDIPARGB</span>;
+<span class='kw'>typedef</span> <span class='tp'>INT</span> <span class='tp'>MAGGDIPPIXELFORMAT</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpBitmap</span> <span class='tp'>GpBitmap</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpBrush</span> <span class='tp'>GpBrush</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpGraphics</span> <span class='tp'>GpGraphics</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpImage</span> <span class='tp'>GpImage</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpImageAttributes</span> <span class='tp'>GpImageAttributes</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>GpSolidFill</span> <span class='tp'>GpSolidFill</span>;
+
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span> (<span class='kw'>CALLBACK</span> *MAGGDIPDRAWIMAGEABORT)(VOID* data);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGGDIPLUSSTARTUPINPUT</span>
+{
+  <span class='tp'>UINT32</span> <span class='tp'>GdiplusVersion</span>;
+  <span class='fn'>VOID</span> (<span class='kw'>WINAPI</span> *DebugEventCallback)(<span class='tp'>INT</span> level, <span class='tp'>CHAR</span>* message);
+  <span class='tp'>BOOL</span> SuppressBackgroundThread;
+  <span class='tp'>BOOL</span> SuppressExternalCodecs;
+} <span class='tp'>MAGGDIPLUSSTARTUPINPUT</span>;
+
+<span class='kw'>enum</span>
+{
+  MAG_GDIP_STATUS_OK = <span class='num'>0</span>,
+  MAG_GDIP_UNIT_PIXEL = <span class='num'>2</span>,
+  MAG_GDIP_COMPOSITING_SOURCE_OVER = <span class='num'>0</span>,
+  MAG_GDIP_COMPOSITING_SOURCE_COPY = <span class='num'>1</span>,
+  MAG_GDIP_COMPOSITING_QUALITY_HIGH_SPEED = <span class='num'>1</span>,
+  MAG_GDIP_INTERPOLATION_NEAREST_NEIGHBOR = <span class='num'>5</span>,
+  MAG_GDIP_PIXEL_OFFSET_HIGH_SPEED = <span class='num'>1</span>,
+  MAG_GDIP_FLUSH_SYNC = <span class='num'>1</span>,
+  MAG_GDIP_PIXEL_FORMAT_GDI = <span class='num'>0x00020000</span>,
+  MAG_GDIP_PIXEL_FORMAT_32BPP_RGB =
+    <span class='num'>9</span> | (<span class='num'>32</span> &lt;&lt; <span class='num'>8</span>) | MAG_GDIP_PIXEL_FORMAT_GDI,
+};
+
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdiplusStartup</span>(
+  ULONG_PTR* token,
+  <span class='kw'>const</span> <span class='tp'>MAGGDIPLUSSTARTUPINPUT</span>* input,
+  VOID* output);
+VOID <span class='kw'>WINAPI</span> <span class='fn'>GdiplusShutdown</span>(ULONG_PTR token);
+
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipCreateBitmapFromScan0</span>(
+  <span class='tp'>INT</span> width,
+  <span class='tp'>INT</span> height,
+  <span class='tp'>INT</span> stride,
+  <span class='tp'>MAGGDIPPIXELFORMAT</span> <span class='tp'>format</span>,
+  <span class='tp'>BYTE</span>* scan0,
+  <span class='tp'>GpBitmap</span>** bitmap);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipDisposeImage</span>(<span class='tp'>GpImage</span>* image);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipGetImageGraphicsContext</span>(
+  <span class='tp'>GpImage</span>* image,
+  <span class='tp'>GpGraphics</span>** graphics);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipDeleteGraphics</span>(<span class='tp'>GpGraphics</span>* graphics);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetCompositingMode</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>INT</span> compositingMode);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetCompositingQuality</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>INT</span> compositingQuality);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetInterpolationMode</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>INT</span> interpolationMode);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetPixelOffsetMode</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>INT</span> pixelOffsetMode);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetPageUnit</span>(<span class='tp'>GpGraphics</span>* graphics, <span class='tp'>INT</span> unit);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipDrawImageRectRectI</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>GpImage</span>* image,
+  <span class='tp'>INT</span> destinationX,
+  <span class='tp'>INT</span> destinationY,
+  <span class='tp'>INT</span> destinationWidth,
+  <span class='tp'>INT</span> destinationHeight,
+  <span class='tp'>INT</span> sourceX,
+  <span class='tp'>INT</span> sourceY,
+  <span class='tp'>INT</span> sourceWidth,
+  <span class='tp'>INT</span> sourceHeight,
+  <span class='tp'>INT</span> sourceUnit,
+  <span class='kw'>const</span> <span class='tp'>GpImageAttributes</span>* imageAttributes,
+  MAGGDIPDRAWIMAGEABORT callback,
+  VOID* callbackData);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipCreateSolidFill</span>(
+  <span class='tp'>MAGGDIPARGB</span> color,
+  <span class='tp'>GpSolidFill</span>** brush);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipSetSolidFillColor</span>(
+  <span class='tp'>GpSolidFill</span>* brush,
+  <span class='tp'>MAGGDIPARGB</span> color);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipDeleteBrush</span>(<span class='tp'>GpBrush</span>* brush);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipFillRectangleI</span>(
+  <span class='tp'>GpGraphics</span>* graphics,
+  <span class='tp'>GpBrush</span>* brush,
+  <span class='tp'>INT</span> <span class='tp'>x</span>,
+  <span class='tp'>INT</span> y,
+  <span class='tp'>INT</span> width,
+  <span class='tp'>INT</span> height);
+<span class='tp'>MAGGDIPSTATUS</span> <span class='kw'>WINAPI</span> <span class='fn'>GdipFlush</span>(<span class='tp'>GpGraphics</span>* graphics, <span class='tp'>INT</span> intention);
+</pre>
+<p class="source-nav"><a href='framework_h.htm'>&larr; framework.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_c.htm'>graphics.c &rarr;</a></p>
+</body>
+</html>

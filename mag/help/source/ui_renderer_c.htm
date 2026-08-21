@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>ui_renderer.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; ui_renderer.c</p>
+<h1>ui_renderer.c</h1>
+<p>Backend-neutral UI draw list, Direct2D UI, text selection, and overlay resources.</p>
+<div class="source-meta"><strong>736 lines</strong> &middot; 21342 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='targetver_h.htm'>&larr; targetver.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='ui_renderer_h.htm'>ui_renderer.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#define COBJMACROS</span>
+<span class='pp'>#define D2D_USE_C_DEFINITIONS</span>
+
+<span class='pp'>#include &quot;ui_renderer.h&quot;</span>
+<span class='pp'>#include &quot;d2dwriteabi.h&quot;</span>
+
+<span class='pp'>#include &lt;windowsx.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;d2d1&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;dwrite&quot;)</span>
+
+<span class='pp'>#define MAG_RECT_WIDTH(Rect) ((Rect).right - (Rect).left)</span>
+<span class='pp'>#define MAG_RECT_HEIGHT(Rect) ((Rect).bottom - (Rect).top)</span>
+<span class='pp'>#define MAG_CLAMP(Value, Low, High) (max(min((Value), (High)), (Low)))</span>
+
+<span class='pp'>#define MAG_ATLAS_FIRST_CHAR 32</span>
+<span class='pp'>#define MAG_ATLAS_GLYPH_COUNT 96</span>
+<span class='pp'>#define MAG_ATLAS_COLUMNS 16</span>
+<span class='pp'>#define MAG_ATLAS_CELL_WIDTH 24</span>
+<span class='pp'>#define MAG_ATLAS_CELL_HEIGHT 24</span>
+<span class='pp'>#define MAG_ATLAS_WIDTH (MAG_ATLAS_COLUMNS * MAG_ATLAS_CELL_WIDTH)</span>
+<span class='pp'>#define MAG_ATLAS_ROWS ((MAG_ATLAS_GLYPH_COUNT + MAG_ATLAS_COLUMNS - 1) / MAG_ATLAS_COLUMNS)</span>
+<span class='pp'>#define MAG_ATLAS_HEIGHT (MAG_ATLAS_ROWS * MAG_ATLAS_CELL_HEIGHT)</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_ID2D1Factory =
+  { <span class='num'>0x06152247</span>, <span class='num'>0x6f50</span>, <span class='num'>0x465a</span>, { <span class='num'>0x92</span>, <span class='num'>0x45</span>, <span class='num'>0x11</span>, <span class='num'>0x8b</span>, <span class='num'>0xfd</span>, <span class='num'>0x3b</span>, <span class='num'>0x60</span>, <span class='num'>0x07</span> } };
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IDWriteFactory =
+  { <span class='num'>0xb859ee5a</span>, <span class='num'>0xd838</span>, <span class='num'>0x4b5b</span>, { <span class='num'>0xa2</span>, <span class='num'>0xe8</span>, <span class='num'>0x1a</span>, <span class='num'>0xdc</span>, <span class='num'>0x7d</span>, <span class='num'>0x93</span>, <span class='num'>0xdb</span>, <span class='num'>0x48</span> } };
+
+<span class='kw'>struct</span> <span class='tp'>MAGUIRENDERER</span>
+{
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi;
+  <span class='tp'>TEXTRENDERER</span> textRenderer;
+  <span class='tp'>HDC</span>           hDC;
+  <span class='tp'>HBITMAP</span>       hBitmap;
+  <span class='tp'>HBITMAP</span>       hBitmapOld;
+  <span class='tp'>BYTE</span>*         <span class='tp'>pixels</span>;
+  <span class='tp'>UINT</span>          width;
+  <span class='tp'>UINT</span>          height;
+  <span class='tp'>UINT</span>          capacityWidth;
+  <span class='tp'>UINT</span>          capacityHeight;
+  <span class='tp'>UINT64</span>        surfaceGeneration;
+  HFONT         hFont;
+  <span class='tp'>MAGCPUCOMPOSITOR</span> baseCompositor;
+
+  <span class='tp'>ID2D1Factory</span>*          d2dFactory;
+  <span class='tp'>ID2D1DCRenderTarget</span>*   d2dTarget;
+  <span class='tp'>ID2D1SolidColorBrush</span>*  d2dBrush;
+  <span class='tp'>IDWriteFactory</span>*        dwriteFactory;
+  <span class='tp'>IDWriteTextFormat</span>*     textFormat;
+
+  <span class='tp'>BYTE</span>*         atlasAlpha;
+  <span class='tp'>MAGGLYPHINFO</span>  glyphs[<span class='mc'>MAG_ATLAS_GLYPH_COUNT</span>];
+  <span class='tp'>MAGGLYPHATLAS</span> atlas;
+};
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magUiReleaseUnknown</span>(IUnknown** object)
+{
+    <span class='kw'>if</span> (*object)
+    {
+      (*object)-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(*object);
+      *object = NULL;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BYTE</span> <span class='fn'>magUiColorByte</span>(<span class='tp'>FLOAT</span> value)
+{
+    value = <span class='mc'>MAG_CLAMP</span>(value, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>);
+    <span class='kw'>return</span> (<span class='tp'>BYTE</span>)(value * <span class='num'>255.0f</span> + <span class='num'>0.5f</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magUiCreateSurface</span>(<span class='tp'>MAGUIRENDERER</span>* renderer, <span class='tp'>SIZE</span> clientSize)
+{
+    BITMAPINFO bmi = { <span class='num'>0</span> };
+    <span class='kw'>void</span>* <span class='tp'>pixels</span> = NULL;
+    <span class='tp'>SIZE</span> reservoirSize;
+    <span class='tp'>HBITMAP</span> newBitmap;
+    <span class='tp'>HBITMAP</span> replacedBitmap;
+
+    <span class='kw'>if</span> (clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!renderer-&gt;hDC)
+    {
+      renderer-&gt;hDC = <span class='fn'>CreateCompatibleDC</span>(NULL);
+      <span class='kw'>if</span> (!renderer-&gt;hDC)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    renderer-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    renderer-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>if</span> (renderer-&gt;hBitmap &amp;&amp;
+        renderer-&gt;width &lt;= renderer-&gt;capacityWidth &amp;&amp;
+        renderer-&gt;height &lt;= renderer-&gt;capacityHeight)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(NULL, clientSize);
+    reservoirSize.cx = <span class='fn'>max</span>(reservoirSize.cx, (<span class='tp'>LONG</span>)renderer-&gt;capacityWidth);
+    reservoirSize.cy = <span class='fn'>max</span>(reservoirSize.cy, (<span class='tp'>LONG</span>)renderer-&gt;capacityHeight);
+
+    bmi.bmiHeader.biSize = <span class='kw'>sizeof</span>(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = reservoirSize.cx;
+    bmi.bmiHeader.biHeight = -reservoirSize.cy;
+    bmi.bmiHeader.biPlanes = <span class='num'>1</span>;
+    bmi.bmiHeader.biBitCount = <span class='num'>32</span>;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    newBitmap = <span class='fn'>CreateDIBSection</span>(
+      renderer-&gt;hDC,
+      &amp;bmi,
+      DIB_RGB_COLORS,
+      &amp;<span class='tp'>pixels</span>,
+      NULL,
+      <span class='num'>0</span>);
+    <span class='kw'>if</span> (!newBitmap || !<span class='tp'>pixels</span>)
+    {
+      <span class='kw'>if</span> (newBitmap)
+      {
+        <span class='fn'>DeleteBitmap</span>(newBitmap);
+      }
+      <span class='kw'>return</span> FALSE;
+    }
+
+    replacedBitmap = <span class='fn'>SelectBitmap</span>(renderer-&gt;hDC, newBitmap);
+    <span class='kw'>if</span> (!replacedBitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(newBitmap);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!renderer-&gt;hBitmapOld)
+    {
+      renderer-&gt;hBitmapOld = replacedBitmap;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (renderer-&gt;hBitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(renderer-&gt;hBitmap);
+    }
+
+    renderer-&gt;hBitmap = newBitmap;
+    renderer-&gt;<span class='tp'>pixels</span> = (<span class='tp'>BYTE</span>*)<span class='tp'>pixels</span>;
+    renderer-&gt;capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    renderer-&gt;capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    ++renderer-&gt;surfaceGeneration;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magUiCreateD2DResources</span>(<span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='tp'>D2D1_RENDER_TARGET_PROPERTIES</span> properties;
+    <span class='tp'>D2D1_COLOR_F</span> color = { <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span> };
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='fn'>ZeroMemory</span>(&amp;properties, <span class='kw'>sizeof</span>(properties));
+    properties.<span class='tp'>type</span> = <span class='mc'>D2D1_RENDER_TARGET_TYPE_SOFTWARE</span>;
+    properties.pixelFormat.<span class='tp'>format</span> = <span class='mc'>MAG_DXGI_FORMAT_B8G8R8A8_UNORM</span>;
+    properties.pixelFormat.alphaMode = <span class='mc'>D2D1_ALPHA_MODE_IGNORE</span>;
+    properties.usage = <span class='mc'>D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE</span>;
+
+    hr = <span class='fn'>D2D1CreateFactory</span>(
+      <span class='mc'>D2D1_FACTORY_TYPE_SINGLE_THREADED</span>,
+      &amp;IID_MAG_ID2D1Factory,
+      NULL,
+      (<span class='kw'>void</span>**)&amp;renderer-&gt;d2dFactory);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = renderer-&gt;d2dFactory-&gt;lpVtbl-&gt;<span class='fn'>CreateDCRenderTarget</span>(
+        renderer-&gt;d2dFactory,
+        &amp;properties,
+        &amp;renderer-&gt;d2dTarget);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>CreateSolidColorBrush</span>(
+        renderer-&gt;d2dTarget,
+        &amp;color,
+        NULL,
+        &amp;renderer-&gt;d2dBrush);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magUiCreateDirectWriteResources</span>(<span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='tp'>HRESULT</span> hr = <span class='fn'>DWriteCreateFactory</span>(
+      <span class='mc'>DWRITE_FACTORY_TYPE_SHARED</span>,
+      &amp;IID_MAG_IDWriteFactory,
+      (IUnknown**)&amp;renderer-&gt;dwriteFactory);
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = renderer-&gt;dwriteFactory-&gt;lpVtbl-&gt;<span class='fn'>CreateTextFormat</span>(
+        renderer-&gt;dwriteFactory,
+        L<span class='str'>&quot;Segoe UI&quot;</span>,
+        NULL,
+        <span class='mc'>DWRITE_FONT_WEIGHT_NORMAL</span>,
+        <span class='mc'>DWRITE_FONT_STYLE_NORMAL</span>,
+        <span class='mc'>DWRITE_FONT_STRETCH_NORMAL</span>,
+        <span class='num'>12.0f</span>,
+        L<span class='str'>&quot;en-us&quot;</span>,
+        &amp;renderer-&gt;textFormat);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      renderer-&gt;textFormat-&gt;lpVtbl-&gt;<span class='fn'>SetWordWrapping</span>(
+        renderer-&gt;textFormat,
+        <span class='mc'>DWRITE_WORD_WRAPPING_NO_WRAP</span>);
+      renderer-&gt;textFormat-&gt;lpVtbl-&gt;<span class='fn'>SetTextAlignment</span>(
+        renderer-&gt;textFormat,
+        <span class='mc'>DWRITE_TEXT_ALIGNMENT_LEADING</span>);
+      renderer-&gt;textFormat-&gt;lpVtbl-&gt;<span class='fn'>SetParagraphAlignment</span>(
+        renderer-&gt;textFormat,
+        <span class='mc'>DWRITE_PARAGRAPH_ALIGNMENT_CENTER</span>);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magUiCreateGlyphAtlas</span>(<span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='tp'>HDC</span> atlasDC = NULL;
+    <span class='tp'>HBITMAP</span> atlasBitmap = NULL;
+    <span class='tp'>HBITMAP</span> atlasBitmapOld = NULL;
+    BITMAPINFO bmi = { <span class='num'>0</span> };
+    <span class='tp'>DWORD</span>* atlasPixels = NULL;
+    <span class='tp'>RECT</span> atlasRect = { <span class='num'>0</span>, <span class='num'>0</span>, <span class='mc'>MAG_ATLAS_WIDTH</span>, <span class='mc'>MAG_ATLAS_HEIGHT</span> };
+    <span class='tp'>D2D1_COLOR_F</span> black = { <span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span> };
+    <span class='tp'>D2D1_COLOR_F</span> white = { <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span> };
+    <span class='tp'>UINT</span> i;
+    <span class='tp'>BOOL</span> success = FALSE;
+
+    renderer-&gt;atlasAlpha = (<span class='tp'>BYTE</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      <span class='mc'>MAG_ATLAS_WIDTH</span> * <span class='mc'>MAG_ATLAS_HEIGHT</span>);
+    atlasDC = <span class='fn'>CreateCompatibleDC</span>(NULL);
+    <span class='kw'>if</span> (!renderer-&gt;atlasAlpha || !atlasDC)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    bmi.bmiHeader.biSize = <span class='kw'>sizeof</span>(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = <span class='mc'>MAG_ATLAS_WIDTH</span>;
+    bmi.bmiHeader.biHeight = -<span class='mc'>MAG_ATLAS_HEIGHT</span>;
+    bmi.bmiHeader.biPlanes = <span class='num'>1</span>;
+    bmi.bmiHeader.biBitCount = <span class='num'>32</span>;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    atlasBitmap = <span class='fn'>CreateDIBSection</span>(
+      atlasDC,
+      &amp;bmi,
+      DIB_RGB_COLORS,
+      (<span class='kw'>void</span>**)&amp;atlasPixels,
+      NULL,
+      <span class='num'>0</span>);
+    <span class='kw'>if</span> (!atlasBitmap || !atlasPixels)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    atlasBitmapOld = <span class='fn'>SelectBitmap</span>(atlasDC, atlasBitmap);
+    <span class='kw'>if</span> (!atlasBitmapOld || !renderer-&gt;d2dTarget || !renderer-&gt;d2dBrush ||
+        !renderer-&gt;dwriteFactory || !renderer-&gt;textFormat ||
+        <span class='fn'>FAILED</span>(renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>BindDC</span>(
+          renderer-&gt;d2dTarget,
+          atlasDC,
+          &amp;atlasRect)))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>SetTextAntialiasMode</span>(
+      renderer-&gt;d2dTarget,
+      <span class='mc'>D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE</span>);
+    renderer-&gt;d2dBrush-&gt;lpVtbl-&gt;<span class='fn'>SetColor</span>(renderer-&gt;d2dBrush, &amp;white);
+    renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>BeginDraw</span>(renderer-&gt;d2dTarget);
+    renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>Clear</span>(renderer-&gt;d2dTarget, &amp;black);
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_ATLAS_GLYPH_COUNT</span>; ++i)
+    {
+      <span class='kw'>const</span> <span class='tp'>WCHAR</span> character = (<span class='tp'>WCHAR</span>)(<span class='mc'>MAG_ATLAS_FIRST_CHAR</span> + i);
+      <span class='kw'>const</span> <span class='tp'>LONG</span> column = i % <span class='mc'>MAG_ATLAS_COLUMNS</span>;
+      <span class='kw'>const</span> <span class='tp'>LONG</span> row = i / <span class='mc'>MAG_ATLAS_COLUMNS</span>;
+      <span class='tp'>D2D1_RECT_F</span> cell =
+      {
+        (<span class='tp'>FLOAT</span>)(column * <span class='mc'>MAG_ATLAS_CELL_WIDTH</span>),
+        (<span class='tp'>FLOAT</span>)(row * <span class='mc'>MAG_ATLAS_CELL_HEIGHT</span>),
+        (<span class='tp'>FLOAT</span>)((column + <span class='num'>1</span>) * <span class='mc'>MAG_ATLAS_CELL_WIDTH</span>),
+        (<span class='tp'>FLOAT</span>)((row + <span class='num'>1</span>) * <span class='mc'>MAG_ATLAS_CELL_HEIGHT</span>),
+      };
+      <span class='tp'>IDWriteTextLayout</span>* layout = NULL;
+      <span class='tp'>DWRITE_TEXT_METRICS</span> metrics = { <span class='num'>0</span> };
+
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(renderer-&gt;dwriteFactory-&gt;lpVtbl-&gt;<span class='fn'>CreateTextLayout</span>(
+            renderer-&gt;dwriteFactory,
+            &amp;character,
+            <span class='num'>1</span>,
+            renderer-&gt;textFormat,
+            (<span class='tp'>FLOAT</span>)<span class='mc'>MAG_ATLAS_CELL_WIDTH</span>,
+            (<span class='tp'>FLOAT</span>)<span class='mc'>MAG_ATLAS_CELL_HEIGHT</span>,
+            &amp;layout)))
+      {
+        layout-&gt;lpVtbl-&gt;<span class='fn'>GetMetrics</span>(layout, &amp;metrics);
+      }
+      <span class='fn'>SetRect</span>(
+        &amp;renderer-&gt;glyphs[i].<span class='tp'>rect</span>,
+        column * <span class='mc'>MAG_ATLAS_CELL_WIDTH</span>,
+        row * <span class='mc'>MAG_ATLAS_CELL_HEIGHT</span>,
+        (column + <span class='num'>1</span>) * <span class='mc'>MAG_ATLAS_CELL_WIDTH</span>,
+        (row + <span class='num'>1</span>) * <span class='mc'>MAG_ATLAS_CELL_HEIGHT</span>);
+      renderer-&gt;glyphs[i].advance = <span class='fn'>max</span>(
+        <span class='num'>1</span>,
+        (<span class='tp'>LONG</span>)(metrics.widthIncludingTrailingWhitespace + <span class='num'>0.999f</span>));
+      renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>DrawText</span>(
+        renderer-&gt;d2dTarget,
+        &amp;character,
+        <span class='num'>1</span>,
+        renderer-&gt;textFormat,
+        &amp;cell,
+        renderer-&gt;d2dBrush,
+        <span class='mc'>D2D1_DRAW_TEXT_OPTIONS_CLIP</span>,
+        <span class='mc'>DWRITE_MEASURING_MODE_NATURAL</span>);
+      <span class='kw'>if</span> (layout)
+      {
+        layout-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(layout);
+      }
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>EndDraw</span>(
+          renderer-&gt;d2dTarget,
+          NULL,
+          NULL)))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+    <span class='fn'>GdiFlush</span>();
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_ATLAS_WIDTH</span> * <span class='mc'>MAG_ATLAS_HEIGHT</span>; ++i)
+    {
+      <span class='kw'>const</span> <span class='tp'>DWORD</span> pixel = atlasPixels[i];
+      <span class='kw'>const</span> <span class='tp'>BYTE</span> blue = (<span class='tp'>BYTE</span>)(pixel &amp; <span class='num'>0xFF</span>);
+      <span class='kw'>const</span> <span class='tp'>BYTE</span> green = (<span class='tp'>BYTE</span>)((pixel &gt;&gt; <span class='num'>8</span>) &amp; <span class='num'>0xFF</span>);
+      <span class='kw'>const</span> <span class='tp'>BYTE</span> red = (<span class='tp'>BYTE</span>)((pixel &gt;&gt; <span class='num'>16</span>) &amp; <span class='num'>0xFF</span>);
+      renderer-&gt;atlasAlpha[i] = <span class='fn'>max</span>(red, <span class='fn'>max</span>(green, blue));
+    }
+    success = TRUE;
+
+cleanup:
+    <span class='kw'>if</span> (atlasDC &amp;&amp; atlasBitmapOld)
+    {
+      <span class='fn'>SelectBitmap</span>(atlasDC, atlasBitmapOld);
+    }
+    <span class='kw'>if</span> (atlasBitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(atlasBitmap);
+    }
+    <span class='kw'>if</span> (atlasDC)
+    {
+      <span class='fn'>DeleteDC</span>(atlasDC);
+    }
+    <span class='kw'>return</span> success;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magUiDrawAtlasText</span>(<span class='tp'>MAGUIRENDERER</span>* renderer, <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='kw'>const</span> <span class='tp'>UINT</span> colorAlpha = <span class='fn'>magUiColorByte</span>(command-&gt;color.a);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> red = <span class='fn'>magUiColorByte</span>(command-&gt;color.<span class='tp'>r</span>);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> green = <span class='fn'>magUiColorByte</span>(command-&gt;color.g);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> blue = <span class='fn'>magUiColorByte</span>(command-&gt;color.b);
+    <span class='tp'>LONG</span> destinationX = command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>;
+    <span class='tp'>LONG</span> destinationY = command-&gt;<span class='tp'>rect</span>.top;
+    <span class='tp'>UINT</span> characterIndex;
+
+    <span class='kw'>for</span> (characterIndex = <span class='num'>0</span>;
+         command-&gt;text[characterIndex] &amp;&amp; destinationX &lt; command-&gt;<span class='tp'>rect</span>.right;
+         ++characterIndex)
+    {
+      <span class='tp'>WCHAR</span> character = command-&gt;text[characterIndex];
+      <span class='tp'>UINT</span> glyphIndex;
+      <span class='kw'>const</span> <span class='tp'>MAGGLYPHINFO</span>* glyph;
+      <span class='tp'>LONG</span> y;
+
+      <span class='kw'>if</span> (character &lt; <span class='mc'>MAG_ATLAS_FIRST_CHAR</span> ||
+          character &gt;= <span class='mc'>MAG_ATLAS_FIRST_CHAR</span> + <span class='mc'>MAG_ATLAS_GLYPH_COUNT</span>)
+      {
+        character = L<span class='str'>'?'</span>;
+      }
+      glyphIndex = character - <span class='mc'>MAG_ATLAS_FIRST_CHAR</span>;
+      glyph = &amp;renderer-&gt;glyphs[glyphIndex];
+
+      <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; <span class='mc'>MAG_RECT_HEIGHT</span>(glyph-&gt;<span class='tp'>rect</span>); ++y)
+      {
+        <span class='kw'>const</span> <span class='tp'>LONG</span> targetY = destinationY + y;
+        <span class='tp'>LONG</span> <span class='tp'>x</span>;
+
+        <span class='kw'>if</span> (targetY &lt; command-&gt;<span class='tp'>rect</span>.top || targetY &gt;= command-&gt;<span class='tp'>rect</span>.bottom ||
+            targetY &lt; <span class='num'>0</span> || targetY &gt;= (<span class='tp'>LONG</span>)renderer-&gt;height)
+        {
+          <span class='kw'>continue</span>;
+        }
+
+        <span class='kw'>for</span> (<span class='tp'>x</span> = <span class='num'>0</span>; <span class='tp'>x</span> &lt; <span class='mc'>MAG_RECT_WIDTH</span>(glyph-&gt;<span class='tp'>rect</span>); ++<span class='tp'>x</span>)
+        {
+          <span class='kw'>const</span> <span class='tp'>LONG</span> targetX = destinationX + <span class='tp'>x</span>;
+          <span class='kw'>const</span> <span class='tp'>BYTE</span> glyphAlpha = renderer-&gt;atlasAlpha[
+            (glyph-&gt;<span class='tp'>rect</span>.top + y) * <span class='mc'>MAG_ATLAS_WIDTH</span> + glyph-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> + <span class='tp'>x</span>];
+          <span class='kw'>const</span> <span class='tp'>UINT</span> <span class='tp'>alpha</span> = (glyphAlpha * colorAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>;
+          <span class='kw'>const</span> <span class='tp'>UINT</span> inverseAlpha = <span class='num'>255U</span> - <span class='tp'>alpha</span>;
+          <span class='tp'>BYTE</span>* pixel;
+
+          <span class='kw'>if</span> (!<span class='tp'>alpha</span> || targetX &lt; command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> || targetX &gt;= command-&gt;<span class='tp'>rect</span>.right ||
+              targetX &lt; <span class='num'>0</span> || targetX &gt;= (<span class='tp'>LONG</span>)renderer-&gt;width)
+          {
+            <span class='kw'>continue</span>;
+          }
+
+          pixel = renderer-&gt;<span class='tp'>pixels</span> +
+            (<span class='tp'>SIZE_T</span>)targetY * renderer-&gt;capacityWidth * <span class='num'>4U</span> +
+            (<span class='tp'>SIZE_T</span>)targetX * <span class='num'>4U</span>;
+          pixel[<span class='num'>0</span>] = (<span class='tp'>BYTE</span>)((blue * <span class='tp'>alpha</span> + pixel[<span class='num'>0</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+          pixel[<span class='num'>1</span>] = (<span class='tp'>BYTE</span>)((green * <span class='tp'>alpha</span> + pixel[<span class='num'>1</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+          pixel[<span class='num'>2</span>] = (<span class='tp'>BYTE</span>)((red * <span class='tp'>alpha</span> + pixel[<span class='num'>2</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+          pixel[<span class='num'>3</span>] = <span class='num'>255</span>;
+        }
+      }
+      destinationX += glyph-&gt;advance;
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magUiDrawGdiText</span>(<span class='tp'>MAGUIRENDERER</span>* renderer, <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='tp'>RECT</span> <span class='tp'>rect</span> = command-&gt;<span class='tp'>rect</span>;
+
+    <span class='fn'>SelectFont</span>(renderer-&gt;hDC, renderer-&gt;hFont);
+    <span class='fn'>SetBkMode</span>(renderer-&gt;hDC, TRANSPARENT);
+    <span class='fn'>SetTextColor</span>(
+      renderer-&gt;hDC,
+      <span class='fn'>RGB</span>(
+        <span class='fn'>magUiColorByte</span>(command-&gt;color.<span class='tp'>r</span>),
+        <span class='fn'>magUiColorByte</span>(command-&gt;color.g),
+        <span class='fn'>magUiColorByte</span>(command-&gt;color.b)));
+    <span class='fn'>DrawText</span>(
+      renderer-&gt;hDC,
+      command-&gt;text,
+      -<span class='num'>1</span>,
+      &amp;<span class='tp'>rect</span>,
+      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magUiSetD2DBrushColor</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='tp'>MAGCOLORF</span> source)
+{
+    <span class='tp'>D2D1_COLOR_F</span> color = { source.<span class='tp'>r</span>, source.g, source.b, source.a };
+    renderer-&gt;d2dBrush-&gt;lpVtbl-&gt;<span class='fn'>SetColor</span>(renderer-&gt;d2dBrush, &amp;color);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererCreate</span>(
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='tp'>MAGUIRENDERER</span>** rendererOut,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='tp'>MAGUIRENDERER</span>* renderer;
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    }
+    <span class='kw'>if</span> (!rendererOut || uiApi &gt;= UI_GRAPHICS_API_COUNT || textRenderer &gt;= TEXT_RENDERER_COUNT)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *rendererOut = NULL;
+
+    renderer = (<span class='tp'>MAGUIRENDERER</span>*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*renderer));
+    <span class='kw'>if</span> (!renderer)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    renderer-&gt;uiApi = uiApi;
+    renderer-&gt;textRenderer = textRenderer;
+    renderer-&gt;hFont = <span class='fn'>CreateFont</span>(
+      -<span class='num'>16</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      FW_NORMAL,
+      FALSE,
+      FALSE,
+      FALSE,
+      DEFAULT_CHARSET,
+      OUT_DEFAULT_PRECIS,
+      CLIP_DEFAULT_PRECIS,
+      ANTIALIASED_QUALITY,
+      DEFAULT_PITCH | FF_DONTCARE,
+      <span class='fn'>TEXT</span>(<span class='str'>&quot;Segoe UI&quot;</span>));
+
+    <span class='kw'>if</span> (!renderer-&gt;hFont || !<span class='fn'>magUiCreateSurface</span>(renderer, clientSize) ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(
+          &amp;renderer-&gt;baseCompositor,
+          renderer-&gt;capacityWidth,
+          renderer-&gt;capacityHeight) ||
+        ((UI_GRAPHICS_API_DIRECT2D == uiApi ||
+          TEXT_RENDERER_DIRECTWRITE == textRenderer ||
+          TEXT_RENDERER_GPU_GLYPH_ATLAS == textRenderer) &amp;&amp;
+          !<span class='fn'>magUiCreateD2DResources</span>(renderer)) ||
+        ((TEXT_RENDERER_DIRECTWRITE == textRenderer ||
+          TEXT_RENDERER_GPU_GLYPH_ATLAS == textRenderer) &amp;&amp;
+          !<span class='fn'>magUiCreateDirectWriteResources</span>(renderer)) ||
+        (TEXT_RENDERER_GPU_GLYPH_ATLAS == textRenderer &amp;&amp; !<span class='fn'>magUiCreateGlyphAtlas</span>(renderer)))
+    {
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected UI or text renderer could not initialize.&quot;</span>), reasonCount);
+      }
+      <span class='fn'>magUiRendererDestroy</span>(renderer);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (TEXT_RENDERER_GPU_GLYPH_ATLAS == textRenderer)
+    {
+      renderer-&gt;atlas.<span class='tp'>alpha</span> = renderer-&gt;atlasAlpha;
+      renderer-&gt;atlas.width = <span class='mc'>MAG_ATLAS_WIDTH</span>;
+      renderer-&gt;atlas.height = <span class='mc'>MAG_ATLAS_HEIGHT</span>;
+      renderer-&gt;atlas.stride = <span class='mc'>MAG_ATLAS_WIDTH</span>;
+      renderer-&gt;atlas.firstCharacter = <span class='mc'>MAG_ATLAS_FIRST_CHAR</span>;
+      renderer-&gt;atlas.glyphCount = <span class='mc'>MAG_ATLAS_GLYPH_COUNT</span>;
+      renderer-&gt;atlas.glyphs = renderer-&gt;glyphs;
+    }
+
+    *rendererOut = renderer;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magUiRendererDestroy</span>(<span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='kw'>if</span> (!renderer)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>magUiReleaseUnknown</span>((IUnknown**)&amp;renderer-&gt;textFormat);
+    <span class='fn'>magUiReleaseUnknown</span>((IUnknown**)&amp;renderer-&gt;dwriteFactory);
+    <span class='fn'>magUiReleaseUnknown</span>((IUnknown**)&amp;renderer-&gt;d2dBrush);
+    <span class='fn'>magUiReleaseUnknown</span>((IUnknown**)&amp;renderer-&gt;d2dTarget);
+    <span class='fn'>magUiReleaseUnknown</span>((IUnknown**)&amp;renderer-&gt;d2dFactory);
+    <span class='kw'>if</span> (renderer-&gt;hDC &amp;&amp; renderer-&gt;hBitmapOld)
+    {
+      <span class='fn'>SelectBitmap</span>(renderer-&gt;hDC, renderer-&gt;hBitmapOld);
+    }
+    <span class='kw'>if</span> (renderer-&gt;hBitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(renderer-&gt;hBitmap);
+    }
+    <span class='kw'>if</span> (renderer-&gt;hDC)
+    {
+      <span class='fn'>DeleteDC</span>(renderer-&gt;hDC);
+    }
+    <span class='kw'>if</span> (renderer-&gt;hFont)
+    {
+      <span class='fn'>DeleteFont</span>(renderer-&gt;hFont);
+    }
+    <span class='kw'>if</span> (renderer-&gt;atlasAlpha)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, renderer-&gt;atlasAlpha);
+    }
+    <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;renderer-&gt;baseCompositor);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, renderer);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererResize</span>(<span class='tp'>MAGUIRENDERER</span>* renderer, <span class='tp'>SIZE</span> clientSize)
+{
+    <span class='kw'>return</span> renderer &amp;&amp; <span class='fn'>magUiCreateSurface</span>(renderer, clientSize);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magUiRendererComposeInternal</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output,
+  <span class='tp'>BOOL</span> includeText)
+{
+    <span class='tp'>MAGPIXELBUFFER</span> base;
+    <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* cpuUi = UI_GRAPHICS_API_NATIVE == renderer-&gt;uiApi ? ui : NULL;
+    <span class='tp'>RECT</span> targetRect = { <span class='num'>0</span>, <span class='num'>0</span>, (<span class='tp'>LONG</span>)renderer-&gt;width, (<span class='tp'>LONG</span>)renderer-&gt;height };
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!renderer || !frame || !output || frame-&gt;width != renderer-&gt;width || frame-&gt;height != renderer-&gt;height ||
+        !<span class='fn'>magGraphicsComposeFrame</span>(&amp;renderer-&gt;baseCompositor, frame, cpuUi, &amp;base))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; base.height; ++i)
+    {
+      <span class='fn'>CopyMemory</span>(
+        renderer-&gt;<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)i * renderer-&gt;capacityWidth * <span class='num'>4U</span>,
+        base.<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)i * base.stride,
+        (<span class='tp'>SIZE_T</span>)base.width * <span class='num'>4U</span>);
+    }
+
+    <span class='kw'>if</span> (UI_GRAPHICS_API_DIRECT2D == renderer-&gt;uiApi || TEXT_RENDERER_DIRECTWRITE == renderer-&gt;textRenderer)
+    {
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>BindDC</span>(
+            renderer-&gt;d2dTarget,
+            renderer-&gt;hDC,
+            &amp;targetRect)))
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+
+      renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>BeginDraw</span>(renderer-&gt;d2dTarget);
+      <span class='kw'>if</span> (ui)
+      {
+        <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+        {
+          <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command = &amp;ui-&gt;commands[i];
+          <span class='tp'>D2D1_RECT_F</span> <span class='tp'>rect</span> =
+          {
+            (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>,
+            (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.top,
+            (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.right,
+            (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.bottom,
+          };
+
+          <span class='kw'>if</span> (UI_GRAPHICS_API_DIRECT2D == renderer-&gt;uiApi &amp;&amp;
+              MAG_UI_DRAW_FILL_RECT == command-&gt;<span class='tp'>type</span>)
+          {
+            <span class='fn'>magUiSetD2DBrushColor</span>(renderer, command-&gt;color);
+            renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>FillRectangle</span>(
+              renderer-&gt;d2dTarget,
+              &amp;<span class='tp'>rect</span>,
+              renderer-&gt;d2dBrush);
+          }
+          <span class='kw'>else</span> <span class='kw'>if</span> (UI_GRAPHICS_API_DIRECT2D == renderer-&gt;uiApi &amp;&amp;
+                   MAG_UI_DRAW_STROKE_RECT == command-&gt;<span class='tp'>type</span>)
+          {
+            <span class='fn'>magUiSetD2DBrushColor</span>(renderer, command-&gt;color);
+            renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>DrawRectangle</span>(
+              renderer-&gt;d2dTarget,
+              &amp;<span class='tp'>rect</span>,
+              renderer-&gt;d2dBrush,
+              command-&gt;thickness,
+              NULL);
+          }
+          <span class='kw'>else</span> <span class='kw'>if</span> (includeText &amp;&amp;
+                   TEXT_RENDERER_DIRECTWRITE == renderer-&gt;textRenderer &amp;&amp;
+                   MAG_UI_DRAW_TEXT == command-&gt;<span class='tp'>type</span>)
+          {
+            <span class='fn'>magUiSetD2DBrushColor</span>(renderer, command-&gt;color);
+            renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>DrawText</span>(
+              renderer-&gt;d2dTarget,
+              command-&gt;text,
+              <span class='fn'>lstrlen</span>(command-&gt;text),
+              renderer-&gt;textFormat,
+              &amp;<span class='tp'>rect</span>,
+              renderer-&gt;d2dBrush,
+              <span class='mc'>D2D1_DRAW_TEXT_OPTIONS_CLIP</span>,
+              <span class='mc'>DWRITE_MEASURING_MODE_NATURAL</span>);
+          }
+        }
+      }
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(renderer-&gt;d2dTarget-&gt;lpVtbl-&gt;<span class='fn'>EndDraw</span>(
+            renderer-&gt;d2dTarget,
+            NULL,
+            NULL)))
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    <span class='kw'>if</span> (includeText &amp;&amp; ui &amp;&amp; TEXT_RENDERER_GDI == renderer-&gt;textRenderer)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (MAG_UI_DRAW_TEXT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magUiDrawGdiText</span>(renderer, &amp;ui-&gt;commands[i]);
+        }
+      }
+      <span class='fn'>GdiFlush</span>();
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (includeText &amp;&amp; ui &amp;&amp; TEXT_RENDERER_GPU_GLYPH_ATLAS == renderer-&gt;textRenderer)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (MAG_UI_DRAW_TEXT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magUiDrawAtlasText</span>(renderer, &amp;ui-&gt;commands[i]);
+        }
+      }
+    }
+
+    output-&gt;<span class='tp'>pixels</span> = renderer-&gt;<span class='tp'>pixels</span>;
+    output-&gt;width = renderer-&gt;width;
+    output-&gt;height = renderer-&gt;height;
+    output-&gt;stride = renderer-&gt;capacityWidth * <span class='num'>4U</span>;
+    output-&gt;rowOrder = MAG_ROW_ORDER_TOP_DOWN;
+    output-&gt;alphaMode = MAG_ALPHA_MODE_IGNORE;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererCompose</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output)
+{
+    <span class='kw'>return</span> <span class='fn'>magUiRendererComposeInternal</span>(renderer, frame, ui, output, TRUE);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererComposeWithoutText</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output)
+{
+    <span class='kw'>return</span> <span class='fn'>magUiRendererComposeInternal</span>(renderer, frame, ui, output, FALSE);
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* <span class='fn'>magUiRendererGetGlyphAtlas</span>(<span class='kw'>const</span> <span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='kw'>return</span> renderer &amp;&amp; renderer-&gt;atlas.<span class='tp'>alpha</span> ? &amp;renderer-&gt;atlas : NULL;
+}
+
+<span class='tp'>UINT64</span> <span class='fn'>magUiRendererGetSurfaceGeneration</span>(<span class='kw'>const</span> <span class='tp'>MAGUIRENDERER</span>* renderer)
+{
+    <span class='kw'>return</span> renderer
+      ? renderer-&gt;surfaceGeneration + renderer-&gt;baseCompositor.generation
+      : <span class='num'>0</span>;
+}
+</pre>
+<p class="source-nav"><a href='targetver_h.htm'>&larr; targetver.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='ui_renderer_h.htm'>ui_renderer.h &rarr;</a></p>
+</body>
+</html>

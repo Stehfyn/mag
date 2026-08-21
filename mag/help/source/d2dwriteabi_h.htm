@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>d2dwriteabi.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; d2dwriteabi.h</p>
+<h1>d2dwriteabi.h</h1>
+<p>C ABI declarations for the Direct2D/DirectWrite interfaces used by MAG.</p>
+<div class="source-meta"><strong>293 lines</strong> &middot; 8461 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav">&larr; first file &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='d3dkmtx_c.htm'>d3dkmtx.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &lt;windows.h&gt;</span>
+<span class='pp'>#include &lt;unknwn.h&gt;</span>
+
+<span class='cm'>/* Minimal C declarations for the Direct2D/DirectWrite COM ABI consumed by
+   ui_renderer.c.  Current SDK convenience headers contain C++-only syntax;
+   the binary interfaces themselves remain ordinary COM vtables. */</span>
+
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_FACTORY_TYPE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_RENDER_TARGET_TYPE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_ALPHA_MODE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_RENDER_TARGET_USAGE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_FEATURE_LEVEL</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_TEXT_ANTIALIAS_MODE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>D2D1_DRAW_TEXT_OPTIONS</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_FACTORY_TYPE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_FONT_WEIGHT</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_FONT_STYLE</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_FONT_STRETCH</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_TEXT_ALIGNMENT</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_PARAGRAPH_ALIGNMENT</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_WORD_WRAPPING</span>;
+<span class='kw'>typedef</span> <span class='tp'>UINT32</span> <span class='tp'>DWRITE_MEASURING_MODE</span>;
+
+<span class='pp'>#define D2D1_FACTORY_TYPE_SINGLE_THREADED 0U</span>
+<span class='pp'>#define D2D1_RENDER_TARGET_TYPE_SOFTWARE 1U</span>
+<span class='pp'>#define D2D1_ALPHA_MODE_IGNORE 3U</span>
+<span class='pp'>#define D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE 2U</span>
+<span class='pp'>#define D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE 2U</span>
+<span class='pp'>#define D2D1_DRAW_TEXT_OPTIONS_CLIP 2U</span>
+<span class='pp'>#define DWRITE_FACTORY_TYPE_SHARED 0U</span>
+<span class='pp'>#define DWRITE_FONT_WEIGHT_NORMAL 400U</span>
+<span class='pp'>#define DWRITE_FONT_WEIGHT_SEMI_BOLD 600U</span>
+<span class='pp'>#define DWRITE_FONT_STYLE_NORMAL 0U</span>
+<span class='pp'>#define DWRITE_FONT_STRETCH_NORMAL 5U</span>
+<span class='pp'>#define DWRITE_TEXT_ALIGNMENT_LEADING 0U</span>
+<span class='pp'>#define DWRITE_PARAGRAPH_ALIGNMENT_NEAR 0U</span>
+<span class='pp'>#define DWRITE_PARAGRAPH_ALIGNMENT_CENTER 2U</span>
+<span class='pp'>#define DWRITE_WORD_WRAPPING_WRAP 0U</span>
+<span class='pp'>#define DWRITE_WORD_WRAPPING_NO_WRAP 1U</span>
+<span class='pp'>#define DWRITE_MEASURING_MODE_NATURAL 0U</span>
+<span class='pp'>#define MAG_DXGI_FORMAT_B8G8R8A8_UNORM 87U</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_PIXEL_FORMAT</span>
+{
+  <span class='tp'>UINT32</span> <span class='tp'>format</span>;
+  <span class='tp'>D2D1_ALPHA_MODE</span> alphaMode;
+} <span class='tp'>D2D1_PIXEL_FORMAT</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_RENDER_TARGET_PROPERTIES</span>
+{
+  <span class='tp'>D2D1_RENDER_TARGET_TYPE</span> <span class='tp'>type</span>;
+  <span class='tp'>D2D1_PIXEL_FORMAT</span> pixelFormat;
+  <span class='tp'>FLOAT</span> dpiX;
+  <span class='tp'>FLOAT</span> dpiY;
+  <span class='tp'>D2D1_RENDER_TARGET_USAGE</span> usage;
+  <span class='tp'>D2D1_FEATURE_LEVEL</span> minLevel;
+} <span class='tp'>D2D1_RENDER_TARGET_PROPERTIES</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_COLOR_F</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>r</span>;
+  <span class='tp'>FLOAT</span> g;
+  <span class='tp'>FLOAT</span> b;
+  <span class='tp'>FLOAT</span> a;
+} <span class='tp'>D2D1_COLOR_F</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_RECT_F</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>left</span>;
+  <span class='tp'>FLOAT</span> top;
+  <span class='tp'>FLOAT</span> right;
+  <span class='tp'>FLOAT</span> bottom;
+} <span class='tp'>D2D1_RECT_F</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_POINT_2F</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>x</span>;
+  <span class='tp'>FLOAT</span> y;
+} <span class='tp'>D2D1_POINT_2F</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>D2D1_ROUNDED_RECT</span>
+{
+  <span class='tp'>D2D1_RECT_F</span> <span class='tp'>rect</span>;
+  <span class='tp'>FLOAT</span> radiusX;
+  <span class='tp'>FLOAT</span> radiusY;
+} <span class='tp'>D2D1_ROUNDED_RECT</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWRITE_TEXT_METRICS</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>left</span>;
+  <span class='tp'>FLOAT</span> top;
+  <span class='tp'>FLOAT</span> width;
+  <span class='tp'>FLOAT</span> widthIncludingTrailingWhitespace;
+  <span class='tp'>FLOAT</span> height;
+  <span class='tp'>FLOAT</span> layoutWidth;
+  <span class='tp'>FLOAT</span> layoutHeight;
+  <span class='tp'>UINT32</span> maxBidiReorderingDepth;
+  <span class='tp'>UINT32</span> lineCount;
+} <span class='tp'>DWRITE_TEXT_METRICS</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1Factory</span> <span class='tp'>ID2D1Factory</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1DCRenderTarget</span> <span class='tp'>ID2D1DCRenderTarget</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1SolidColorBrush</span> <span class='tp'>ID2D1SolidColorBrush</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteFactory</span> <span class='tp'>IDWriteFactory</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteTextFormat</span> <span class='tp'>IDWriteTextFormat</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteTextLayout</span> <span class='tp'>IDWriteTextLayout</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1FactoryVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>ID2D1Factory</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>ID2D1Factory</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>ID2D1Factory</span>*);
+  <span class='kw'>void</span>* <span class='tp'>ReloadSystemMetrics</span>;
+  <span class='kw'>void</span>* GetDesktopDpi;
+  <span class='kw'>void</span>* CreateRectangleGeometry;
+  <span class='kw'>void</span>* CreateRoundedRectangleGeometry;
+  <span class='kw'>void</span>* CreateEllipseGeometry;
+  <span class='kw'>void</span>* CreateGeometryGroup;
+  <span class='kw'>void</span>* CreateTransformedGeometry;
+  <span class='kw'>void</span>* CreatePathGeometry;
+  <span class='kw'>void</span>* CreateStrokeStyle;
+  <span class='kw'>void</span>* CreateDrawingStateBlock;
+  <span class='kw'>void</span>* CreateWicBitmapRenderTarget;
+  <span class='kw'>void</span>* CreateHwndRenderTarget;
+  <span class='kw'>void</span>* CreateDxgiSurfaceRenderTarget;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateDCRenderTarget)(
+    <span class='tp'>ID2D1Factory</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_RENDER_TARGET_PROPERTIES</span>*,
+    <span class='tp'>ID2D1DCRenderTarget</span>**);
+} <span class='tp'>ID2D1FactoryVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>ID2D1Factory</span>
+{
+  <span class='kw'>const</span> <span class='tp'>ID2D1FactoryVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1DCRenderTargetVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>ID2D1DCRenderTarget</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>ID2D1DCRenderTarget</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>ID2D1DCRenderTarget</span>*);
+  <span class='kw'>void</span>* <span class='tp'>GetFactory</span>;
+  <span class='kw'>void</span>* CreateBitmapBeforeSolidBrush[<span class='num'>4</span>];
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateSolidColorBrush)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_COLOR_F</span>*,
+    <span class='kw'>const</span> <span class='kw'>void</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>**);
+  <span class='kw'>void</span>* CreateResourcesAfterSolidBrush[<span class='num'>6</span>];
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* DrawLine)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='tp'>D2D1_POINT_2F</span>,
+    <span class='tp'>D2D1_POINT_2F</span>,
+    <span class='tp'>ID2D1SolidColorBrush</span>*,
+    <span class='tp'>FLOAT</span>,
+    <span class='kw'>void</span>*);
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* DrawRectangle)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_RECT_F</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>*,
+    <span class='tp'>FLOAT</span>,
+    <span class='kw'>void</span>*);
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* FillRectangle)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_RECT_F</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>*);
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* DrawRoundedRectangle)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_ROUNDED_RECT</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>*,
+    <span class='tp'>FLOAT</span>,
+    <span class='kw'>void</span>*);
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* FillRoundedRectangle)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_ROUNDED_RECT</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>*);
+  <span class='kw'>void</span>* ShapesAfterRoundedRectangleBeforeDrawText[<span class='num'>7</span>];
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* DrawText)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='kw'>const</span> <span class='tp'>WCHAR</span>*,
+    <span class='tp'>UINT32</span>,
+    <span class='tp'>IDWriteTextFormat</span>*,
+    <span class='kw'>const</span> <span class='tp'>D2D1_RECT_F</span>*,
+    <span class='tp'>ID2D1SolidColorBrush</span>*,
+    <span class='tp'>D2D1_DRAW_TEXT_OPTIONS</span>,
+    <span class='tp'>DWRITE_MEASURING_MODE</span>);
+  <span class='kw'>void</span>* DrawingStateBeforeTextAntialias[<span class='num'>6</span>];
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* SetTextAntialiasMode)(
+    <span class='tp'>ID2D1DCRenderTarget</span>*,
+    <span class='tp'>D2D1_TEXT_ANTIALIAS_MODE</span>);
+  <span class='kw'>void</span>* DrawingStateBeforeClear[<span class='num'>12</span>];
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* Clear)(<span class='tp'>ID2D1DCRenderTarget</span>*, <span class='kw'>const</span> <span class='tp'>D2D1_COLOR_F</span>*);
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* BeginDraw)(<span class='tp'>ID2D1DCRenderTarget</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* EndDraw)(<span class='tp'>ID2D1DCRenderTarget</span>*, <span class='tp'>UINT64</span>*, <span class='tp'>UINT64</span>*);
+  <span class='kw'>void</span>* QueriesBeforeBindDC[<span class='num'>7</span>];
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* BindDC)(<span class='tp'>ID2D1DCRenderTarget</span>*, <span class='tp'>HDC</span>, <span class='kw'>const</span> <span class='tp'>RECT</span>*);
+} <span class='tp'>ID2D1DCRenderTargetVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>ID2D1DCRenderTarget</span>
+{
+  <span class='kw'>const</span> <span class='tp'>ID2D1DCRenderTargetVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>ID2D1SolidColorBrushVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>ID2D1SolidColorBrush</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>ID2D1SolidColorBrush</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>ID2D1SolidColorBrush</span>*);
+  <span class='kw'>void</span>* ResourceAndBrushMethods[<span class='num'>5</span>];
+  <span class='kw'>void</span> (STDMETHODCALLTYPE* SetColor)(<span class='tp'>ID2D1SolidColorBrush</span>*, <span class='kw'>const</span> <span class='tp'>D2D1_COLOR_F</span>*);
+  <span class='kw'>void</span>* <span class='tp'>GetColor</span>;
+} <span class='tp'>ID2D1SolidColorBrushVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>ID2D1SolidColorBrush</span>
+{
+  <span class='kw'>const</span> <span class='tp'>ID2D1SolidColorBrushVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteTextFormatVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>IDWriteTextFormat</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>IDWriteTextFormat</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>IDWriteTextFormat</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetTextAlignment)(<span class='tp'>IDWriteTextFormat</span>*, <span class='tp'>DWRITE_TEXT_ALIGNMENT</span>);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetParagraphAlignment)(<span class='tp'>IDWriteTextFormat</span>*, <span class='tp'>DWRITE_PARAGRAPH_ALIGNMENT</span>);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetWordWrapping)(<span class='tp'>IDWriteTextFormat</span>*, <span class='tp'>DWRITE_WORD_WRAPPING</span>);
+} <span class='tp'>IDWriteTextFormatVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>IDWriteTextFormat</span>
+{
+  <span class='kw'>const</span> <span class='tp'>IDWriteTextFormatVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteTextLayoutVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>IDWriteTextLayout</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>IDWriteTextLayout</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>IDWriteTextLayout</span>*);
+  <span class='kw'>void</span>* TextFormatMethods[<span class='num'>25</span>];
+  <span class='kw'>void</span>* LayoutMethodsBeforeGetMetrics[<span class='num'>32</span>];
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* GetMetrics)(<span class='tp'>IDWriteTextLayout</span>*, <span class='tp'>DWRITE_TEXT_METRICS</span>*);
+} <span class='tp'>IDWriteTextLayoutVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>IDWriteTextLayout</span>
+{
+  <span class='kw'>const</span> <span class='tp'>IDWriteTextLayoutVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>IDWriteFactoryVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>IDWriteFactory</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>IDWriteFactory</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>IDWriteFactory</span>*);
+  <span class='kw'>void</span>* MethodsBeforeCreateTextFormat[<span class='num'>12</span>];
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateTextFormat)(
+    <span class='tp'>IDWriteFactory</span>*,
+    <span class='kw'>const</span> <span class='tp'>WCHAR</span>*,
+    <span class='kw'>void</span>*,
+    <span class='tp'>DWRITE_FONT_WEIGHT</span>,
+    <span class='tp'>DWRITE_FONT_STYLE</span>,
+    <span class='tp'>DWRITE_FONT_STRETCH</span>,
+    <span class='tp'>FLOAT</span>,
+    <span class='kw'>const</span> <span class='tp'>WCHAR</span>*,
+    <span class='tp'>IDWriteTextFormat</span>**);
+  <span class='kw'>void</span>* <span class='tp'>CreateTypography</span>;
+  <span class='kw'>void</span>* GetGdiInterop;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateTextLayout)(
+    <span class='tp'>IDWriteFactory</span>*,
+    <span class='kw'>const</span> <span class='tp'>WCHAR</span>*,
+    <span class='tp'>UINT32</span>,
+    <span class='tp'>IDWriteTextFormat</span>*,
+    <span class='tp'>FLOAT</span>,
+    <span class='tp'>FLOAT</span>,
+    <span class='tp'>IDWriteTextLayout</span>**);
+} <span class='tp'>IDWriteFactoryVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>IDWriteFactory</span>
+{
+  <span class='kw'>const</span> <span class='tp'>IDWriteFactoryVtbl</span>* lpVtbl;
+};
+
+<span class='tp'>HRESULT</span> <span class='kw'>WINAPI</span> <span class='fn'>D2D1CreateFactory</span>(
+  <span class='tp'>D2D1_FACTORY_TYPE</span> factoryType,
+  <span class='tp'>REFIID</span> iid,
+  <span class='kw'>const</span> <span class='kw'>void</span>* factoryOptions,
+  <span class='kw'>void</span>** factory);
+<span class='tp'>HRESULT</span> <span class='kw'>WINAPI</span> <span class='fn'>DWriteCreateFactory</span>(
+  <span class='tp'>DWRITE_FACTORY_TYPE</span> factoryType,
+  <span class='tp'>REFIID</span> iid,
+  IUnknown** factory);
+</pre>
+<p class="source-nav">&larr; first file &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='d3dkmtx_c.htm'>d3dkmtx.c &rarr;</a></p>
+</body>
+</html>

@@ -27,6 +27,9 @@
     <ClCompile Include="presentation.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="presentation_observer.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="mag.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -52,6 +55,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics_gdi.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics_gdiplus.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics_layered.c">
@@ -98,6 +104,9 @@
     <ClInclude Include="presentation.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="presentation_observer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="wingdix.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -105,6 +114,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gdiplusabi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="graphics_dcomp.h">

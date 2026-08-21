@@ -4,6 +4,7 @@ static const MAGGRAPHICSBACKEND* const g_graphicsBackends[] =
 {
   &g_magGraphicsOpenGLBackend,
   &g_magGraphicsGdiBackend,
+  &g_magGraphicsGdiPlusBackend,
   &g_magGraphicsD3D9Backend,
   &g_magGraphicsD3D11Backend,
   &g_magGraphicsD3D12Backend,

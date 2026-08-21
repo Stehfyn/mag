@@ -3,28 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Resource.rc - Source Code</title>
+  <title>Resource.rc - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; Resource.rc</p>
 <h1>Resource.rc</h1>
+<p>Dialogs, icons, strings, embedded CHM, and native resources.</p>
+<div class="source-meta"><strong>166 lines</strong> &middot; 7824 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='resource_h.htm'>&larr; resource.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='targetver_h.htm'>targetver.h &rarr;</a></p>
 <pre class="source-code"><span class='cm'>// Microsoft Visual C++ generated resource script.</span>
-<span class='cm'>//</span>
-<span class='pp'>#include "resource.h"</span>
+<span class='cm'>//</span>
+<span class='pp'>#include &quot;resource.h&quot;</span>
 
 <span class='pp'>#define APSTUDIO_READONLY_SYMBOLS</span>
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 <span class='cm'>// Generated from the TEXTINCLUDE 2 resource.</span>
-<span class='cm'>//</span>
-<span class='pp'>#include "winres.h"</span>
+<span class='cm'>//</span>
+<span class='pp'>#include &quot;winres.h&quot;</span>
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
 <span class='pp'>#undef APSTUDIO_READONLY_SYMBOLS</span>
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 <span class='cm'>// English (United States) resources</span>
 
 <span class='pp'>#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)</span>
@@ -32,82 +35,133 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
 <span class='pp'>#ifdef APSTUDIO_INVOKED</span>
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 <span class='cm'>// TEXTINCLUDE</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 
 <span class='num'>1</span> TEXTINCLUDE
 <span class='kw'>BEGIN</span>
-    <span class='str'>"resource.h\0"</span>
+    <span class='str'>&quot;resource.h\0&quot;</span>
 <span class='kw'>END</span>
 
 <span class='num'>2</span> TEXTINCLUDE
 <span class='kw'>BEGIN</span>
-    <span class='str'>"#include "</span><span class='str'>"winres.h"</span><span class='str'>"\r\n"</span>
-    <span class='str'>"\0"</span>
+    <span class='str'>&quot;#include &quot;</span><span class='str'>&quot;winres.h&quot;</span><span class='str'>&quot;\r\n&quot;</span>
+    <span class='str'>&quot;\0&quot;</span>
 <span class='kw'>END</span>
 
 <span class='num'>3</span> TEXTINCLUDE
 <span class='kw'>BEGIN</span>
-    <span class='str'>"\r\n"</span>
-    <span class='str'>"\0"</span>
+    <span class='str'>&quot;\r\n&quot;</span>
+    <span class='str'>&quot;\0&quot;</span>
 <span class='kw'>END</span>
 
 <span class='pp'>#endif    // APSTUDIO_INVOKED</span>
 
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//
-// Icon</span>
-<span class='cm'>//
-</span>
-IDI_APPICON     ICON                    <span class='str'>"mag.ico"</span>
+<span class='cm'>//</span>
+<span class='cm'>// Icon</span>
+<span class='cm'>//</span>
+
+<span class='mc'>IDI_APPICON</span>     ICON                    <span class='str'>&quot;mag.ico&quot;</span>
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//
-// Menu</span>
-<span class='cm'>//
-</span>
-IDR_MENU1 <span class='kw'>MENU</span>
+<span class='cm'>//</span>
+<span class='cm'>// Menu</span>
+<span class='cm'>//</span>
+
+<span class='mc'>IDR_MENU1</span> <span class='kw'>MENU</span>
 <span class='kw'>BEGIN</span>
-    <span class='kw'>POPUP</span> <span class='str'>"Context Menu"</span>
+    <span class='kw'>POPUP</span> <span class='str'>&quot;Context Menu&quot;</span>
     <span class='kw'>BEGIN</span>
-        <span class='kw'>MENUITEM</span> <span class='str'>"Window"</span>,                              ID_CONTEXTMENU_WINDOW_MODE
-        <span class='kw'>MENUITEM</span> <span class='str'>"Follow Mouse"</span>,                        ID_CONTEXTMENU_FOLLOW_MOUSE
-        <span class='kw'>MENUITEM</span> <span class='str'>"Lens"</span>,                                ID_CONTEXTMENU_LENS_MODE
-        <span class='kw'>MENUITEM</span> <span class='str'>"Settings..."</span>,                         ID_CONTEXTMENU_SETTINGS
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Window&quot;</span>,                              <span class='mc'>ID_CONTEXTMENU_WINDOW_MODE</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Follow Mouse&quot;</span>,                        <span class='mc'>ID_CONTEXTMENU_FOLLOW_MOUSE</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Lens&quot;</span>,                                <span class='mc'>ID_CONTEXTMENU_LENS_MODE</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Settings...&quot;</span>,                         <span class='mc'>ID_CONTEXTMENU_SETTINGS</span>
         <span class='kw'>MENUITEM</span> <span class='kw'>SEPARATOR</span>
-        <span class='kw'>MENUITEM</span> <span class='str'>"Help"</span>,                                ID_CONTEXTMENU_HELP
-        <span class='kw'>MENUITEM</span> <span class='str'>"Exit"</span>,                                ID_CONTEXTMENU_CLOSE
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Help&quot;</span>,                                <span class='mc'>ID_CONTEXTMENU_HELP</span>
+        <span class='kw'>MENUITEM</span> <span class='str'>&quot;Exit&quot;</span>,                                <span class='mc'>ID_CONTEXTMENU_CLOSE</span>
     <span class='kw'>END</span>
 <span class='kw'>END</span>
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//
-// Dialog</span>
-<span class='cm'>//
-</span>
-IDD_SETTINGS DIALOGEX <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>260</span>, <span class='num'>136</span>
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION <span class='str'>"Settings"</span>
-FONT <span class='num'>9</span>, <span class='str'>"Segoe UI"</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0x1</span>
+<span class='cm'>//</span>
+<span class='cm'>// Dialog</span>
+<span class='cm'>//</span>
+
+<span class='mc'>IDD_SETTINGS</span> <span class='kw'>DIALOGEX</span> <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>520</span>, <span class='num'>280</span>
+<span class='kw'>STYLE</span> DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+<span class='kw'>CAPTION</span> <span class='str'>&quot;Settings&quot;</span>
+<span class='kw'>FONT</span> <span class='num'>9</span>, <span class='str'>&quot;Segoe UI&quot;</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0x1</span>
 <span class='kw'>BEGIN</span>
-    LTEXT           <span class='str'>"Graphics API:"</span>,IDC_STATIC,<span class='num'>12</span>,<span class='num'>16</span>,<span class='num'>76</span>,<span class='num'>8</span>
-    COMBOBOX        IDC_SETTINGS_GRAPHICS_API,<span class='num'>96</span>,<span class='num'>14</span>,<span class='num'>148</span>,<span class='num'>48</span>,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           <span class='str'>"Capture API:"</span>,IDC_STATIC,<span class='num'>12</span>,<span class='num'>40</span>,<span class='num'>76</span>,<span class='num'>8</span>
-    COMBOBOX        IDC_SETTINGS_CAPTURE_API,<span class='num'>96</span>,<span class='num'>38</span>,<span class='num'>148</span>,<span class='num'>72</span>,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         <span class='str'>"Mouse-relative wheel zoom"</span>,IDC_SETTINGS_MOUSE_RELATIVE_ZOOM,<span class='str'>"Button"</span>,BS_AUTOCHECKBOX | WS_TABSTOP,<span class='num'>96</span>,<span class='num'>64</span>,<span class='num'>148</span>,<span class='num'>10</span>
-    LTEXT           <span class='str'>""</span>,IDC_SETTINGS_STATUS,<span class='num'>12</span>,<span class='num'>88</span>,<span class='num'>232</span>,<span class='num'>18</span>
-    DEFPUSHBUTTON   <span class='str'>"OK"</span>,IDOK,<span class='num'>148</span>,<span class='num'>114</span>,<span class='num'>50</span>,<span class='num'>14</span>
-    PUSHBUTTON      <span class='str'>"Cancel"</span>,IDCANCEL,<span class='num'>204</span>,<span class='num'>114</span>,<span class='num'>50</span>,<span class='num'>14</span>
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_TAB</span>,<span class='str'>&quot;SysTabControl32&quot;</span>,TCS_TABS | WS_TABSTOP | WS_CLIPSIBLINGS,<span class='num'>5</span>,<span class='num'>4</span>,<span class='num'>510</span>,<span class='num'>198</span>
+
+    LTEXT           <span class='str'>&quot;Preset:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_PRESET</span>,<span class='num'>11</span>,<span class='num'>20</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_PRESET</span>,<span class='num'>66</span>,<span class='num'>17</span>,<span class='num'>442</span>,<span class='num'>40</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_ROUTE_DIAGRAM</span>,<span class='str'>&quot;Static&quot;</span>,SS_OWNERDRAW | SS_NOTIFY | WS_BORDER,<span class='num'>11</span>,<span class='num'>34</span>,<span class='num'>497</span>,<span class='num'>158</span>
+    PUSHBUTTON      <span class='str'>&quot;Layering...&quot;</span>,<span class='mc'>IDC_SETTINGS_ROUTE_LAYERING</span>,<span class='num'>180</span>,<span class='num'>170</span>,<span class='num'>72</span>,<span class='num'>16</span>
+    PUSHBUTTON      <span class='str'>&quot;Pacing...&quot;</span>,<span class='mc'>IDC_SETTINGS_ROUTE_PACING</span>,<span class='num'>262</span>,<span class='num'>170</span>,<span class='num'>72</span>,<span class='num'>16</span>
+
+    LTEXT           <span class='str'>&quot;Graphics:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_GRAPHICS_API</span>,<span class='num'>11</span>,<span class='num'>20</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_GRAPHICS_API</span>,<span class='num'>66</span>,<span class='num'>17</span>,<span class='num'>442</span>,<span class='num'>60</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Capture:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_CAPTURE_API</span>,<span class='num'>11</span>,<span class='num'>36</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_CAPTURE_API</span>,<span class='num'>66</span>,<span class='num'>33</span>,<span class='num'>442</span>,<span class='num'>68</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;UI:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_UI_API</span>,<span class='num'>11</span>,<span class='num'>52</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_UI_API</span>,<span class='num'>66</span>,<span class='num'>49</span>,<span class='num'>442</span>,<span class='num'>52</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Text:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_TEXT_RENDERER</span>,<span class='num'>11</span>,<span class='num'>68</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_TEXT_RENDERER</span>,<span class='num'>66</span>,<span class='num'>65</span>,<span class='num'>442</span>,<span class='num'>60</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;Mouse-relative zoom&quot;</span>,<span class='mc'>IDC_SETTINGS_MOUSE_RELATIVE_ZOOM</span>,<span class='str'>&quot;Button&quot;</span>,BS_AUTOCHECKBOX | WS_TABSTOP,<span class='num'>11</span>,<span class='num'>111</span>,<span class='num'>10</span>,<span class='num'>10</span>
+    LTEXT           <span class='str'>&quot;Mouse-relative zoom&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_MOUSE_RELATIVE_ZOOM</span>,<span class='num'>23</span>,<span class='num'>112</span>,<span class='num'>94</span>,<span class='num'>8</span>,SS_NOTIFY
+
+    LTEXT           <span class='str'>&quot;Target:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_PRESENT_TARGET</span>,<span class='num'>11</span>,<span class='num'>20</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_PRESENT_TARGET</span>,<span class='num'>66</span>,<span class='num'>17</span>,<span class='num'>442</span>,<span class='num'>84</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Surface:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_SURFACE_OWNERSHIP</span>,<span class='num'>11</span>,<span class='num'>36</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_SURFACE_OWNERSHIP</span>,<span class='num'>66</span>,<span class='num'>33</span>,<span class='num'>442</span>,<span class='num'>52</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Host:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_COMPOSITION_HOST</span>,<span class='num'>11</span>,<span class='num'>52</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_COMPOSITION_HOST</span>,<span class='num'>66</span>,<span class='num'>49</span>,<span class='num'>442</span>,<span class='num'>68</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Copy policy:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_COPY_REQUIREMENT</span>,<span class='num'>11</span>,<span class='num'>68</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_COPY_REQUIREMENT</span>,<span class='num'>66</span>,<span class='num'>65</span>,<span class='num'>442</span>,<span class='num'>60</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;Exact target&quot;</span>,<span class='mc'>IDC_SETTINGS_STRICT_TARGET</span>,<span class='str'>&quot;Button&quot;</span>,BS_AUTOCHECKBOX | WS_TABSTOP,<span class='num'>11</span>,<span class='num'>79</span>,<span class='num'>10</span>,<span class='num'>10</span>
+    LTEXT           <span class='str'>&quot;Exact target&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_STRICT_TARGET</span>,<span class='num'>23</span>,<span class='num'>80</span>,<span class='num'>66</span>,<span class='num'>8</span>,SS_NOTIFY
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;Allow tearing&quot;</span>,<span class='mc'>IDC_SETTINGS_ALLOW_TEARING</span>,<span class='str'>&quot;Button&quot;</span>,BS_AUTOCHECKBOX | WS_TABSTOP,<span class='num'>112</span>,<span class='num'>79</span>,<span class='num'>10</span>,<span class='num'>10</span>
+    LTEXT           <span class='str'>&quot;Allow tearing&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_ALLOW_TEARING</span>,<span class='num'>124</span>,<span class='num'>80</span>,<span class='num'>66</span>,<span class='num'>8</span>,SS_NOTIFY
+
+    LTEXT           <span class='str'>&quot;Display:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_DISPLAY_ADAPTER</span>,<span class='num'>11</span>,<span class='num'>31</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_DISPLAY_ADAPTER</span>,<span class='num'>66</span>,<span class='num'>28</span>,<span class='num'>442</span>,<span class='num'>100</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Hardware:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_HARDWARE_ADAPTER</span>,<span class='num'>11</span>,<span class='num'>55</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_HARDWARE_ADAPTER</span>,<span class='num'>66</span>,<span class='num'>52</span>,<span class='num'>442</span>,<span class='num'>100</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           <span class='str'>&quot;Alpha mode:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_ALPHA_MODE</span>,<span class='num'>11</span>,<span class='num'>20</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_ALPHA_MODE</span>,<span class='num'>66</span>,<span class='num'>17</span>,<span class='num'>442</span>,<span class='num'>60</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           <span class='str'>&quot;Window alpha:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_CONSTANT_ALPHA</span>,<span class='num'>11</span>,<span class='num'>45</span>,<span class='num'>58</span>,<span class='num'>8</span>
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_CONSTANT_ALPHA</span>,<span class='str'>&quot;msctls_trackbar32&quot;</span>,TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,<span class='num'>72</span>,<span class='num'>40</span>,<span class='num'>406</span>,<span class='num'>12</span>
+    RTEXT           <span class='str'>&quot;255&quot;</span>,<span class='mc'>IDC_SETTINGS_VALUE_CONSTANT_ALPHA</span>,<span class='num'>482</span>,<span class='num'>45</span>,<span class='num'>26</span>,<span class='num'>8</span>
+    LTEXT           <span class='str'>&quot;Color key:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_COLOR_KEY</span>,<span class='num'>11</span>,<span class='num'>69</span>,<span class='num'>52</span>,<span class='num'>8</span>
+    PUSHBUTTON      <span class='str'>&quot;#000000...&quot;</span>,<span class='mc'>IDC_SETTINGS_COLOR_KEY</span>,<span class='num'>72</span>,<span class='num'>63</span>,<span class='num'>406</span>,<span class='num'>14</span>
+
+    LTEXT           <span class='str'>&quot;Buffers:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_BUFFER_COUNT</span>,<span class='num'>11</span>,<span class='num'>24</span>,<span class='num'>44</span>,<span class='num'>8</span>
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_BUFFER_COUNT</span>,<span class='str'>&quot;msctls_trackbar32&quot;</span>,TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,<span class='num'>58</span>,<span class='num'>19</span>,<span class='num'>420</span>,<span class='num'>12</span>
+    RTEXT           <span class='str'>&quot;3&quot;</span>,<span class='mc'>IDC_SETTINGS_VALUE_BUFFER_COUNT</span>,<span class='num'>482</span>,<span class='num'>24</span>,<span class='num'>26</span>,<span class='num'>8</span>
+    LTEXT           <span class='str'>&quot;Latency:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_FRAME_LATENCY</span>,<span class='num'>11</span>,<span class='num'>47</span>,<span class='num'>44</span>,<span class='num'>8</span>
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_FRAME_LATENCY</span>,<span class='str'>&quot;msctls_trackbar32&quot;</span>,TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,<span class='num'>58</span>,<span class='num'>42</span>,<span class='num'>420</span>,<span class='num'>12</span>
+    RTEXT           <span class='str'>&quot;1&quot;</span>,<span class='mc'>IDC_SETTINGS_VALUE_FRAME_LATENCY</span>,<span class='num'>482</span>,<span class='num'>47</span>,<span class='num'>26</span>,<span class='num'>8</span>
+    LTEXT           <span class='str'>&quot;Sync interval:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_SYNC_INTERVAL</span>,<span class='num'>11</span>,<span class='num'>70</span>,<span class='num'>44</span>,<span class='num'>8</span>
+    <span class='kw'>CONTROL</span>         <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_SYNC_INTERVAL</span>,<span class='str'>&quot;msctls_trackbar32&quot;</span>,TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,<span class='num'>58</span>,<span class='num'>65</span>,<span class='num'>420</span>,<span class='num'>12</span>
+    RTEXT           <span class='str'>&quot;1&quot;</span>,<span class='mc'>IDC_SETTINGS_VALUE_SYNC_INTERVAL</span>,<span class='num'>482</span>,<span class='num'>70</span>,<span class='num'>26</span>,<span class='num'>8</span>
+    LTEXT           <span class='str'>&quot;Waitable:&quot;</span>,<span class='mc'>IDC_SETTINGS_LABEL_WAITABLE_SWAP_CHAIN</span>,<span class='num'>11</span>,<span class='num'>93</span>,<span class='num'>44</span>,<span class='num'>8</span>
+    COMBOBOX        <span class='mc'>IDC_SETTINGS_WAITABLE_SWAP_CHAIN</span>,<span class='num'>58</span>,<span class='num'>88</span>,<span class='num'>450</span>,<span class='num'>52</span>,CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           <span class='str'>&quot;&quot;</span>,<span class='mc'>IDC_SETTINGS_STATUS</span>,<span class='num'>6</span>,<span class='num'>204</span>,<span class='num'>508</span>,<span class='num'>50</span>,SS_LEFT | SS_SUNKEN | SS_EDITCONTROL
+    DEFPUSHBUTTON   <span class='str'>&quot;Close&quot;</span>,IDCANCEL,<span class='num'>458</span>,<span class='num'>260</span>,<span class='num'>56</span>,<span class='num'>14</span>
 <span class='kw'>END</span>
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//
-// RCDATA</span>
-<span class='cm'>//
-</span>
-IDR_CHM         <span class='kw'>RCDATA</span>                  <span class='str'>"help/mag.chm"</span>
+<span class='cm'>//</span>
+<span class='cm'>// RCDATA</span>
+<span class='cm'>//</span>
+
+<span class='mc'>IDR_CHM</span>         <span class='kw'>RCDATA</span>                  <span class='str'>&quot;help/mag.chm&quot;</span>
 
 <span class='pp'>#endif    // English (United States) resources</span>
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
@@ -116,13 +170,14 @@ IDR_CHM         <span class='kw'>RCDATA</span>                  <span class='str
 
 <span class='pp'>#ifndef APSTUDIO_INVOKED</span>
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 <span class='cm'>// Generated from the TEXTINCLUDE 3 resource.</span>
-<span class='cm'>//</span>
+<span class='cm'>//</span>
 
 
 <span class='cm'>/////////////////////////////////////////////////////////////////////////////</span>
 <span class='pp'>#endif    // not APSTUDIO_INVOKED</span>
 </pre>
+<p class="source-nav"><a href='resource_h.htm'>&larr; resource.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='targetver_h.htm'>targetver.h &rarr;</a></p>
 </body>
 </html>

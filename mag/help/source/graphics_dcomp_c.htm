@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_dcomp.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_dcomp.c</p>
+<h1>graphics_dcomp.c</h1>
+<p>DirectComposition presentation host.</p>
+<div class="source-meta"><strong>294 lines</strong> &middot; 6503 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_d3d9_c.htm'>&larr; graphics_d3d9.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_dcomp_h.htm'>graphics_dcomp.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;graphics_dcomp.h&quot;</span>
+<span class='pp'>#include &quot;dcompabi.h&quot;</span>
+
+<span class='pp'>#include &lt;dwmapi.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;dcomp&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;dwmapi&quot;)</span>
+
+<span class='kw'>struct</span> <span class='tp'>MAGDCOMPPRESENTER</span>
+{
+  <span class='tp'>MAG_IDCompositionDevice</span>*      device;
+  <span class='tp'>MAG_IDCompositionTarget</span>*      target;
+  <span class='tp'>MAG_IDCompositionVisual</span>*      visual;
+  <span class='tp'>MAG_IDCompositionEffectGroup</span>* effects;
+};
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magDCompPresenterRelease</span>(<span class='tp'>MAGDCOMPPRESENTER</span>* presenter)
+{
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (presenter-&gt;effects)
+    {
+      presenter-&gt;effects-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(presenter-&gt;effects);
+    }
+    <span class='kw'>if</span> (presenter-&gt;visual)
+    {
+      presenter-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(presenter-&gt;visual);
+    }
+    <span class='kw'>if</span> (presenter-&gt;target)
+    {
+      presenter-&gt;target-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(presenter-&gt;target);
+    }
+    <span class='kw'>if</span> (presenter-&gt;device)
+    {
+      presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(presenter-&gt;device);
+    }
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, presenter);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterCreateWithContent</span>(
+  <span class='tp'>HWND</span> hWnd,
+  IUnknown* content,
+  <span class='tp'>MAGDCOMPPRESENTER</span>** presenterOut)
+{
+    <span class='tp'>MAGDCOMPPRESENTER</span>* presenter;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!hWnd || !content || !presenterOut)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *presenterOut = NULL;
+
+    presenter = (<span class='tp'>MAGDCOMPPRESENTER</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      <span class='kw'>sizeof</span>(*presenter));
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>DCompositionCreateDevice</span>(
+      NULL,
+      &amp;IID_MAG_IDCompositionDevice,
+      (<span class='kw'>void</span>**)&amp;presenter-&gt;device);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateTargetForHwnd</span>(
+        presenter-&gt;device,
+        hWnd,
+        TRUE,
+        &amp;presenter-&gt;target);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+        presenter-&gt;device,
+        &amp;presenter-&gt;visual);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetContent</span>(presenter-&gt;visual, content);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;target-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(
+        presenter-&gt;target,
+        presenter-&gt;visual);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(presenter-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>magDCompPresenterRelease</span>(presenter);
+      <span class='fn'>SetLastError</span>((<span class='tp'>DWORD</span>)hr);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    *presenterOut = presenter;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  IUnknown* content,
+  <span class='tp'>MAGDCOMPPRESENTER</span>** presenterOut)
+{
+    <span class='kw'>return</span> <span class='fn'>magDCompPresenterCreateWithContent</span>(hWnd, content, presenterOut);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterCreateFromSurfaceHandle</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>HANDLE</span> compositionSurfaceHandle,
+  <span class='tp'>MAGDCOMPPRESENTER</span>** presenterOut)
+{
+    <span class='tp'>MAGDCOMPPRESENTER</span>* presenter;
+    IUnknown* content = NULL;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!hWnd || !compositionSurfaceHandle || !presenterOut)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    *presenterOut = NULL;
+    presenter = (<span class='tp'>MAGDCOMPPRESENTER</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      <span class='kw'>sizeof</span>(*presenter));
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>DCompositionCreateDevice</span>(
+      NULL,
+      &amp;IID_MAG_IDCompositionDevice,
+      (<span class='kw'>void</span>**)&amp;presenter-&gt;device);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateSurfaceFromHandle</span>(
+        presenter-&gt;device,
+        compositionSurfaceHandle,
+        &amp;content);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateTargetForHwnd</span>(
+        presenter-&gt;device,
+        hWnd,
+        TRUE,
+        &amp;presenter-&gt;target);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateVisual</span>(
+        presenter-&gt;device,
+        &amp;presenter-&gt;visual);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetContent</span>(presenter-&gt;visual, content);
+    }
+    <span class='kw'>if</span> (content)
+    {
+      content-&gt;lpVtbl-&gt;<span class='fn'>Release</span>(content);
+      content = NULL;
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;target-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(
+        presenter-&gt;target,
+        presenter-&gt;visual);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(presenter-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>magDCompPresenterRelease</span>(presenter);
+      <span class='fn'>SetLastError</span>((<span class='tp'>DWORD</span>)hr);
+      <span class='kw'>return</span> FALSE;
+    }
+    *presenterOut = presenter;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magDCompPresenterDestroy</span>(<span class='tp'>MAGDCOMPPRESENTER</span>* presenter)
+{
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (presenter-&gt;visual)
+    {
+      presenter-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetContent</span>(presenter-&gt;visual, NULL);
+    }
+    <span class='kw'>if</span> (presenter-&gt;target)
+    {
+      presenter-&gt;target-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(presenter-&gt;target, NULL);
+    }
+    <span class='kw'>if</span> (presenter-&gt;device)
+    {
+      presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(presenter-&gt;device);
+      <span class='fn'>DwmFlush</span>();
+    }
+    <span class='fn'>magDCompPresenterRelease</span>(presenter);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterSetEnabled</span>(
+  <span class='tp'>MAGDCOMPPRESENTER</span>* presenter,
+  <span class='tp'>BOOL</span> enabled)
+{
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!presenter || !presenter-&gt;target || !presenter-&gt;device)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = presenter-&gt;target-&gt;lpVtbl-&gt;<span class='fn'>SetRoot</span>(
+      presenter-&gt;target,
+      enabled ? presenter-&gt;visual : NULL);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(presenter-&gt;device);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterSetOpacity</span>(
+  <span class='tp'>MAGDCOMPPRESENTER</span>* presenter,
+  <span class='tp'>FLOAT</span> opacity)
+{
+    <span class='tp'>HRESULT</span> hr = S_OK;
+
+    <span class='kw'>if</span> (!presenter || !presenter-&gt;visual || !presenter-&gt;device ||
+        opacity &lt; <span class='num'>0.0f</span> || opacity &gt; <span class='num'>1.0f</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (!presenter-&gt;effects)
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>CreateEffectGroup</span>(
+        presenter-&gt;device,
+        &amp;presenter-&gt;effects);
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        hr = presenter-&gt;visual-&gt;lpVtbl-&gt;<span class='fn'>SetEffect</span>(
+          presenter-&gt;visual,
+          presenter-&gt;effects);
+      }
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;effects-&gt;lpVtbl-&gt;<span class='fn'>SetOpacityValue</span>(presenter-&gt;effects, opacity);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>Commit</span>(presenter-&gt;device);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magDCompPresenterGetNextEstimatedFrameTime</span>(
+  <span class='tp'>MAGDCOMPPRESENTER</span>* presenter,
+  LONGLONG* frameTime)
+{
+    <span class='tp'>MAG_DCOMPOSITION_FRAME_STATISTICS</span> statistics;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='fn'>ZeroMemory</span>(&amp;statistics, <span class='kw'>sizeof</span>(statistics));
+    <span class='kw'>if</span> (!presenter || !presenter-&gt;device || !frameTime)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    hr = presenter-&gt;device-&gt;lpVtbl-&gt;<span class='fn'>GetFrameStatistics</span>(
+      presenter-&gt;device,
+      &amp;statistics);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      *frameTime = statistics.nextEstimatedFrameTime.QuadPart;
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+</pre>
+<p class="source-nav"><a href='graphics_d3d9_c.htm'>&larr; graphics_d3d9.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_dcomp_h.htm'>graphics_dcomp.h &rarr;</a></p>
+</body>
+</html>

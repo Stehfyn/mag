@@ -3,18 +3,327 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>d3dkmtx.c - Source Code</title>
+  <title>d3dkmtx.c - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; d3dkmtx.c</p>
 <h1>d3dkmtx.c</h1>
-<pre class="source-code"><span class='pp'>#include "d3dkmtx.h"</span>
+<p>Project-owned C implementation.</p>
+<div class="source-meta"><strong>362 lines</strong> &middot; 11374 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='d2dwriteabi_h.htm'>&larr; d2dwriteabi.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='d3dkmtx_h.htm'>d3dkmtx.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;d3dkmtx.h&quot;</span>
 
-<span class='kw'>typedef</span> LONG <span class='tp'>NTSTATUS</span>;
+<span class='kw'>typedef</span> <span class='tp'>LONG</span> <span class='tp'>NTSTATUS</span>;
 <span class='pp'>#include &lt;d3dkmthk.h&gt;</span>
 
-BOOL <span class='fn'>D3DKMTWaitForVerticalBlank</span>(HWND hWnd)
+<span class='cm'>/* These query payloads are stable public D3DKMT ABIs introduced after the
+ * oldest Windows 10 SDK that MAG still builds against.  Keep the narrow C
+ * declarations local so runtime probing does not raise the SDK floor. */</span>
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D3DKMT_QUERY_SCANOUT_CAPS
+{
+  <span class='tp'>UINT</span> vidPnSourceId;
+  <span class='tp'>UINT</span> caps;
+} MAG_D3DKMT_QUERY_SCANOUT_CAPS;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D3DKMT_DISPLAY_CAPS
+{
+  <span class='tp'>UINT64</span> value;
+} MAG_D3DKMT_DISPLAY_CAPS;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D3DKMT_CROSS_ADAPTER_SUPPORT
+{
+  <span class='tp'>UINT</span> supportTier;
+} MAG_D3DKMT_CROSS_ADAPTER_SUPPORT;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAG_D3DKMT_WDDM3_CAPS
+{
+  <span class='tp'>UINT</span> value;
+} MAG_D3DKMT_WDDM3_CAPS;
+
+<span class='kw'>enum</span>
+{
+  MAG_KMTQAITYPE_SCANOUT_CAPS = <span class='num'>67</span>,
+  MAG_KMTQAITYPE_DISPLAY_CAPS = <span class='num'>74</span>,
+  MAG_KMTQAITYPE_CROSS_ADAPTER_RESOURCE_SUPPORT = <span class='num'>76</span>,
+  MAG_KMTQAITYPE_WDDM_3_0_CAPS = <span class='num'>77</span>,
+};
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+  D3DKMT_HANDLE adapter,
+  KMTQUERYADAPTERINFOTYPE <span class='tp'>type</span>,
+  <span class='kw'>void</span>* value,
+  <span class='tp'>UINT</span> valueSize)
+{
+    D3DKMT_QUERYADAPTERINFO query = { <span class='num'>0</span> };
+
+    query.hAdapter = adapter;
+    query.Type = <span class='tp'>type</span>;
+    query.pPrivateDriverData = value;
+    query.PrivateDriverDataSize = valueSize;
+    <span class='kw'>return</span> <span class='num'>0</span> == <span class='fn'>D3DKMTQueryAdapterInfo</span>(&amp;query);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>D3DKMTQueryDisplayPlaneCaps</span>(
+  <span class='tp'>LPCWSTR</span> deviceName,
+  <span class='tp'>MAGD3DKMTDISPLAYPLANECAPS</span>* caps)
+{
+    D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME openAdapter = { <span class='num'>0</span> };
+    D3DKMT_CLOSEADAPTER closeAdapter = { <span class='num'>0</span> };
+    D3DKMT_DIRECTFLIP_SUPPORT directFlip = { <span class='num'>0</span> };
+    D3DKMT_INDEPENDENTFLIP_SUPPORT independentFlip = { <span class='num'>0</span> };
+    D3DKMT_MULTIPLANEOVERLAY_SUPPORT multiPlaneOverlay = { <span class='num'>0</span> };
+    D3DKMT_MULTIPLANEOVERLAY_DECODE_SUPPORT multiPlaneOverlayDecode = { <span class='num'>0</span> };
+    D3DKMT_PANELFITTER_SUPPORT panelFitter = { <span class='num'>0</span> };
+    D3DKMT_MPO3DDI_SUPPORT mpo3Ddi = { <span class='num'>0</span> };
+    D3DKMT_MPOKERNELCAPS_SUPPORT mpoKernelCaps = { <span class='num'>0</span> };
+    D3DKMT_MULTIPLANEOVERLAY_HUD_SUPPORT mpoHud = { <span class='num'>0</span> };
+    D3DKMT_MULTIPLANEOVERLAY_SECONDARY_SUPPORT mpoSecondary = { <span class='num'>0</span> };
+    D3DKMT_INDEPENDENTFLIP_SECONDARY_SUPPORT independentFlipSecondary = { <span class='num'>0</span> };
+    D3DKMT_MULTIPLANEOVERLAY_STRETCH_SUPPORT mpoStretch = { <span class='num'>0</span> };
+    D3DKMT_GET_MULTIPLANE_OVERLAY_CAPS overlay = { <span class='num'>0</span> };
+    D3DKMT_GET_POST_COMPOSITION_CAPS postComposition = { <span class='num'>0</span> };
+    MAG_D3DKMT_QUERY_SCANOUT_CAPS scanout = { <span class='num'>0</span> };
+    MAG_D3DKMT_DISPLAY_CAPS displayCaps = { <span class='num'>0</span> };
+    MAG_D3DKMT_CROSS_ADAPTER_SUPPORT crossAdapter = { <span class='num'>0</span> };
+    MAG_D3DKMT_WDDM3_CAPS wddm3 = { <span class='num'>0</span> };
+    PFND3DKMT_GETMULTIPLANEOVERLAYCAPS getOverlayCaps = NULL;
+    PFND3DKMT_GETPOSTCOMPOSITIONCAPS getPostCompositionCaps = NULL;
+    <span class='tp'>HMODULE</span> gdi32;
+
+    <span class='kw'>if</span> (!deviceName || !deviceName[<span class='num'>0</span>] || !caps)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>ZeroMemory</span>(caps, <span class='kw'>sizeof</span>(*caps));
+    <span class='fn'>lstrcpynW</span>(
+      openAdapter.DeviceName,
+      deviceName,
+      <span class='fn'>ARRAYSIZE</span>(openAdapter.DeviceName));
+    <span class='kw'>if</span> (<span class='num'>0</span> != <span class='fn'>D3DKMTOpenAdapterFromGdiDisplayName</span>(&amp;openAdapter))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    caps-&gt;vidPnSourceId = openAdapter.VidPnSourceId;
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_DIRECTFLIP_SUPPORT,
+          &amp;directFlip,
+          <span class='kw'>sizeof</span>(directFlip)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;directFlip = directFlip.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_INDEPENDENTFLIP_SUPPORT,
+          &amp;independentFlip,
+          <span class='kw'>sizeof</span>(independentFlip)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;independentFlip = independentFlip.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MULTIPLANEOVERLAY_SUPPORT,
+          &amp;multiPlaneOverlay,
+          <span class='kw'>sizeof</span>(multiPlaneOverlay)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;multiPlaneOverlay = multiPlaneOverlay.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_QUERY_MULTIPLANEOVERLAY_DECODE_SUPPORT,
+          &amp;multiPlaneOverlayDecode,
+          <span class='kw'>sizeof</span>(multiPlaneOverlayDecode)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;multiPlaneOverlayDecode = multiPlaneOverlayDecode.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_PANELFITTER_SUPPORT,
+          &amp;panelFitter,
+          <span class='kw'>sizeof</span>(panelFitter)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;panelFitter = panelFitter.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MPO3DDI_SUPPORT,
+          &amp;mpo3Ddi,
+          <span class='kw'>sizeof</span>(mpo3Ddi)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;mpo3Ddi = mpo3Ddi.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MPOKERNELCAPS_SUPPORT,
+          &amp;mpoKernelCaps,
+          <span class='kw'>sizeof</span>(mpoKernelCaps)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;mpoKernelCaps = mpoKernelCaps.Supported;
+    }
+    mpoHud.VidPnSourceId = openAdapter.VidPnSourceId;
+    mpoHud.Update = TRUE;
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MULTIPLANEOVERLAY_HUD_SUPPORT,
+          &amp;mpoHud,
+          <span class='kw'>sizeof</span>(mpoHud)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;mpoHudKernel = mpoHud.KernelSupported;
+      caps-&gt;mpoHud = mpoHud.HudSupported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MULTIPLANEOVERLAY_SECONDARY_SUPPORT,
+          &amp;mpoSecondary,
+          <span class='kw'>sizeof</span>(mpoSecondary)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;mpoSecondary = mpoSecondary.Supported;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_INDEPENDENTFLIP_SECONDARY_SUPPORT,
+          &amp;independentFlipSecondary,
+          <span class='kw'>sizeof</span>(independentFlipSecondary)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;independentFlipSecondary = independentFlipSecondary.Supported;
+    }
+    mpoStretch.VidPnSourceId = openAdapter.VidPnSourceId;
+    mpoStretch.Update = TRUE;
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          KMTQAITYPE_MULTIPLANEOVERLAY_STRETCH_SUPPORT,
+          &amp;mpoStretch,
+          <span class='kw'>sizeof</span>(mpoStretch)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;mpoStretch = mpoStretch.Supported;
+    }
+    scanout.vidPnSourceId = openAdapter.VidPnSourceId;
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          (KMTQUERYADAPTERINFOTYPE)MAG_KMTQAITYPE_SCANOUT_CAPS,
+          &amp;scanout,
+          <span class='kw'>sizeof</span>(scanout)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;scanoutCapsKnown = TRUE;
+      caps-&gt;scanoutCaps = scanout.caps;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          (KMTQUERYADAPTERINFOTYPE)MAG_KMTQAITYPE_DISPLAY_CAPS,
+          &amp;displayCaps,
+          <span class='kw'>sizeof</span>(displayCaps)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;displayCapsKnown = TRUE;
+      caps-&gt;displayPreferPhysicallyContiguous =
+        <span class='num'>0</span> != (displayCaps.value &amp; <span class='num'>0x1ULL</span>);
+      caps-&gt;displayCursorScaledWithMpoPlane0 =
+        <span class='num'>0</span> != (displayCaps.value &amp; <span class='num'>0x2ULL</span>);
+      caps-&gt;displayCursorNoXorWithMpo =
+        <span class='num'>0</span> != (displayCaps.value &amp; <span class='num'>0x4ULL</span>);
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          (KMTQUERYADAPTERINFOTYPE)
+            MAG_KMTQAITYPE_CROSS_ADAPTER_RESOURCE_SUPPORT,
+          &amp;crossAdapter,
+          <span class='kw'>sizeof</span>(crossAdapter)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;crossAdapterSupportKnown = TRUE;
+      caps-&gt;crossAdapterSupportTier = crossAdapter.supportTier;
+    }
+    <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryAdapterBoolean</span>(
+          openAdapter.hAdapter,
+          (KMTQUERYADAPTERINFOTYPE)MAG_KMTQAITYPE_WDDM_3_0_CAPS,
+          &amp;wddm3,
+          <span class='kw'>sizeof</span>(wddm3)))
+    {
+      caps-&gt;<span class='tp'>queried</span> = TRUE;
+      caps-&gt;wddm3CapsKnown = TRUE;
+      caps-&gt;hardwareFlipQueueSupportState = wddm3.value &amp; <span class='num'>0x3U</span>;
+      caps-&gt;hardwareFlipQueueSupported = <span class='num'>0</span> != (wddm3.value &amp; <span class='num'>0x3U</span>);
+      caps-&gt;hardwareFlipQueueEnabled = <span class='num'>0</span> != (wddm3.value &amp; <span class='num'>0x4U</span>);
+      caps-&gt;displayableSupported = <span class='num'>0</span> != (wddm3.value &amp; <span class='num'>0x8U</span>);
+    }
+
+    gdi32 = <span class='fn'>GetModuleHandle</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;gdi32.dll&quot;</span>));
+    <span class='kw'>if</span> (gdi32)
+    {
+      getOverlayCaps = (PFND3DKMT_GETMULTIPLANEOVERLAYCAPS)<span class='fn'>GetProcAddress</span>(
+        gdi32,
+        <span class='str'>&quot;D3DKMTGetMultiPlaneOverlayCaps&quot;</span>);
+      getPostCompositionCaps =
+        (PFND3DKMT_GETPOSTCOMPOSITIONCAPS)<span class='fn'>GetProcAddress</span>(
+          gdi32,
+          <span class='str'>&quot;D3DKMTGetPostCompositionCaps&quot;</span>);
+    }
+    <span class='kw'>if</span> (getOverlayCaps)
+    {
+      overlay.hAdapter = openAdapter.hAdapter;
+      overlay.VidPnSourceId = openAdapter.VidPnSourceId;
+      <span class='kw'>if</span> (<span class='num'>0</span> == <span class='fn'>getOverlayCaps</span>(&amp;overlay))
+      {
+        caps-&gt;<span class='tp'>queried</span> = TRUE;
+        caps-&gt;overlayCapsKnown = TRUE;
+        caps-&gt;maxPlanes = overlay.MaxPlanes;
+        caps-&gt;maxRgbPlanes = overlay.MaxRGBPlanes;
+        caps-&gt;maxYuvPlanes = overlay.MaxYUVPlanes;
+        caps-&gt;overlayCaps = overlay.OverlayCaps.Value;
+        caps-&gt;overlayRotation = overlay.OverlayCaps.Rotation;
+        caps-&gt;overlayRotationWithoutIndependentFlip =
+          overlay.OverlayCaps.RotationWithoutIndependentFlip;
+        caps-&gt;overlayVerticalFlip = overlay.OverlayCaps.VerticalFlip;
+        caps-&gt;overlayHorizontalFlip = overlay.OverlayCaps.HorizontalFlip;
+        caps-&gt;overlayStretchRgb = overlay.OverlayCaps.StretchRGB;
+        caps-&gt;overlayStretchYuv = overlay.OverlayCaps.StretchYUV;
+        caps-&gt;overlayBilinearFilter = overlay.OverlayCaps.BilinearFilter;
+        caps-&gt;overlayHighFilter = overlay.OverlayCaps.HighFilter;
+        caps-&gt;overlayShared = overlay.OverlayCaps.Shared;
+        caps-&gt;overlayImmediate = overlay.OverlayCaps.Immediate;
+        caps-&gt;overlayPlane0ForVirtualModeOnly =
+          overlay.OverlayCaps.Plane0ForVirtualModeOnly;
+        caps-&gt;overlayVersion3Ddi = overlay.OverlayCaps.Version3DDISupport;
+        caps-&gt;maxStretchFactor = overlay.MaxStretchFactor;
+        caps-&gt;maxShrinkFactor = overlay.MaxShrinkFactor;
+        caps-&gt;multiPlaneOverlay = overlay.MaxPlanes &gt; <span class='num'>1</span>;
+      }
+    }
+    <span class='kw'>if</span> (getPostCompositionCaps)
+    {
+      postComposition.hAdapter = openAdapter.hAdapter;
+      postComposition.VidPnSourceId = openAdapter.VidPnSourceId;
+      <span class='kw'>if</span> (<span class='num'>0</span> == <span class='fn'>getPostCompositionCaps</span>(&amp;postComposition))
+      {
+        caps-&gt;<span class='tp'>queried</span> = TRUE;
+        caps-&gt;postCompositionCaps = TRUE;
+        caps-&gt;postCompositionMaxStretchFactor =
+          postComposition.MaxStretchFactor;
+        caps-&gt;postCompositionMaxShrinkFactor =
+          postComposition.MaxShrinkFactor;
+      }
+    }
+
+    closeAdapter.hAdapter = openAdapter.hAdapter;
+    <span class='fn'>D3DKMTCloseAdapter</span>(&amp;closeAdapter);
+    <span class='kw'>return</span> caps-&gt;<span class='tp'>queried</span>;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>D3DKMTWaitForVerticalBlank</span>(<span class='tp'>HWND</span> hWnd)
 {
     <span class='tp'>NTSTATUS</span> status;
     <span class='kw'>static</span> D3DKMT_WAITFORVERTICALBLANKEVENT vbe = { <span class='num'>0</span> };
@@ -32,7 +341,7 @@ BOOL <span class='fn'>D3DKMTWaitForVerticalBlank</span>(HWND hWnd)
       status = <span class='fn'>D3DKMTOpenAdapterFromHdc</span>(&amp;oa);
 
       <span class='fn'>ReleaseDC</span>(hWnd, oa.hDc);
-    
+&#32;&#32;&#32;&#32;
       <span class='kw'>if</span> (<span class='num'>0</span> != status)
       {
         <span class='kw'>return</span> FALSE;
@@ -65,5 +374,6 @@ BOOL <span class='fn'>D3DKMTWaitForVerticalBlank</span>(HWND hWnd)
     <span class='kw'>return</span> TRUE;
 }
 </pre>
+<p class="source-nav"><a href='d2dwriteabi_h.htm'>&larr; d2dwriteabi.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='d3dkmtx_h.htm'>d3dkmtx.h &rarr;</a></p>
 </body>
 </html>

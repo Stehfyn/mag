@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics.c</p>
+<h1>graphics.c</h1>
+<p>Graphics backend catalog and shared backend dispatch.</p>
+<div class="source-meta"><strong>349 lines</strong> &middot; 9423 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='gdiplusabi_h.htm'>&larr; gdiplusabi.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_h.htm'>graphics.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;graphics.h&quot;</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* <span class='kw'>const</span> g_graphicsBackends[] =
+{
+  &amp;g_magGraphicsOpenGLBackend,
+  &amp;g_magGraphicsGdiBackend,
+  &amp;g_magGraphicsGdiPlusBackend,
+  &amp;g_magGraphicsD3D9Backend,
+  &amp;g_magGraphicsD3D11Backend,
+  &amp;g_magGraphicsD3D12Backend,
+  &amp;g_magGraphicsVulkanBackend,
+};
+
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_graphicsBackends) == GRAPHICS_API_COUNT);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGRESERVOIRMEASURE
+{
+  <span class='tp'>LONG</span> width;
+  <span class='tp'>LONG</span> height;
+  <span class='tp'>LONG</span> <span class='tp'>left</span>;
+  <span class='tp'>LONG</span> top;
+  <span class='tp'>LONG</span> right;
+  <span class='tp'>LONG</span> bottom;
+  <span class='tp'>BOOL</span> haveBounds;
+} MAGRESERVOIRMEASURE;
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='kw'>CALLBACK</span> <span class='fn'>magGraphicsMeasureMonitor</span>(<span class='tp'>HMONITOR</span> monitor, <span class='tp'>HDC</span> hDC, LPRECT <span class='tp'>rect</span>, <span class='tp'>LPARAM</span> context)
+{
+    MAGRESERVOIRMEASURE* measure = (MAGRESERVOIRMEASURE*)context;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(monitor);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hDC);
+    <span class='kw'>if</span> (measure &amp;&amp; <span class='tp'>rect</span>)
+    {
+      measure-&gt;width = <span class='fn'>max</span>(measure-&gt;width, <span class='tp'>rect</span>-&gt;right - <span class='tp'>rect</span>-&gt;<span class='tp'>left</span>);
+      measure-&gt;height = <span class='fn'>max</span>(measure-&gt;height, <span class='tp'>rect</span>-&gt;bottom - <span class='tp'>rect</span>-&gt;top);
+      <span class='kw'>if</span> (!measure-&gt;haveBounds)
+      {
+        measure-&gt;<span class='tp'>left</span> = <span class='tp'>rect</span>-&gt;<span class='tp'>left</span>;
+        measure-&gt;top = <span class='tp'>rect</span>-&gt;top;
+        measure-&gt;right = <span class='tp'>rect</span>-&gt;right;
+        measure-&gt;bottom = <span class='tp'>rect</span>-&gt;bottom;
+        measure-&gt;haveBounds = TRUE;
+      }
+      <span class='kw'>else</span>
+      {
+        measure-&gt;<span class='tp'>left</span> = <span class='fn'>min</span>(measure-&gt;<span class='tp'>left</span>, <span class='tp'>rect</span>-&gt;<span class='tp'>left</span>);
+        measure-&gt;top = <span class='fn'>min</span>(measure-&gt;top, <span class='tp'>rect</span>-&gt;top);
+        measure-&gt;right = <span class='fn'>max</span>(measure-&gt;right, <span class='tp'>rect</span>-&gt;right);
+        measure-&gt;bottom = <span class='fn'>max</span>(measure-&gt;bottom, <span class='tp'>rect</span>-&gt;bottom);
+      }
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>SIZE</span> <span class='fn'>magGraphicsChooseReservoirSize</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>SIZE</span> minimumSize)
+{
+    MAGRESERVOIRMEASURE measure = { <span class='num'>0</span> };
+    <span class='tp'>SIZE</span> result;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='fn'>EnumDisplayMonitors</span>(NULL, NULL, magGraphicsMeasureMonitor, (<span class='tp'>LPARAM</span>)&amp;measure);
+    <span class='kw'>if</span> (measure.haveBounds)
+    {
+      measure.width = <span class='fn'>max</span>(measure.width, measure.right - measure.<span class='tp'>left</span>);
+      measure.height = <span class='fn'>max</span>(measure.height, measure.bottom - measure.top);
+    }
+    result.cx = <span class='fn'>max</span>(<span class='fn'>max</span>(<span class='num'>1</span>, minimumSize.cx), measure.width);
+    result.cy = <span class='fn'>max</span>(<span class='fn'>max</span>(<span class='num'>1</span>, minimumSize.cy), measure.height);
+    <span class='kw'>return</span> result;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsIsInputDesktop</span>(<span class='kw'>void</span>)
+{
+    <span class='tp'>HDESK</span> inputDesktop = <span class='fn'>OpenInputDesktop</span>(<span class='num'>0</span>, FALSE, DESKTOP_READOBJECTS);
+    <span class='tp'>HDESK</span> currentDesktop = <span class='fn'>GetThreadDesktop</span>(<span class='fn'>GetCurrentThreadId</span>());
+    <span class='tp'>TCHAR</span> inputName[<span class='num'>128</span>] = { <span class='num'>0</span> };
+    <span class='tp'>TCHAR</span> currentName[<span class='num'>128</span>] = { <span class='num'>0</span> };
+    <span class='tp'>DWORD</span> required;
+    <span class='tp'>BOOL</span> matches = FALSE;
+
+    <span class='kw'>if</span> (inputDesktop &amp;&amp; currentDesktop &amp;&amp;
+        <span class='fn'>GetUserObjectInformation</span>(inputDesktop, UOI_NAME, inputName, <span class='kw'>sizeof</span>(inputName), &amp;required) &amp;&amp;
+        <span class='fn'>GetUserObjectInformation</span>(currentDesktop, UOI_NAME, currentName, <span class='kw'>sizeof</span>(currentName), &amp;required))
+    {
+      matches = <span class='num'>0</span> == <span class='fn'>lstrcmpi</span>(inputName, currentName);
+    }
+    <span class='kw'>if</span> (inputDesktop)
+    {
+      <span class='fn'>CloseDesktop</span>(inputDesktop);
+    }
+    <span class='kw'>return</span> matches;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsSetPresentationEnabledNoop</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* <span class='tp'>state</span>, <span class='tp'>BOOL</span> enabled)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(enabled);
+    <span class='kw'>return</span> NULL != <span class='tp'>state</span>;
+}
+
+<span class='kw'>static</span> <span class='tp'>BYTE</span> <span class='fn'>magGraphicsColorByte</span>(<span class='tp'>FLOAT</span> value)
+{
+    value = <span class='fn'>max</span>(<span class='num'>0.0f</span>, <span class='fn'>min</span>(<span class='num'>1.0f</span>, value));
+    <span class='kw'>return</span> (<span class='tp'>BYTE</span>)(value * <span class='num'>255.0f</span> + <span class='num'>0.5f</span>);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsCpuFillRect</span>(
+  <span class='tp'>LPMAGPIXELBUFFER</span> output,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* sourceRect,
+  <span class='tp'>MAGCOLORF</span> color)
+{
+    <span class='tp'>RECT</span> bounds = { <span class='num'>0</span>, <span class='num'>0</span>, (<span class='tp'>LONG</span>)output-&gt;width, (<span class='tp'>LONG</span>)output-&gt;height };
+    <span class='tp'>RECT</span> <span class='tp'>rect</span>;
+    <span class='kw'>const</span> <span class='tp'>UINT</span> <span class='tp'>alpha</span> = <span class='fn'>magGraphicsColorByte</span>(color.a);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> inverseAlpha = <span class='num'>255U</span> - <span class='tp'>alpha</span>;
+    <span class='kw'>const</span> <span class='tp'>UINT</span> blue = <span class='fn'>magGraphicsColorByte</span>(color.b);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> green = <span class='fn'>magGraphicsColorByte</span>(color.g);
+    <span class='kw'>const</span> <span class='tp'>UINT</span> red = <span class='fn'>magGraphicsColorByte</span>(color.<span class='tp'>r</span>);
+    <span class='tp'>LONG</span> y;
+
+    <span class='kw'>if</span> (!<span class='tp'>alpha</span> || !<span class='fn'>IntersectRect</span>(&amp;<span class='tp'>rect</span>, sourceRect, &amp;bounds))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>for</span> (y = <span class='tp'>rect</span>.top; y &lt; <span class='tp'>rect</span>.bottom; ++y)
+    {
+      <span class='tp'>BYTE</span>* pixel = output-&gt;<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)y * output-&gt;stride + (<span class='tp'>SIZE_T</span>)<span class='tp'>rect</span>.<span class='tp'>left</span> * <span class='num'>4U</span>;
+      <span class='tp'>LONG</span> <span class='tp'>x</span>;
+
+      <span class='kw'>for</span> (<span class='tp'>x</span> = <span class='tp'>rect</span>.<span class='tp'>left</span>; <span class='tp'>x</span> &lt; <span class='tp'>rect</span>.right; ++<span class='tp'>x</span>, pixel += <span class='num'>4</span>)
+      {
+        pixel[<span class='num'>0</span>] = (<span class='tp'>BYTE</span>)((blue * <span class='tp'>alpha</span> + pixel[<span class='num'>0</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+        pixel[<span class='num'>1</span>] = (<span class='tp'>BYTE</span>)((green * <span class='tp'>alpha</span> + pixel[<span class='num'>1</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+        pixel[<span class='num'>2</span>] = (<span class='tp'>BYTE</span>)((red * <span class='tp'>alpha</span> + pixel[<span class='num'>2</span>] * inverseAlpha + <span class='num'>127U</span>) / <span class='num'>255U</span>);
+        pixel[<span class='num'>3</span>] = <span class='num'>255</span>;
+      }
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsCpuStrokeRect</span>(
+  <span class='tp'>LPMAGPIXELBUFFER</span> output,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='kw'>const</span> <span class='tp'>LONG</span> thickness = <span class='fn'>max</span>(<span class='num'>1</span>, (<span class='tp'>LONG</span>)(command-&gt;thickness + <span class='num'>0.5f</span>));
+    <span class='kw'>const</span> <span class='tp'>RECT</span> edges[] =
+    {
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.top, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.top + thickness },
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.bottom - thickness, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.bottom },
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.top + thickness, command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> + thickness, command-&gt;<span class='tp'>rect</span>.bottom - thickness },
+      { command-&gt;<span class='tp'>rect</span>.right - thickness, command-&gt;<span class='tp'>rect</span>.top + thickness, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.bottom - thickness },
+    };
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(edges); ++i)
+    {
+      <span class='fn'>magGraphicsCpuFillRect</span>(output, &amp;edges[i], command-&gt;color);
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsReserveCpuCompositor</span>(
+  <span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor,
+  <span class='tp'>UINT</span> width,
+  <span class='tp'>UINT</span> height)
+{
+    <span class='tp'>SIZE_T</span> required;
+    <span class='tp'>BYTE</span>* <span class='tp'>pixels</span>;
+
+    <span class='kw'>if</span> (!compositor || !width || !height || width &gt; MAXUINT / <span class='num'>4U</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    required = (<span class='tp'>SIZE_T</span>)width * <span class='num'>4U</span> * height;
+    <span class='kw'>if</span> (required / height != (<span class='tp'>SIZE_T</span>)width * <span class='num'>4U</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (compositor-&gt;capacity &lt; required)
+    {
+      <span class='tp'>pixels</span> = compositor-&gt;<span class='tp'>pixels</span>
+        ? (<span class='tp'>BYTE</span>*)<span class='fn'>HeapReAlloc</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, compositor-&gt;<span class='tp'>pixels</span>, required)
+        : (<span class='tp'>BYTE</span>*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, required);
+      <span class='kw'>if</span> (!<span class='tp'>pixels</span>)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+      compositor-&gt;<span class='tp'>pixels</span> = <span class='tp'>pixels</span>;
+      compositor-&gt;capacity = required;
+      ++compositor-&gt;generation;
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magGraphicsComposeFrame</span>(
+  <span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output)
+{
+    <span class='tp'>UINT</span> y;
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!compositor || !frame || !frame-&gt;<span class='tp'>pixels</span> || !frame-&gt;width || !frame-&gt;height || !output ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(compositor, frame-&gt;width, frame-&gt;height))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    output-&gt;<span class='tp'>pixels</span> = compositor-&gt;<span class='tp'>pixels</span>;
+    output-&gt;width = frame-&gt;width;
+    output-&gt;height = frame-&gt;height;
+    output-&gt;stride = frame-&gt;width * <span class='num'>4U</span>;
+    output-&gt;rowOrder = MAG_ROW_ORDER_TOP_DOWN;
+    output-&gt;alphaMode = MAG_ALPHA_MODE_IGNORE;
+
+    <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; frame-&gt;height; ++y)
+    {
+      <span class='kw'>const</span> <span class='tp'>UINT</span> sourceY = MAG_ROW_ORDER_TOP_DOWN == frame-&gt;rowOrder ? y : frame-&gt;height - <span class='num'>1U</span> - y;
+      <span class='fn'>CopyMemory</span>(
+        output-&gt;<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)y * output-&gt;stride,
+        frame-&gt;<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)sourceY * frame-&gt;stride,
+        output-&gt;stride);
+    }
+
+    <span class='kw'>if</span> (ui)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (MAG_UI_DRAW_FILL_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsCpuFillRect</span>(output, &amp;ui-&gt;commands[i].<span class='tp'>rect</span>, ui-&gt;commands[i].color);
+        }
+        <span class='kw'>else</span> <span class='kw'>if</span> (MAG_UI_DRAW_STROKE_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsCpuStrokeRect</span>(output, &amp;ui-&gt;commands[i]);
+        }
+      }
+    }
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magGraphicsDestroyCpuCompositor</span>(<span class='tp'>LPMAGCPUCOMPOSITOR</span> compositor)
+{
+    <span class='kw'>if</span> (compositor)
+    {
+      <span class='kw'>if</span> (compositor-&gt;<span class='tp'>pixels</span>)
+      {
+        <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, compositor-&gt;<span class='tp'>pixels</span>);
+      }
+      <span class='fn'>ZeroMemory</span>(compositor, <span class='kw'>sizeof</span>(*compositor));
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>magUiDrawListReset</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list)
+{
+    <span class='kw'>if</span> (list)
+    {
+      list-&gt;<span class='tp'>count</span> = <span class='num'>0</span>;
+      list-&gt;glyphAtlas = NULL;
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendFill</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list, <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>, <span class='tp'>MAGCOLORF</span> color)
+{
+    <span class='tp'>MAGUIDRAWCOMMAND</span>* command;
+
+    <span class='kw'>if</span> (!list || !<span class='tp'>rect</span> || list-&gt;<span class='tp'>count</span> &gt;= <span class='fn'>ARRAYSIZE</span>(list-&gt;commands))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    command = &amp;list-&gt;commands[list-&gt;<span class='tp'>count</span>++];
+    command-&gt;<span class='tp'>type</span> = MAG_UI_DRAW_FILL_RECT;
+    command-&gt;<span class='tp'>rect</span> = *<span class='tp'>rect</span>;
+    command-&gt;color = color;
+    command-&gt;thickness = <span class='num'>0.0f</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendStroke</span>(<span class='tp'>LPMAGUIDRAWLIST</span> list, <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>, <span class='tp'>MAGCOLORF</span> color, <span class='tp'>FLOAT</span> thickness)
+{
+    <span class='tp'>MAGUIDRAWCOMMAND</span>* command;
+
+    <span class='kw'>if</span> (!list || !<span class='tp'>rect</span> || list-&gt;<span class='tp'>count</span> &gt;= <span class='fn'>ARRAYSIZE</span>(list-&gt;commands) || thickness &lt;= <span class='num'>0.0f</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    command = &amp;list-&gt;commands[list-&gt;<span class='tp'>count</span>++];
+    command-&gt;<span class='tp'>type</span> = MAG_UI_DRAW_STROKE_RECT;
+    command-&gt;<span class='tp'>rect</span> = *<span class='tp'>rect</span>;
+    command-&gt;color = color;
+    command-&gt;thickness = thickness;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiDrawListAppendText</span>(
+  <span class='tp'>LPMAGUIDRAWLIST</span> list,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>,
+  <span class='tp'>MAGCOLORF</span> color,
+  <span class='tp'>FLOAT</span> fontSize,
+  <span class='tp'>LPCTSTR</span> value)
+{
+    <span class='tp'>MAGUIDRAWCOMMAND</span>* command;
+
+    <span class='kw'>if</span> (!list || !<span class='tp'>rect</span> || !value || list-&gt;<span class='tp'>count</span> &gt;= <span class='fn'>ARRAYSIZE</span>(list-&gt;commands) || fontSize &lt;= <span class='num'>0.0f</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    command = &amp;list-&gt;commands[list-&gt;<span class='tp'>count</span>++];
+    <span class='fn'>ZeroMemory</span>(command, <span class='kw'>sizeof</span>(*command));
+    command-&gt;<span class='tp'>type</span> = MAG_UI_DRAW_TEXT;
+    command-&gt;<span class='tp'>rect</span> = *<span class='tp'>rect</span>;
+    command-&gt;color = color;
+    command-&gt;fontSize = fontSize;
+    <span class='fn'>lstrcpyn</span>(command-&gt;text, value, <span class='fn'>ARRAYSIZE</span>(command-&gt;text));
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>UINT</span> <span class='fn'>magGraphicsGetBackendCount</span>(<span class='kw'>void</span>)
+{
+    <span class='kw'>return</span> <span class='fn'>ARRAYSIZE</span>(g_graphicsBackends);
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* <span class='fn'>magGraphicsGetBackendAt</span>(<span class='tp'>UINT</span> index)
+{
+    <span class='kw'>return</span> index &lt; <span class='fn'>ARRAYSIZE</span>(g_graphicsBackends) ? g_graphicsBackends[index] : NULL;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* <span class='fn'>magGraphicsGetBackend</span>(<span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(g_graphicsBackends); ++i)
+    {
+      <span class='kw'>if</span> (g_graphicsBackends[i]-&gt;<span class='tp'>api</span> == <span class='tp'>api</span>)
+      {
+        <span class='kw'>return</span> g_graphicsBackends[i];
+      }
+    }
+
+    <span class='kw'>return</span> NULL;
+}
+</pre>
+<p class="source-nav"><a href='gdiplusabi_h.htm'>&larr; gdiplusabi.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_h.htm'>graphics.h &rarr;</a></p>
+</body>
+</html>

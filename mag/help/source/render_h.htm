@@ -3,39 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>render.h - Source Code</title>
+  <title>render.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; render.h</p>
 <h1>render.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>236 lines</strong> &middot; 7385 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='render_c.htm'>&larr; render.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='resource_h.htm'>resource.h &rarr;</a></p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;dwmprivate.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;graphics_layered.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+<span class='pp'>#include &quot;ui_renderer.h&quot;</span>
 
 <span class='pp'>#include &lt;d3d11.h&gt;</span>
 <span class='pp'>#include &lt;dxgi1_2.h&gt;</span>
-<span class='pp'>#include &lt;gl/GL.h&gt;</span>
 
 <span class='pp'>#define CHANNELS (4)</span>
 <span class='pp'>#define BITS_PER_PIXEL (CHANNELS &lt;&lt; 3) // 8 bits = 2^3 </span>
 <span class='pp'>#define SURFACE_BYTES(rc) (CHANNELS * RECTWIDTH((rc)) * RECTHEIGHT((rc)))</span>
-
-<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>GRAPHICSAPI</span>
-{
-  GRAPHICS_API_OPENGL = <span class='num'>0</span>,
-  GRAPHICS_API_COUNT
-} <span class='tp'>GRAPHICSAPI</span>;
-
-<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>CAPTUREAPI</span>
-{
-  CAPTURE_API_GDI_BITBLT = <span class='num'>0</span>,
-  CAPTURE_API_DXGI_DESKTOP_DUPLICATION,
-  CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE,
-  CAPTURE_API_DWM_THUMBNAIL,
-  CAPTURE_API_DWM_PRIVATE_VISUAL,
-  CAPTURE_API_COUNT
-} <span class='tp'>CAPTUREAPI</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>MAGVIEWMODE</span>
 {
@@ -47,21 +38,21 @@
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DXGIOUTPUTCAPTURE</span>
 {
-  ID3D11Device*             d3dDevice;
+  ID3D11Device*             <span class='tp'>d3dDevice</span>;
   ID3D11DeviceContext*      d3dContext;
   IDXGIOutputDuplication*   dxgiDuplication;
   ID3D11Texture2D*          dxgiFrameTexture;
   ID3D11Texture2D*          dxgiStagingTexture;
-  HMONITOR                  hMonitor;
-  RECT                      rcOutput;
-  UINT                      dxgiStagingWidth;
-  UINT                      dxgiStagingHeight;
-  BOOL                      fHasFrame;
+  <span class='tp'>HMONITOR</span>                  hMonitor;
+  <span class='tp'>RECT</span>                      rcOutput;
+  <span class='tp'>UINT</span>                      dxgiStagingWidth;
+  <span class='tp'>UINT</span>                      dxgiStagingHeight;
+  <span class='tp'>BOOL</span>                      fHasFrame;
 } <span class='tp'>DXGIOUTPUTCAPTURE</span>, *<span class='tp'>LPDXGIOUTPUTCAPTURE</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>WGCMONITORCAPTURE</span>
 {
-  ID3D11Device*             d3dDevice;
+  ID3D11Device*             <span class='tp'>d3dDevice</span>;
   ID3D11DeviceContext*      d3dContext;
   IUnknown*                 wgcDevice;
   IUnknown*                 wgcItem;
@@ -69,105 +60,194 @@
   IUnknown*                 wgcSession;
   ID3D11Texture2D*          wgcFrameTexture;
   ID3D11Texture2D*          wgcStagingTexture;
-  HMONITOR                  hMonitor;
-  RECT                      rcOutput;
-  UINT                      wgcFrameWidth;
-  UINT                      wgcFrameHeight;
-  UINT                      wgcStagingWidth;
-  UINT                      wgcStagingHeight;
-  BOOL                      fHasFrame;
+  <span class='tp'>HMONITOR</span>                  hMonitor;
+  <span class='tp'>RECT</span>                      rcOutput;
+  <span class='tp'>UINT</span>                      wgcFrameWidth;
+  <span class='tp'>UINT</span>                      wgcFrameHeight;
+  <span class='tp'>UINT</span>                      wgcStagingWidth;
+  <span class='tp'>UINT</span>                      wgcStagingHeight;
+  <span class='tp'>BOOL</span>                      fHasFrame;
 } <span class='tp'>WGCMONITORCAPTURE</span>, *<span class='tp'>LPWGCMONITORCAPTURE</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMTHUMBNAILCAPTURE</span>
 {
-  HTHUMBNAIL hThumbnail;
-  HWND       hwndSource;
+  <span class='tp'>HTHUMBNAIL</span> <span class='tp'>hThumbnail</span>;
+  <span class='tp'>HWND</span>       hwndSource;
 } <span class='tp'>DWMTHUMBNAILCAPTURE</span>, *<span class='tp'>LPDWMTHUMBNAILCAPTURE</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMPRIVATEVISUALCAPTURE</span>
 {
-  HWND         hwndHost;
-  HMODULE      hDComp;
-  HMODULE      hDwmApi;
-  HMODULE      hUser32;
-  FARPROC      pDCompositionCreateDevice;
-  FARPROC      pDCompositionCreateDevice3;
-  FARPROC      pCreateSharedVisual;
-  FARPROC      pUpdateSharedVisual;
-  FARPROC      pSetWindowCompositionAttribute;
-  ID3D11Device* d3dDevice;
-  IDXGIDevice* dxgiDevice;
-  IUnknown*    dcompDevice;
-  IUnknown*    dcompTarget;
-  IUnknown*    dcompVisual;
-  HTHUMBNAIL   hThumbnail;
-  BOOL         fDesktopDevice;
-  BOOL         fUseMultiWindow;
-  BOOL         fInitialized;
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* <span class='tp'>state</span>;
 } <span class='tp'>DWMPRIVATEVISUALCAPTURE</span>, *<span class='tp'>LPDWMPRIVATEVISUALCAPTURE</span>;
 
-<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>SHAREDWGLDATA</span>
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGVIEWGEOMETRY</span>
 {
-  BOOL             fTrackCursor;
-  BOOL             fWinRtInitialized;
-  BOOL             fUseSourceOrigin;
-  BOOL             fMouseRelativeZoom;
-  BOOL             fMiniMapDragging;
-  BOOL             fMiniMapHoldVisible;
-  BOOL             fMiniMapHaveLastCursor;
-  BOOL             fSourceOriginPinned;
-  BOOL             fInSizeMove;
-  BOOL             fRenderMessageDriven;
+  <span class='tp'>RECT</span> <span class='tp'>rcClient</span>;
+  <span class='tp'>RECT</span> rcWindow;
+  <span class='tp'>RECT</span> rcCapture;
+  <span class='tp'>RECT</span> rcSource;
+  <span class='tp'>RECT</span> rcClippedSource;
+  <span class='tp'>RECT</span> rcDestination;
+  <span class='tp'>SIZE</span> targetSize;
+  <span class='tp'>BOOL</span> sourceVisible;
+} <span class='tp'>MAGVIEWGEOMETRY</span>, *<span class='tp'>LPMAGVIEWGEOMETRY</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGSTATE</span>
+{
+  <span class='tp'>BOOL</span>             <span class='tp'>fTrackCursor</span>;
+  <span class='tp'>BOOL</span>             fWinRtInitialized;
+  <span class='tp'>BOOL</span>             fUseSourceOrigin;
+  <span class='tp'>BOOL</span>             fMouseRelativeZoom;
+  <span class='tp'>BOOL</span>             fAutoSettingsPreset;
+  <span class='tp'>BOOL</span>             fMiniMapDragging;
+  <span class='tp'>BOOL</span>             fMiniMapHoldVisible;
+  <span class='tp'>BOOL</span>             fMiniMapHaveLastCursor;
+  <span class='tp'>BOOL</span>             fSourceOriginPinned;
+  <span class='tp'>BOOL</span>             fInSizeMove;
+  <span class='tp'>BOOL</span>             fRenderMessageDriven;
   <span class='tp'>MAGVIEWMODE</span>      viewMode;
   <span class='tp'>GRAPHICSAPI</span>      graphicsApi;
+  <span class='tp'>UIGRAPHICSAPI</span>    uiGraphicsApi;
+  <span class='tp'>TEXTRENDERER</span>     textRenderer;
   <span class='tp'>CAPTUREAPI</span>       captureApi;
-  POINT            pt;
-  POINT            ptSourceOrigin;
-  POINT            ptMiniMapDragOffset;
-  POINT            ptMiniMapLastCursor;
-  DWORD            dwMiniMapLastActivity;
-  RECT             rc;
+  <span class='tp'>CAPTUREAPI</span>       activeCaptureApi;
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span> presentationSettings;
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span> resolvedPresentation;
+  <span class='tp'>MAGPRESENTATIONSTATUS</span> presentationStatus;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> lastObservedTarget;
+  <span class='tp'>UINT</span>             observedTargetConsecutiveFrames;
+  <span class='tp'>MAGLAYEREDPRESENTER</span>* layeredPresenter;
+  SRWLOCK          graphicsLock;
+  <span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span>* graphicsBackend;
+  <span class='kw'>void</span>*            graphicsState;
+  <span class='kw'>void</span>*            parkedOpenGlState;
+  <span class='kw'>void</span>*            parkedVulkanState;
+  <span class='tp'>POINT</span>            pt;
+  <span class='tp'>POINT</span>            ptSourceOrigin;
+  <span class='tp'>POINT</span>            ptMiniMapDragOffset;
+  <span class='tp'>POINT</span>            ptMiniMapLastCursor;
+  <span class='tp'>DWORD</span>            dwMiniMapLastActivity;
+  <span class='tp'>RECT</span>             <span class='tp'>rc</span>;
   <span class='tp'>DISPLAYINFO</span>      di;
   BITMAPINFOHEADER bi;
-  HDC              hDC;
-  HGLRC            hRC;
-  HPBUFFERARB      pb;
-  FLOAT            fScale;
-  HDC              hCaptureDC;
-  HDC              hDesktopDC;
-  HBITMAP          hBitmapBg;
-  HBITMAP          hBitmapOld;
-  <span class='tp'>DXGIOUTPUTCAPTURE</span> dxgiOutputs[MAX_ENUM_MONITORS];
-  <span class='tp'>WGCMONITORCAPTURE</span> wgcMonitors[MAX_ENUM_MONITORS];
+  <span class='tp'>MAGVIEWGEOMETRY</span>  viewGeometry;
+  <span class='tp'>BOOL</span>             fViewGeometryActive;
+  <span class='tp'>MAGPIXELBUFFER</span>   frame;
+  <span class='tp'>UINT</span>             frameCapacityWidth;
+  <span class='tp'>UINT</span>             frameCapacityHeight;
+  <span class='tp'>UINT64</span>           captureSurfaceGeneration;
+  <span class='tp'>MAGUIDRAWLIST</span>    uiDrawList;
+  <span class='tp'>MAGUIRENDERER</span>*   uiRenderer;
+  <span class='tp'>MAGPIXELBUFFER</span>   presentationFrame;
+  <span class='tp'>SIZE</span>             presentedContentSize;
+  <span class='tp'>BOOL</span>             fPresentedContentValid;
+  <span class='tp'>BOOL</span>             fInResizePresent;
+  <span class='tp'>BOOL</span>             fGraphicsPresentationEnabled;
+  <span class='tp'>BOOL</span>             fResizeContractViolation;
+  <span class='tp'>BOOL</span>             fForceGraphicsRecreate;
+  <span class='tp'>BOOL</span>             fGeometryTransition;
+  <span class='tp'>BOOL</span>             fDeferredResize;
+  <span class='tp'>SIZE</span>             deferredClientSize;
+  <span class='tp'>UINT64</span>           geometryEpoch;
+  <span class='tp'>UINT64</span>           committedGeometryEpoch;
+  <span class='tp'>UINT64</span>           presentedGeometryEpoch;
+  <span class='tp'>UINT64</span>           stateTransitionEpoch;
+  <span class='tp'>UINT64</span>           presentedStateTransitionEpoch;
+  LONGLONG         presentedTargetFrame;
+  <span class='tp'>MAGPRESENTINTENT</span> presentIntent;
+  <span class='tp'>BOOL</span>             fPresentIntentActive;
+  <span class='tp'>UINT</span>             resizePrecommitCount;
+  <span class='tp'>UINT</span>             resizeCommitCount;
+  <span class='tp'>FLOAT</span>            fScale;
+  <span class='tp'>HDC</span>              hCaptureDC;
+  <span class='tp'>HDC</span>              hDesktopDC;
+  <span class='tp'>HBITMAP</span>          hBitmapBg;
+  <span class='tp'>HBITMAP</span>          hBitmapOld;
+  <span class='tp'>DXGIOUTPUTCAPTURE</span> dxgiOutputs[<span class='mc'>MAX_ENUM_MONITORS</span>];
+  <span class='tp'>WGCMONITORCAPTURE</span> wgcMonitors[<span class='mc'>MAX_ENUM_MONITORS</span>];
   <span class='tp'>DWMTHUMBNAILCAPTURE</span> dwmThumbnail;
   <span class='tp'>DWMPRIVATEVISUALCAPTURE</span> dwmPrivate;
-  <span class='tp'>GLclampf</span>         cfClearColor[CHANNELS];
-  FLOAT            fTexScaler;
-  <span class='tp'>GLuint</span>           glScreenTexture;
-  <span class='tp'>GLubyte</span>*         glScreenData;
+  <span class='tp'>FLOAT</span>            outlineColor[<span class='mc'>CHANNELS</span>];
+  <span class='tp'>FLOAT</span>            fTexScaler;
 
-} <span class='tp'>SHAREDWGLDATA</span>, *<span class='tp'>LPSHAREDWGLDATA</span>;
+} <span class='tp'>MAGSTATE</span>, *<span class='tp'>LPMAGSTATE</span>;
 
-<span class='kw'>void</span> <span class='fn'>renderInit</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>renderInit</span>(<span class='tp'>HWND</span> hWnd);
 
-<span class='kw'>void</span> <span class='fn'>renderCleanup</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>renderCleanup</span>(<span class='tp'>HWND</span> hWnd);
 
-<span class='kw'>void</span> <span class='fn'>renderResizeCapture</span>(HWND hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>renderResizeCapture</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>renderPrepareWindowResize</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>SIZE</span> proposedClientSize);
+<span class='tp'>BOOL</span> <span class='fn'>renderPresentCommittedGeometry</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>renderSubmitStateTransitionFrame</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>BOOL</span> synchronize);
 
-<span class='kw'>void</span> <span class='fn'>renderSetMessageDriven</span>(HWND hWnd, BOOL fMessageDriven);
+<span class='tp'>BOOL</span> <span class='fn'>renderSetGraphicsApi</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>, LPTSTR reason, <span class='tp'>UINT</span> reasonCount);
+<span class='tp'>BOOL</span> <span class='fn'>renderApplyPresentationSettings</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
+<span class='tp'>BOOL</span> <span class='fn'>renderApplySettings</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
+<span class='tp'>BOOL</span> <span class='fn'>renderApplyFullSettings</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>GRAPHICSAPI</span> <span class='tp'>api</span>,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
+<span class='tp'>BOOL</span> <span class='fn'>renderSetUiRendering</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
 
-<span class='kw'>void</span> <span class='fn'>renderRender</span>(HWND hWnd);
-<span class='kw'>void</span> <span class='fn'>renderSubmit</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>renderSetMessageDriven</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>BOOL</span> fMessageDriven);
+<span class='tp'>HANDLE</span> <span class='fn'>renderDuplicateFrameWaitHandle</span>(<span class='tp'>HWND</span> hWnd);
 
-LONG <span class='fn'>render_clipSourceOrigin</span>(LONG origin, LONG sourceExtent, LONG clipMin, LONG clipMax);
+<span class='kw'>void</span> <span class='fn'>renderRender</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>renderSubmit</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>renderSubmitLiveFrame</span>(<span class='tp'>HWND</span> hWnd);
+<span class='kw'>int</span> <span class='fn'>renderRunGraphicsSmoke</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>HWND</span> hDesktopFixture,
+  <span class='tp'>HWND</span> hTaskbarFixture,
+  <span class='tp'>HWND</span> hPeerFixture);
+<span class='kw'>int</span> <span class='fn'>renderRunDwmPrivateSmoke</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>HWND</span> hDesktopFixture,
+  <span class='tp'>HWND</span> hTaskbarFixture,
+  <span class='tp'>HWND</span> hPeerFixture);
 
-<span class='kw'>void</span> <span class='fn'>render_computeSourceRect</span>(HWND hWnd, RECT* lprcSource);
+<span class='tp'>LONG</span> <span class='fn'>render_clipSourceOrigin</span>(<span class='tp'>LONG</span> origin, <span class='tp'>LONG</span> sourceExtent, <span class='tp'>LONG</span> clipMin, <span class='tp'>LONG</span> clipMax);
+<span class='tp'>BOOL</span> <span class='fn'>render_calculateZoomedSourceOrigin</span>(
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* oldSource,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='tp'>FLOAT</span> scaler,
+  DOUBLE anchorU,
+  DOUBLE anchorV,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* capture,
+  <span class='tp'>POINT</span>* sourceOrigin);
 
-BOOL <span class='fn'>render_minimapHitTest</span>(HWND hWnd, POINT ptClient);
-<span class='kw'>void</span> <span class='fn'>render_minimapNotifyActivity</span>(HWND hWnd);
-BOOL <span class='fn'>render_minimapBeginDrag</span>(HWND hWnd, POINT ptClient);
-BOOL <span class='fn'>render_minimapDrag</span>(HWND hWnd, POINT ptClient);
-<span class='kw'>void</span> <span class='fn'>render_minimapEndDrag</span>(HWND hWnd);
+<span class='kw'>void</span> <span class='fn'>render_computeSourceRect</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>RECT</span>* lprcSource);
+
+<span class='tp'>BOOL</span> <span class='fn'>render_minimapHitTest</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>POINT</span> ptClient);
+<span class='kw'>void</span> <span class='fn'>render_minimapNotifyActivity</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>render_minimapBeginDrag</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>POINT</span> ptClient);
+<span class='tp'>BOOL</span> <span class='fn'>render_minimapDrag</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>POINT</span> ptClient);
+<span class='kw'>void</span> <span class='fn'>render_minimapEndDrag</span>(<span class='tp'>HWND</span> hWnd);
 </pre>
+<p class="source-nav"><a href='render_c.htm'>&larr; render.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='resource_h.htm'>resource.h &rarr;</a></p>
 </body>
 </html>

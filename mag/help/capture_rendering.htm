@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Capture and Rendering - MAG Screen Magnifier Help</title>
+  <link rel="stylesheet" type="text/css" href="help.css">
+</head>
+<body>
+
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Capture and Rendering</p>
+
+<h1>Capture and Rendering</h1>
+
+<p>
+  Capture API and Graphics API are independent selections. Capture obtains the desktop
+  image or compositor visual; graphics composes pixel-backed content and MAG's overlay.
+  The status box rejects combinations that cannot be routed correctly.
+</p>
+
+<div class="hero">
+  <p class="lead">A compositor-visual capture can bypass the pixel renderer, while GDI, DXGI Desktop Duplication, and Windows Graphics Capture produce frames that the selected graphics backend consumes. UI and text remain separately selectable.</p>
+</div>
+
+<div class="help-figure">
+  <img src="images/capture-presentation-flow.png" width="760" alt="Compositor-visual and pixel-frame capture paths flowing through rendering, composition, presentation, and display.">
+  <p class="caption">MAG can route a compositor visual directly or process captured pixels through rendering. Both routes add MAG's overlay before the selected composition host and presentation surface reach the display.</p>
+</div>
+
+<h2>The exact MAG choices</h2>
+<table class="gallery-table">
+  <tr>
+    <td>
+      <img src="images/mag-settings-graphics-options.png" alt="MAG Graphics API dropdown containing OpenGL, GDI, GDI+, Direct3D 9, Direct3D 11, Direct3D 12, and Vulkan.">
+      <p class="caption"><strong>Graphics API:</strong> OpenGL, GDI, GDI+, Direct3D 9, Direct3D 11, Direct3D 12, and Vulkan.</p>
+    </td>
+    <td>
+      <img src="images/mag-settings-capture-options.png" alt="MAG Capture API dropdown containing GDI BitBlt, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, and DWM Private Visual.">
+      <p class="caption"><strong>Capture API:</strong> GDI BitBlt, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, and DWM Private Visual.</p>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="images/mag-settings-ui-options.png" alt="MAG UI API dropdown containing Native draw list and Direct2D.">
+      <p class="caption"><strong>UI API:</strong> Native draw list or Direct2D.</p>
+    </td>
+    <td>
+      <img src="images/mag-settings-text-options.png" alt="MAG Text renderer dropdown containing DirectWrite, Glyph atlas OpenGL GPU or CPU, and GDI.">
+      <p class="caption"><strong>Text renderer:</strong> DirectWrite, Glyph atlas (OpenGL GPU/CPU), or GDI.</p>
+    </td>
+  </tr>
+</table>
+
+<h2>Capture APIs</h2>
+<table>
+  <tr><th>API</th><th>Behavior and limits</th></tr>
+  <tr>
+    <td class="key">GDI BitBlt</td>
+    <td>CPU-owned baseline desktop capture. It is broadly compatible but is not a strict zero-copy route.</td>
+  </tr>
+  <tr>
+    <td class="key">DXGI Desktop Duplication</td>
+    <td>Duplicates attached DXGI outputs and combines monitor regions for the requested desktop area. Availability depends on the active output, adapter, driver, session, and desktop state.</td>
+  </tr>
+  <tr>
+    <td class="key">Windows Graphics Capture</td>
+    <td>Uses the Windows capture runtime for monitor capture. Availability depends on the installed Windows capture APIs and an adapter-compatible D3D device.</td>
+  </tr>
+  <tr>
+    <td class="key">DWM Thumbnail</td>
+    <td>Uses a DWM-owned thumbnail relationship. It is a compositor route rather than a CPU screen readback, but its source and host restrictions differ from pixel capture.</td>
+  </tr>
+  <tr>
+    <td class="key">DWM Private Visual</td>
+    <td>Shares the composed desktop visual into MAG's DirectComposition tree and supplements it with positioned desktop, taskbar, and visible application source visuals. MAG applies its own wrapper transform and clip without recreating the shared source.</td>
+  </tr>
+</table>
+
+<p>See <a href="graphics_architecture.htm">Windows Graphics Architecture</a> for the retained DWM Private Visual tree and the complete driver/compositor stack.</p>
+
+<h2>Graphics APIs</h2>
+<table>
+  <tr><th>API</th><th>Role</th></tr>
+  <tr><td class="key">OpenGL</td><td>WGL/OpenGL renderer with swap-interval pacing when the driver exposes it.</td></tr>
+  <tr><td class="key">GDI</td><td>Windows GDI renderer and CPU presentation baseline. It can also bridge GDI content to supported composition presenters.</td></tr>
+  <tr><td class="key">GDI+</td><td>Pure-C flat-ABI GDI+ renderer with retained source/target bitmaps, graphics context, and brush. Redirected HWND routes finish with one BitBlt; Presentation Manager routes upload the completed CPU surface through the selected adapter. It is CPU-classified and cannot satisfy strict zero-copy.</td></tr>
+  <tr><td class="key">Direct3D 9</td><td>Direct3D 9 renderer with selectable presentation intervals and supported D3D9 presentation targets.</td></tr>
+  <tr><td class="key">Direct3D 11</td><td>DXGI flip-model renderer and the primary Windows interop path for Direct2D, capture, DirectComposition, and Presentation Manager.</td></tr>
+  <tr><td class="key">Direct3D 12</td><td>Explicit Direct3D 12 renderer with DXGI presentation and waitable pacing.</td></tr>
+  <tr><td class="key">Vulkan</td><td>Vulkan renderer using the available Win32 surface, swapchain, and present modes.</td></tr>
+</table>
+
+<h2>UI APIs</h2>
+<table>
+  <tr><th>Choice</th><th>Behavior</th></tr>
+  <tr><td class="key">Native draw list</td><td>MAG generates one neutral overlay command list and lets the active graphics backend draw it.</td></tr>
+  <tr><td class="key">Direct2D</td><td>Uses Direct2D for overlay rendering on routes with a compatible target.</td></tr>
+</table>
+
+<h2>Text renderers</h2>
+<table>
+  <tr><th>Choice</th><th>Behavior</th></tr>
+  <tr><td class="key">DirectWrite</td><td>DirectWrite text layout and rasterization.</td></tr>
+  <tr><td class="key">Glyph atlas (OpenGL GPU / CPU)</td><td>Cached glyph-atlas text, using the OpenGL GPU path where active and its CPU implementation elsewhere.</td></tr>
+  <tr><td class="key">GDI</td><td>GDI text rasterization for legacy/CPU-oriented routes.</td></tr>
+</table>
+
+<h2>Choosing a route</h2>
+<ul>
+  <li>Prefer <strong>Auto</strong> presentation settings first.</li>
+  <li>Use D3D11 when broad Windows GPU interop is more important than API preference.</li>
+  <li>Use GDI BitBlt as a diagnostic baseline, not as a strict zero-copy route.</li>
+  <li>If one route produces different content, compare another capture API to isolate the failing capture path; the difference is diagnostic, not an expected omission.</li>
+  <li>Read the status box after every selection; it describes the resolved route and copy class.</li>
+</ul>
+
+<h2>How to compare capture paths</h2>
+<div class="steps">
+  <div class="step">Keep Graphics, UI, Text, Target, Surface, Host, Copy policy, and adapters unchanged.</div>
+  <div class="step">Change only the Capture node. A compatible path activates immediately; an unavailable path leaves the previous capture active and explains why.</div>
+  <div class="step">Compare content coverage, frame timing, move/resize coherence, and the copy class reported by MAG.</div>
+  <div class="step">Treat a difference as evidence identifying a capture-path defect or constraint; do not document missing content or flicker as acceptable behavior.</div>
+</div>
+
+<h2>Renderer architecture diagrams</h2>
+<p>
+  The architecture topic contains individual diagrams for <a href="graphics_architecture.htm">Direct3D 9,
+  Direct3D 11, Direct3D 12, Direct2D, DirectWrite, OpenGL, Vulkan, GDI, GDI+, DXGI,
+  DirectComposition, DWM Private Visual, and WDDM graphics drivers</a>.
+</p>
+
+</body>
+</html>

@@ -121,6 +121,15 @@ static BOOL magGraphicsOpenGLCreate(
 
     pfd.nVersion = 1;
     pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_SUPPORT_COMPOSITION;
+    if (MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == presentation->target ||
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI == presentation->target)
+    {
+      pfd.dwFlags |= PFD_SWAP_COPY;
+    }
+    else
+    {
+      pfd.dwFlags |= PFD_SWAP_EXCHANGE;
+    }
     pfd.iPixelType = PFD_TYPE_RGBA;
     pfd.cColorBits = 32;
     pfd.cAlphaBits = 8;

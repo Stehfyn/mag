@@ -3,29 +3,478 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>main.c - Source Code</title>
+  <title>main.c - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; main.c</p>
 <h1>main.c</h1>
-<pre class="source-code"><span class='pp'>#include "mag.h"</span>
-<span class='pp'>#include "render.h"</span>
+<p>Process startup, DPI awareness, window class registration, message loop, and command-line entry.</p>
+<div class="source-meta"><strong>736 lines</strong> &middot; 19052 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='mag_h.htm'>&larr; mag.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_c.htm'>presentation.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#define COBJMACROS</span>
+
+<span class='pp'>#include &quot;mag.h&quot;</span>
+<span class='pp'>#include &quot;render.h&quot;</span>
+<span class='pp'>#include &quot;graphics_dcomp.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d11.h&gt;</span>
+<span class='pp'>#include &lt;dxgi1_2.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;comctl32&quot;)</span>
 
 <span class='pp'>#define MAIN_RENDER_INTERVAL_MS USER_TIMER_MINIMUM</span>
+<span class='pp'>#define MAIN_TEST_DESKTOP_PREFIX TEXT(&quot;mag-test-&quot;)</span>
+<span class='pp'>#define MAIN_TEST_DESKTOP_CLASS L&quot;Progman&quot;</span>
+<span class='pp'>#define MAIN_TEST_PEER_CLASS L&quot;MagSmokePeerWindow&quot;</span>
+<span class='pp'>#define MAIN_TEST_TASKBAR_CLASS L&quot;Shell_TrayWnd&quot;</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAINTESTWINDOWS
+{
+  <span class='tp'>HINSTANCE</span> instance;
+  ATOM      desktopClass;
+  ATOM      peerClass;
+  ATOM      taskbarClass;
+  <span class='tp'>HWND</span>      desktop;
+  <span class='tp'>HWND</span>      peer;
+  <span class='tp'>HWND</span>      taskbar;
+  ID3D11Device*        peerDevice;
+  ID3D11DeviceContext* peerContext;
+  IDXGISwapChain1*     peerSwapChain;
+  <span class='tp'>MAGDCOMPPRESENTER</span>*   peerPresenter;
+} MAINTESTWINDOWS, *LPMAINTESTWINDOWS;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> MAINVBLANKTHREAD
 {
-  HWND   hWnd;
-  HANDLE hStopEvent;
-  HANDLE hThread;
+  <span class='tp'>HWND</span>   hWnd;
+  <span class='tp'>HANDLE</span> hStopEvent;
+  <span class='tp'>HANDLE</span> hThread;
 } MAINVBLANKTHREAD, *LPMAINVBLANKTHREAD;
 
-DWORD <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(LPVOID lpParameter);
-BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREAD lpThread);
+<span class='tp'>DWORD</span> <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(<span class='tp'>LPVOID</span> lpParameter);
+<span class='tp'>BOOL</span> <span class='fn'>main_StartVBlankThread</span>(<span class='tp'>HWND</span> hWnd, LPMAINVBLANKTHREAD lpThread);
 <span class='kw'>void</span> <span class='fn'>main_StopVBlankThread</span>(LPMAINVBLANKTHREAD lpThread);
+<span class='tp'>BOOL</span> <span class='fn'>main_BeginIsolatedTestDesktop</span>(<span class='tp'>HDESK</span>* originalDesktop, <span class='tp'>HDESK</span>* testDesktop);
+<span class='kw'>void</span> <span class='fn'>main_EndIsolatedTestDesktop</span>(<span class='tp'>HDESK</span> originalDesktop, <span class='tp'>HDESK</span> testDesktop);
+<span class='tp'>LRESULT</span> <span class='kw'>CALLBACK</span> <span class='fn'>main_TestWindowProc</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>UINT</span> message, <span class='tp'>WPARAM</span> wParam, <span class='tp'>LPARAM</span> lParam);
+<span class='tp'>BOOL</span> <span class='fn'>main_CreateIsolatedTestWindows</span>(<span class='tp'>HINSTANCE</span> hInstance, LPMAINTESTWINDOWS windows);
+<span class='kw'>void</span> <span class='fn'>main_DestroyIsolatedTestWindows</span>(LPMAINTESTWINDOWS windows);
+<span class='tp'>BOOL</span> <span class='fn'>main_InitializeAndRevealWindow</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>int</span> nCmdShow, <span class='tp'>BOOL</span> synchronize);
 
-BOOL <span class='fn'>main_PumpMessages</span>(HWND hWnd, <span class='kw'>int</span>* lpExitCode)
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>main_ReleaseUnknown</span>(IUnknown** object)
+{
+    <span class='kw'>if</span> (object &amp;&amp; *object)
+    {
+      <span class='fn'>IUnknown_Release</span>(*object);
+      *object = NULL;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>main_CreateCompositionTestPeer</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>UINT</span> width,
+  <span class='tp'>UINT</span> height,
+  LPMAINTESTWINDOWS windows)
+{
+    IDXGIDevice* dxgiDevice = NULL;
+    IDXGIAdapter* adapter = NULL;
+    IDXGIFactory2* factory = NULL;
+    ID3D11Texture2D* backBuffer = NULL;
+    ID3D11RenderTargetView* renderTarget = NULL;
+    D3D_FEATURE_LEVEL featureLevel;
+    DXGI_SWAP_CHAIN_DESC1 swapChainDesc;
+    <span class='kw'>const</span> <span class='tp'>FLOAT</span> clearColor[<span class='num'>4</span>] = { <span class='num'>0.75f</span>, <span class='num'>0.18f</span>, <span class='num'>0.14f</span>, <span class='num'>1.0f</span> };
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!hWnd || !width || !height || !windows)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    hr = <span class='fn'>D3D11CreateDevice</span>(
+      NULL,
+      D3D_DRIVER_TYPE_HARDWARE,
+      NULL,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+      NULL,
+      <span class='num'>0</span>,
+      D3D11_SDK_VERSION,
+      &amp;windows-&gt;peerDevice,
+      &amp;featureLevel,
+      &amp;windows-&gt;peerContext);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      hr = <span class='fn'>D3D11CreateDevice</span>(
+        NULL,
+        D3D_DRIVER_TYPE_WARP,
+        NULL,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        NULL,
+        <span class='num'>0</span>,
+        D3D11_SDK_VERSION,
+        &amp;windows-&gt;peerDevice,
+        &amp;featureLevel,
+        &amp;windows-&gt;peerContext);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>ID3D11Device_QueryInterface</span>(
+        windows-&gt;peerDevice,
+        &amp;IID_IDXGIDevice,
+        (<span class='kw'>void</span>**)&amp;dxgiDevice);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDXGIDevice_GetAdapter</span>(dxgiDevice, &amp;adapter);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDXGIAdapter_GetParent</span>(
+        adapter, &amp;IID_IDXGIFactory2, (<span class='kw'>void</span>**)&amp;factory);
+    }
+    <span class='fn'>ZeroMemory</span>(&amp;swapChainDesc, <span class='kw'>sizeof</span>(swapChainDesc));
+    swapChainDesc.Width = width;
+    swapChainDesc.Height = height;
+    swapChainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    swapChainDesc.SampleDesc.Count = <span class='num'>1</span>;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.BufferCount = <span class='num'>2</span>;
+    swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDXGIFactory2_CreateSwapChainForComposition</span>(
+        factory,
+        (IUnknown*)windows-&gt;peerDevice,
+        &amp;swapChainDesc,
+        NULL,
+        &amp;windows-&gt;peerSwapChain);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDXGISwapChain1_GetBuffer</span>(
+        windows-&gt;peerSwapChain,
+        <span class='num'>0</span>,
+        &amp;IID_ID3D11Texture2D,
+        (<span class='kw'>void</span>**)&amp;backBuffer);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>ID3D11Device_CreateRenderTargetView</span>(
+        windows-&gt;peerDevice,
+        (ID3D11Resource*)backBuffer,
+        NULL,
+        &amp;renderTarget);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='fn'>ID3D11DeviceContext_ClearRenderTargetView</span>(
+        windows-&gt;peerContext, renderTarget, clearColor);
+      hr = <span class='fn'>IDXGISwapChain1_Present</span>(windows-&gt;peerSwapChain, <span class='num'>0</span>, <span class='num'>0</span>);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp;
+        !<span class='fn'>magDCompPresenterCreate</span>(
+          hWnd,
+          (IUnknown*)windows-&gt;peerSwapChain,
+          &amp;windows-&gt;peerPresenter))
+    {
+      hr = E_FAIL;
+    }
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;renderTarget);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;backBuffer);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;factory);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;adapter);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;dxgiDevice);
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='tp'>LRESULT</span> <span class='kw'>CALLBACK</span> <span class='fn'>main_TestWindowProc</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>UINT</span> message,
+  <span class='tp'>WPARAM</span> wParam,
+  <span class='tp'>LPARAM</span> lParam)
+{
+    <span class='kw'>if</span> (WM_NCCREATE == message)
+    {
+      <span class='kw'>const</span> CREATESTRUCTW* create = (<span class='kw'>const</span> CREATESTRUCTW*)lParam;
+      <span class='fn'>SetWindowLongPtrW</span>(hWnd, GWLP_USERDATA, (LONG_PTR)create-&gt;lpCreateParams);
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>if</span> (WM_ERASEBKGND == message)
+    {
+      <span class='kw'>return</span> <span class='num'>1</span>;
+    }
+    <span class='kw'>if</span> (WM_PAINT == message)
+    {
+      PAINTSTRUCT paint;
+      <span class='tp'>HDC</span> dc = <span class='fn'>BeginPaint</span>(hWnd, &amp;paint);
+      <span class='tp'>HBRUSH</span> brush = <span class='fn'>CreateSolidBrush</span>(
+        (<span class='tp'>COLORREF</span>)(ULONG_PTR)<span class='fn'>GetWindowLongPtrW</span>(hWnd, GWLP_USERDATA));
+
+      <span class='kw'>if</span> (dc &amp;&amp; brush)
+      {
+        <span class='fn'>FillRect</span>(dc, &amp;paint.rcPaint, brush);
+      }
+      <span class='kw'>if</span> (brush)
+      {
+        <span class='fn'>DeleteObject</span>(brush);
+      }
+      <span class='fn'>EndPaint</span>(hWnd, &amp;paint);
+      <span class='kw'>return</span> <span class='num'>0</span>;
+    }
+    <span class='kw'>return</span> <span class='fn'>DefWindowProcW</span>(hWnd, message, wParam, lParam);
+}
+
+<span class='kw'>static</span> ATOM <span class='fn'>main_RegisterTestWindowClass</span>(
+  <span class='tp'>HINSTANCE</span> hInstance,
+  <span class='tp'>LPCWSTR</span> className)
+{
+    WNDCLASSEXW windowClass = { <span class='kw'>sizeof</span>(windowClass) };
+
+    windowClass.lpfnWndProc = main_TestWindowProc;
+    windowClass.hInstance = hInstance;
+    windowClass.hCursor = <span class='fn'>LoadCursor</span>(NULL, IDC_ARROW);
+    windowClass.lpszClassName = className;
+    <span class='kw'>return</span> <span class='fn'>RegisterClassExW</span>(&amp;windowClass);
+}
+
+<span class='kw'>void</span> <span class='fn'>main_DestroyIsolatedTestWindows</span>(LPMAINTESTWINDOWS windows)
+{
+    <span class='kw'>if</span> (!windows)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (windows-&gt;peerPresenter)
+    {
+      <span class='fn'>magDCompPresenterDestroy</span>(windows-&gt;peerPresenter);
+      windows-&gt;peerPresenter = NULL;
+    }
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;windows-&gt;peerSwapChain);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;windows-&gt;peerContext);
+    <span class='fn'>main_ReleaseUnknown</span>((IUnknown**)&amp;windows-&gt;peerDevice);
+    <span class='kw'>if</span> (windows-&gt;taskbar)
+    {
+      <span class='fn'>DestroyWindow</span>(windows-&gt;taskbar);
+    }
+    <span class='kw'>if</span> (windows-&gt;peer)
+    {
+      <span class='fn'>DestroyWindow</span>(windows-&gt;peer);
+    }
+    <span class='kw'>if</span> (windows-&gt;desktop)
+    {
+      <span class='fn'>DestroyWindow</span>(windows-&gt;desktop);
+    }
+    <span class='kw'>if</span> (windows-&gt;taskbarClass)
+    {
+      <span class='fn'>UnregisterClassW</span>(<span class='fn'>MAKEINTATOM</span>(windows-&gt;taskbarClass), windows-&gt;instance);
+    }
+    <span class='kw'>if</span> (windows-&gt;peerClass)
+    {
+      <span class='fn'>UnregisterClassW</span>(<span class='fn'>MAKEINTATOM</span>(windows-&gt;peerClass), windows-&gt;instance);
+    }
+    <span class='kw'>if</span> (windows-&gt;desktopClass)
+    {
+      <span class='fn'>UnregisterClassW</span>(<span class='fn'>MAKEINTATOM</span>(windows-&gt;desktopClass), windows-&gt;instance);
+    }
+    <span class='fn'>ZeroMemory</span>(windows, <span class='kw'>sizeof</span>(*windows));
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>main_CreateIsolatedTestWindows</span>(
+  <span class='tp'>HINSTANCE</span> hInstance,
+  LPMAINTESTWINDOWS windows)
+{
+    <span class='kw'>const</span> <span class='kw'>int</span> <span class='tp'>left</span> = <span class='fn'>GetSystemMetrics</span>(SM_XVIRTUALSCREEN);
+    <span class='kw'>const</span> <span class='kw'>int</span> top = <span class='fn'>GetSystemMetrics</span>(SM_YVIRTUALSCREEN);
+    <span class='kw'>const</span> <span class='kw'>int</span> width = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='fn'>GetSystemMetrics</span>(SM_CXVIRTUALSCREEN));
+    <span class='kw'>const</span> <span class='kw'>int</span> height = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='fn'>GetSystemMetrics</span>(SM_CYVIRTUALSCREEN));
+    <span class='kw'>const</span> <span class='kw'>int</span> taskbarHeight = <span class='fn'>min</span>(<span class='num'>48</span>, height);
+    <span class='kw'>const</span> <span class='kw'>int</span> peerWidth = <span class='fn'>min</span>(<span class='num'>480</span>, width);
+    <span class='kw'>const</span> <span class='kw'>int</span> peerHeight = <span class='fn'>min</span>(<span class='num'>320</span>, height);
+
+    <span class='kw'>if</span> (!windows)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>ZeroMemory</span>(windows, <span class='kw'>sizeof</span>(*windows));
+    windows-&gt;instance = hInstance;
+    <span class='cm'>/* Use the actual shell class semantics on a private WinStation desktop so
+       the test exercises dedicated desktop/taskbar visuals without ever
+       touching the user's input desktop. */</span>
+    windows-&gt;desktopClass = <span class='fn'>main_RegisterTestWindowClass</span>(
+      hInstance, <span class='mc'>MAIN_TEST_DESKTOP_CLASS</span>);
+    windows-&gt;peerClass = <span class='fn'>main_RegisterTestWindowClass</span>(
+      hInstance, <span class='mc'>MAIN_TEST_PEER_CLASS</span>);
+    windows-&gt;taskbarClass = <span class='fn'>main_RegisterTestWindowClass</span>(
+      hInstance, <span class='mc'>MAIN_TEST_TASKBAR_CLASS</span>);
+    <span class='kw'>if</span> (!windows-&gt;desktopClass || !windows-&gt;peerClass ||
+        !windows-&gt;taskbarClass)
+    {
+      <span class='fn'>main_DestroyIsolatedTestWindows</span>(windows);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    windows-&gt;desktop = <span class='fn'>CreateWindowExW</span>(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      <span class='fn'>MAKEINTATOM</span>(windows-&gt;desktopClass),
+      L<span class='str'>&quot;MAG smoke desktop&quot;</span>,
+      WS_POPUP,
+      <span class='tp'>left</span>,
+      top,
+      width,
+      height,
+      NULL,
+      NULL,
+      hInstance,
+      (<span class='tp'>LPVOID</span>)(ULONG_PTR)<span class='fn'>RGB</span>(<span class='num'>22</span>, <span class='num'>48</span>, <span class='num'>80</span>));
+    windows-&gt;peer = <span class='fn'>CreateWindowExW</span>(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | <span class='mc'>WS_EX_NOREDIRECTIONBITMAP</span>,
+      <span class='fn'>MAKEINTATOM</span>(windows-&gt;peerClass),
+      L<span class='str'>&quot;MAG smoke peer&quot;</span>,
+      WS_POPUP,
+      <span class='tp'>left</span> + <span class='fn'>min</span>(<span class='num'>160</span>, width / <span class='num'>8</span>),
+      top + <span class='fn'>min</span>(<span class='num'>120</span>, height / <span class='num'>8</span>),
+      peerWidth,
+      peerHeight,
+      NULL,
+      NULL,
+      hInstance,
+      (<span class='tp'>LPVOID</span>)(ULONG_PTR)<span class='fn'>RGB</span>(<span class='num'>190</span>, <span class='num'>45</span>, <span class='num'>35</span>));
+    windows-&gt;taskbar = <span class='fn'>CreateWindowExW</span>(
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      <span class='fn'>MAKEINTATOM</span>(windows-&gt;taskbarClass),
+      L<span class='str'>&quot;MAG smoke taskbar&quot;</span>,
+      WS_POPUP,
+      <span class='tp'>left</span>,
+      top + height - taskbarHeight,
+      width,
+      taskbarHeight,
+      NULL,
+      NULL,
+      hInstance,
+      (<span class='tp'>LPVOID</span>)(ULONG_PTR)<span class='fn'>RGB</span>(<span class='num'>32</span>, <span class='num'>120</span>, <span class='num'>64</span>));
+    <span class='kw'>if</span> (!windows-&gt;desktop || !windows-&gt;peer || !windows-&gt;taskbar)
+    {
+      <span class='fn'>main_DestroyIsolatedTestWindows</span>(windows);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='cm'>/* Chromium/Electron content is composed below its top-level HWND and is
+       absent from the old shared-desktop visual.  A no-redirection DComp flip
+       swap chain gives the isolated smoke the same capture requirement. */</span>
+    <span class='kw'>if</span> (!<span class='fn'>main_CreateCompositionTestPeer</span>(
+          windows-&gt;peer,
+          (<span class='tp'>UINT</span>)peerWidth,
+          (<span class='tp'>UINT</span>)peerHeight,
+          windows))
+    {
+      <span class='fn'>main_DestroyIsolatedTestWindows</span>(windows);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>ShowWindow</span>(windows-&gt;desktop, SW_SHOWNOACTIVATE);
+    <span class='fn'>ShowWindow</span>(windows-&gt;peer, SW_SHOWNOACTIVATE);
+    <span class='fn'>ShowWindow</span>(windows-&gt;taskbar, SW_SHOWNOACTIVATE);
+    <span class='fn'>SetWindowPos</span>(
+      windows-&gt;desktop,
+      HWND_BOTTOM,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    <span class='fn'>SetWindowPos</span>(
+      windows-&gt;peer,
+      HWND_TOP,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    <span class='fn'>SetWindowPos</span>(
+      windows-&gt;taskbar,
+      HWND_TOP,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    <span class='fn'>UpdateWindow</span>(windows-&gt;desktop);
+    <span class='fn'>UpdateWindow</span>(windows-&gt;peer);
+    <span class='fn'>UpdateWindow</span>(windows-&gt;taskbar);
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>main_InitializeAndRevealWindow</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>int</span> nCmdShow, <span class='tp'>BOOL</span> synchronize)
+{
+    <span class='kw'>if</span> (!hWnd)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='cm'>/* No messages are pumped between ShowWindow and the first submission.
+       DWM therefore receives initialized content before the next composition
+       pass instead of ever painting the class background. */</span>
+    <span class='fn'>ShowWindow</span>(hWnd, nCmdShow);
+    <span class='kw'>return</span> <span class='fn'>renderSubmit</span>(hWnd) &amp;&amp;
+      (!synchronize || <span class='fn'>SUCCEEDED</span>(<span class='fn'>DwmFlush</span>()));
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>main_BeginIsolatedTestDesktop</span>(<span class='tp'>HDESK</span>* originalDesktop, <span class='tp'>HDESK</span>* testDesktop)
+{
+    <span class='tp'>TCHAR</span> desktopName[<span class='num'>64</span>];
+    <span class='tp'>HDESK</span> createdDesktop;
+
+    <span class='kw'>if</span> (!originalDesktop || !testDesktop)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *originalDesktop = <span class='fn'>GetThreadDesktop</span>(<span class='fn'>GetCurrentThreadId</span>());
+    *testDesktop = NULL;
+    <span class='kw'>if</span> (!*originalDesktop)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>_sntprintf_s</span>(
+      desktopName,
+      <span class='fn'>ARRAYSIZE</span>(desktopName),
+      _TRUNCATE,
+      <span class='fn'>TEXT</span>(<span class='str'>&quot;%s%lu-%I64u&quot;</span>),
+      <span class='mc'>MAIN_TEST_DESKTOP_PREFIX</span>,
+      <span class='fn'>GetCurrentProcessId</span>(),
+      <span class='fn'>GetTickCount64</span>());
+    createdDesktop = <span class='fn'>CreateDesktop</span>(
+      desktopName,
+      NULL,
+      NULL,
+      <span class='num'>0</span>,
+      DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS,
+      NULL);
+    <span class='kw'>if</span> (!createdDesktop)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (!<span class='fn'>SetThreadDesktop</span>(createdDesktop))
+    {
+      <span class='fn'>CloseDesktop</span>(createdDesktop);
+      <span class='kw'>return</span> FALSE;
+    }
+    *testDesktop = createdDesktop;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>main_EndIsolatedTestDesktop</span>(<span class='tp'>HDESK</span> originalDesktop, <span class='tp'>HDESK</span> testDesktop)
+{
+    <span class='kw'>if</span> (originalDesktop)
+    {
+      <span class='fn'>SetThreadDesktop</span>(originalDesktop);
+    }
+    <span class='kw'>if</span> (testDesktop)
+    {
+      <span class='fn'>CloseDesktop</span>(testDesktop);
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>main_PumpMessages</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>int</span>* lpExitCode)
 {
     MSG msg;
 
@@ -48,20 +497,39 @@ BOOL <span class='fn'>main_PumpMessages</span>(HWND hWnd, <span class='kw'>int</
     <span class='kw'>return</span> <span class='fn'>IsWindow</span>(hWnd);
 }
 
-DWORD <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(LPVOID lpParameter)
+<span class='tp'>DWORD</span> <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</span>(<span class='tp'>LPVOID</span> lpParameter)
 {
     LPMAINVBLANKTHREAD lpThread = (LPMAINVBLANKTHREAD)lpParameter;
 
     <span class='kw'>while</span> (WAIT_OBJECT_0 != <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, <span class='num'>0</span>))
     {
+      <span class='tp'>HANDLE</span> frameWaitHandle;
+
       <span class='kw'>if</span> (!<span class='fn'>IsWindow</span>(lpThread-&gt;hWnd))
       {
         <span class='kw'>break</span>;
       }
 
-      <span class='kw'>if</span> (!<span class='fn'>D3DKMTWaitForVerticalBlank</span>(lpThread-&gt;hWnd))
+      frameWaitHandle = <span class='fn'>renderDuplicateFrameWaitHandle</span>(lpThread-&gt;hWnd);
+      <span class='kw'>if</span> (frameWaitHandle)
       {
-        <span class='kw'>if</span> (WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, MAIN_RENDER_INTERVAL_MS))
+        <span class='tp'>HANDLE</span> handles[] = { lpThread-&gt;hStopEvent, frameWaitHandle };
+        <span class='kw'>const</span> <span class='tp'>DWORD</span> waitResult = <span class='fn'>WaitForMultipleObjects</span>(<span class='fn'>ARRAYSIZE</span>(handles), handles, FALSE, <span class='num'>1000</span>);
+
+        <span class='fn'>CloseHandle</span>(frameWaitHandle);
+
+        <span class='kw'>if</span> (WAIT_OBJECT_0 == waitResult)
+        {
+          <span class='kw'>break</span>;
+        }
+        <span class='kw'>if</span> (WAIT_OBJECT_0 + <span class='num'>1</span> != waitResult)
+        {
+          <span class='kw'>continue</span>;
+        }
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (!<span class='fn'>D3DKMTWaitForVerticalBlank</span>(lpThread-&gt;hWnd))
+      {
+        <span class='kw'>if</span> (WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(lpThread-&gt;hStopEvent, <span class='mc'>MAIN_RENDER_INTERVAL_MS</span>))
         {
           <span class='kw'>break</span>;
         }
@@ -72,13 +540,13 @@ DWORD <span class='kw'>WINAPI</span> <span class='fn'>main_VBlankThreadProc</spa
         <span class='kw'>break</span>;
       }
 
-      <span class='fn'>SendMessage</span>(lpThread-&gt;hWnd, WM_MAG_RENDER, <span class='num'>0</span>, <span class='num'>0</span>);
+      <span class='fn'>SendMessage</span>(lpThread-&gt;hWnd, <span class='mc'>WM_MAG_RENDER</span>, <span class='num'>0</span>, <span class='num'>0</span>);
     }
 
     <span class='kw'>return</span> <span class='num'>0</span>;
 }
 
-BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREAD lpThread)
+<span class='tp'>BOOL</span> <span class='fn'>main_StartVBlankThread</span>(<span class='tp'>HWND</span> hWnd, LPMAINVBLANKTHREAD lpThread)
 {
     <span class='fn'>ZeroMemory</span>(lpThread, <span class='kw'>sizeof</span>(*lpThread));
     lpThread-&gt;hWnd = hWnd;
@@ -111,7 +579,7 @@ BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREA
     {
       <span class='kw'>for</span> (;;)
       {
-        DWORD dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>1</span>, &amp;lpThread-&gt;hThread, FALSE, INFINITE, QS_ALLINPUT);
+        <span class='tp'>DWORD</span> dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>1</span>, &amp;lpThread-&gt;hThread, FALSE, INFINITE, QS_ALLINPUT);
 
         <span class='kw'>if</span> (WAIT_OBJECT_0 == dwWait)
         {
@@ -152,26 +620,98 @@ BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREA
     <span class='fn'>ZeroMemory</span>(lpThread, <span class='kw'>sizeof</span>(*lpThread));
 }
 
-<span class='kw'>int</span> 
-<span class='kw'>WINAPI</span> 
+<span class='kw'>int</span>&#32;
+<span class='kw'>WINAPI</span>&#32;
 <span class='fn'>_tWinMain</span>(
-  _In_ HINSTANCE hInstance,
-  _In_opt_ HINSTANCE hPrevInstance,
+  _In_ <span class='tp'>HINSTANCE</span> hInstance,
+  _In_opt_ <span class='tp'>HINSTANCE</span> hPrevInstance,
   _In_ LPTSTR lpCmdLine,
   _In_ <span class='kw'>int</span> nShowCmd)
 {
-    HWND hWnd;
+    <span class='tp'>HWND</span> hWnd;
+    INITCOMMONCONTROLSEX commonControls =
+    {
+      <span class='kw'>sizeof</span>(commonControls),
+      ICC_WIN95_CLASSES,
+    };
     <span class='kw'>int</span> exitCode = <span class='num'>0</span>;
     MAINVBLANKTHREAD vblankThread;
-    BOOL fMessageDrivenRender = FALSE;
+    <span class='tp'>BOOL</span> fMessageDrivenRender = FALSE;
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> fGraphicsSmoke = NULL != <span class='fn'>_tcsstr</span>(lpCmdLine, <span class='fn'>TEXT</span>(<span class='str'>&quot;--graphics-smoke&quot;</span>));
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> fDwmPrivateSmoke =
+      NULL != <span class='fn'>_tcsstr</span>(lpCmdLine, <span class='fn'>TEXT</span>(<span class='str'>&quot;--dwm-private-smoke&quot;</span>));
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> fIsolatedSmoke = fGraphicsSmoke || fDwmPrivateSmoke;
+    <span class='tp'>HDESK</span> originalDesktop = NULL;
+    <span class='tp'>HDESK</span> testDesktop = NULL;
+    MAINTESTWINDOWS testWindows = { <span class='num'>0</span> };
 
     <span class='fn'>UNREFERENCED_PARAMETER</span>(hPrevInstance);
-    <span class='fn'>UNREFERENCED_PARAMETER</span>(lpCmdLine);
 
-    hWnd = <span class='fn'>magInitInstance</span>(hInstance, nShowCmd);
+    <span class='kw'>if</span> (!<span class='fn'>InitCommonControlsEx</span>(&amp;commonControls))
+    {
+      <span class='kw'>return</span> ERROR_DLL_INIT_FAILED;
+    }
+
+    <span class='kw'>if</span> (fIsolatedSmoke &amp;&amp; !<span class='fn'>main_BeginIsolatedTestDesktop</span>(&amp;originalDesktop, &amp;testDesktop))
+    {
+      <span class='kw'>return</span> ERROR_ACCESS_DENIED;
+    }
+    <span class='kw'>if</span> (fIsolatedSmoke &amp;&amp;
+        !<span class='fn'>main_CreateIsolatedTestWindows</span>(hInstance, &amp;testWindows))
+    {
+      <span class='fn'>main_EndIsolatedTestDesktop</span>(originalDesktop, testDesktop);
+      <span class='kw'>return</span> ERROR_OPEN_FAILED;
+    }
+
+    hWnd = <span class='fn'>magInitInstance</span>(hInstance, fIsolatedSmoke ? SW_HIDE : nShowCmd);
     <span class='kw'>if</span> (!hWnd)
     {
+      <span class='kw'>if</span> (fIsolatedSmoke)
+      {
+        <span class='fn'>main_DestroyIsolatedTestWindows</span>(&amp;testWindows);
+        <span class='fn'>main_EndIsolatedTestDesktop</span>(originalDesktop, testDesktop);
+      }
       <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (fIsolatedSmoke)
+    {
+      <span class='cm'>/* Mirror normal startup exactly, but reveal the initialized window only
+         on the private, non-input desktop. */</span>
+      <span class='kw'>if</span> (!<span class='fn'>main_InitializeAndRevealWindow</span>(
+            hWnd,
+            SW_SHOWNOACTIVATE,
+            FALSE))
+      {
+        <span class='fn'>DestroyWindow</span>(hWnd);
+        <span class='fn'>main_DestroyIsolatedTestWindows</span>(&amp;testWindows);
+        <span class='fn'>main_EndIsolatedTestDesktop</span>(originalDesktop, testDesktop);
+        <span class='kw'>return</span> ERROR_OPEN_FAILED;
+      }
+      exitCode = fDwmPrivateSmoke
+        ? <span class='fn'>renderRunDwmPrivateSmoke</span>(
+            hWnd,
+            testWindows.desktop,
+            testWindows.taskbar,
+            testWindows.peer)
+        : <span class='fn'>renderRunGraphicsSmoke</span>(
+            hWnd,
+            testWindows.desktop,
+            testWindows.taskbar,
+            testWindows.peer);
+      <span class='fn'>DestroyWindow</span>(hWnd);
+      <span class='fn'>main_DestroyIsolatedTestWindows</span>(&amp;testWindows);
+      <span class='fn'>main_EndIsolatedTestDesktop</span>(originalDesktop, testDesktop);
+      <span class='kw'>return</span> exitCode;
+    }
+
+    <span class='cm'>/* Give DWM a real target while keeping it invisible.  The first complete
+       frame is committed before uncloaking, so no default white frame or busy
+       cursor is ever exposed. */</span>
+    <span class='kw'>if</span> (!<span class='fn'>main_InitializeAndRevealWindow</span>(hWnd, nShowCmd, TRUE))
+    {
+      <span class='fn'>DestroyWindow</span>(hWnd);
+      <span class='kw'>return</span> ERROR_OPEN_FAILED;
     }
 
     <span class='kw'>if</span> (<span class='fn'>main_StartVBlankThread</span>(hWnd, &amp;vblankThread))
@@ -182,9 +722,9 @@ BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREA
 
     <span class='kw'>while</span> (<span class='fn'>main_PumpMessages</span>(hWnd, &amp;exitCode))
     {
-      DWORD dwWait;
+      <span class='tp'>DWORD</span> dwWait;
 
-      dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>0</span>, NULL, FALSE, fMessageDrivenRender ? INFINITE : MAIN_RENDER_INTERVAL_MS, QS_ALLINPUT);
+      dwWait = <span class='fn'>MsgWaitForMultipleObjects</span>(<span class='num'>0</span>, NULL, FALSE, fMessageDrivenRender ? INFINITE : <span class='mc'>MAIN_RENDER_INTERVAL_MS</span>, QS_ALLINPUT);
 
       <span class='kw'>if</span> (WAIT_FAILED == dwWait)
       {
@@ -208,5 +748,6 @@ BOOL <span class='fn'>main_StartVBlankThread</span>(HWND hWnd, LPMAINVBLANKTHREA
     <span class='kw'>return</span> exitCode;
 }
 </pre>
+<p class="source-nav"><a href='mag_h.htm'>&larr; mag.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_c.htm'>presentation.c &rarr;</a></p>
 </body>
 </html>

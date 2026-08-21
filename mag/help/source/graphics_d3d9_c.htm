@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_d3d9.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_d3d9.c</p>
+<h1>graphics_d3d9.c</h1>
+<p>Direct3D 9 renderer and presentation backend.</p>
+<div class="source-meta"><strong>596 lines</strong> &middot; 16484 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_d3d12_c.htm'>&larr; graphics_d3d12.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_dcomp_c.htm'>graphics_dcomp.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d9.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;d3d9&quot;)</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGD3D9STATE
+{
+  IDirect3D9*        d3d;
+  IDirect3D9Ex*      d3dEx;
+  IDirect3DDevice9*  device;
+  IDirect3DDevice9Ex* deviceEx;
+  IDirect3DTexture9* texture;
+  D3DPRESENT_PARAMETERS present;
+  <span class='tp'>MAGCPUCOMPOSITOR</span>   compositor;
+  <span class='tp'>UINT</span>               width;
+  <span class='tp'>UINT</span>               height;
+  <span class='tp'>UINT</span>               capacityWidth;
+  <span class='tp'>UINT</span>               capacityHeight;
+  <span class='tp'>UINT64</span>             resourceGeneration;
+  <span class='tp'>UINT</span>               adapterOrdinal;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> configuredTarget;
+  <span class='tp'>BOOL</span>               flipEx;
+} MAGD3D9STATE;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGD3D9VERTEX
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>x</span>;
+  <span class='tp'>FLOAT</span> y;
+  <span class='tp'>FLOAT</span> z;
+  <span class='tp'>FLOAT</span> rhw;
+  <span class='tp'>DWORD</span> color;
+  <span class='tp'>FLOAT</span> u;
+  <span class='tp'>FLOAT</span> v;
+} MAGD3D9VERTEX;
+
+<span class='pp'>#define MAG_D3D9_FVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1)</span>
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9IsAvailable</span>(LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='tp'>HMODULE</span> module = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;d3d9.dll&quot;</span>));
+
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>if</span> (module)
+      {
+        <span class='fn'>FreeLibrary</span>(module);
+      }
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 9 window presentation is unavailable on the private non-input test desktop.&quot;</span>), reasonCount);
+      }
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (module)
+    {
+      <span class='fn'>FreeLibrary</span>(module);
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+      }
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 9 is not installed.&quot;</span>), reasonCount);
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D9ReleaseDeviceResources</span>(MAGD3D9STATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;texture)
+    {
+      <span class='fn'>IDirect3DTexture9_Release</span>(<span class='tp'>state</span>-&gt;texture);
+      <span class='tp'>state</span>-&gt;texture = NULL;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9CreateTexture</span>(MAGD3D9STATE* <span class='tp'>state</span>, <span class='tp'>SIZE</span> reservoirSize)
+{
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='fn'>magGraphicsD3D9ReleaseDeviceResources</span>(<span class='tp'>state</span>);
+    hr = <span class='fn'>IDirect3DDevice9_CreateTexture</span>(
+      <span class='tp'>state</span>-&gt;device,
+      (<span class='tp'>UINT</span>)reservoirSize.cx,
+      (<span class='tp'>UINT</span>)reservoirSize.cy,
+      <span class='num'>1</span>,
+      D3DUSAGE_DYNAMIC,
+      D3DFMT_A8R8G8B8,
+      D3DPOOL_DEFAULT,
+      &amp;<span class='tp'>state</span>-&gt;texture,
+      NULL);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    <span class='tp'>state</span>-&gt;capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    ++<span class='tp'>state</span>-&gt;resourceGeneration;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D9SetPresentParameters</span>(
+  MAGD3D9STATE* <span class='tp'>state</span>,
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation)
+{
+    <span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>UINT</span> intervals[] =
+    {
+      D3DPRESENT_INTERVAL_IMMEDIATE,
+      D3DPRESENT_INTERVAL_ONE,
+      D3DPRESENT_INTERVAL_TWO,
+      D3DPRESENT_INTERVAL_THREE,
+      D3DPRESENT_INTERVAL_FOUR,
+    };
+
+    <span class='fn'>ZeroMemory</span>(&amp;<span class='tp'>state</span>-&gt;present, <span class='kw'>sizeof</span>(<span class='tp'>state</span>-&gt;present));
+    <span class='tp'>state</span>-&gt;present.BackBufferWidth = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;present.BackBufferHeight = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='tp'>state</span>-&gt;present.BackBufferFormat = D3DFMT_X8R8G8B8;
+    <span class='tp'>state</span>-&gt;present.BackBufferCount = presentation-&gt;bufferCount;
+    <span class='tp'>state</span>-&gt;present.MultiSampleType = D3DMULTISAMPLE_NONE;
+    <span class='tp'>state</span>-&gt;configuredTarget = presentation-&gt;target;
+    <span class='tp'>state</span>-&gt;flipEx = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == presentation-&gt;target ||
+      MAG_PRESENT_COMPOSED_FLIP == presentation-&gt;target ||
+      MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == presentation-&gt;target;
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;flipEx)
+    {
+      <span class='tp'>state</span>-&gt;present.SwapEffect = D3DSWAPEFFECT_FLIPEX;
+      <span class='tp'>state</span>-&gt;present.BackBufferCount = <span class='fn'>max</span>(<span class='num'>2U</span>, presentation-&gt;bufferCount);
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == presentation-&gt;target)
+    {
+      <span class='tp'>state</span>-&gt;present.SwapEffect = D3DSWAPEFFECT_COPY;
+      <span class='tp'>state</span>-&gt;present.BackBufferCount = <span class='num'>1</span>;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_FLIP == presentation-&gt;target)
+    {
+      <span class='tp'>state</span>-&gt;present.SwapEffect = D3DSWAPEFFECT_FLIP;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='tp'>state</span>-&gt;present.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    }
+    <span class='tp'>state</span>-&gt;present.hDeviceWindow = hWnd;
+    <span class='tp'>state</span>-&gt;present.Windowed = TRUE;
+    <span class='tp'>state</span>-&gt;present.PresentationInterval = intervals[presentation-&gt;syncInterval];
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT</span> <span class='fn'>magGraphicsD3D9FindAdapter</span>(
+  IDirect3D9* d3d,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation)
+{
+    <span class='tp'>UINT</span> <span class='tp'>adapterCount</span> = <span class='fn'>IDirect3D9_GetAdapterCount</span>(d3d);
+    <span class='tp'>UINT</span> adapter;
+
+    <span class='kw'>if</span> (!presentation-&gt;display.deviceName[<span class='num'>0</span>])
+    {
+      <span class='kw'>return</span> D3DADAPTER_DEFAULT;
+    }
+    <span class='kw'>for</span> (adapter = <span class='num'>0</span>; adapter &lt; <span class='tp'>adapterCount</span>; ++adapter)
+    {
+      <span class='tp'>HMONITOR</span> monitor = <span class='fn'>IDirect3D9_GetAdapterMonitor</span>(d3d, adapter);
+      MONITORINFOEX monitorInfo = { <span class='kw'>sizeof</span>(monitorInfo) };
+
+      <span class='kw'>if</span> (monitor &amp;&amp; <span class='fn'>GetMonitorInfo</span>(monitor, (MONITORINFO*)&amp;monitorInfo) &amp;&amp;
+          <span class='num'>0</span> == <span class='fn'>lstrcmpi</span>(monitorInfo.szDevice, presentation-&gt;display.deviceName))
+      {
+        <span class='kw'>return</span> adapter;
+      }
+    }
+    <span class='kw'>return</span> D3DADAPTER_DEFAULT;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9Create</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  <span class='kw'>void</span>** stateOut)
+{
+    MAGD3D9STATE* <span class='tp'>state</span>;
+    <span class='tp'>SIZE</span> reservoirSize;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!stateOut || !presentation || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span> ||
+        presentation-&gt;bufferCount &lt; <span class='num'>1</span> || presentation-&gt;bufferCount &gt; <span class='num'>3</span> ||
+        presentation-&gt;syncInterval &gt; <span class='num'>4</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *stateOut = NULL;
+
+    <span class='tp'>state</span> = (MAGD3D9STATE*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>Direct3DCreate9Ex</span>(D3D_SDK_VERSION, &amp;<span class='tp'>state</span>-&gt;d3dEx);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; <span class='tp'>state</span>-&gt;d3dEx)
+    {
+      <span class='tp'>state</span>-&gt;d3d = (IDirect3D9*)<span class='tp'>state</span>-&gt;d3dEx;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='tp'>state</span>-&gt;d3d = <span class='fn'>Direct3DCreate9</span>(D3D_SDK_VERSION);
+    }
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;d3d)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dEx)
+      {
+        <span class='fn'>IDirect3D9Ex_Release</span>(<span class='tp'>state</span>-&gt;d3dEx);
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3d)
+      {
+        <span class='fn'>IDirect3D9_Release</span>(<span class='tp'>state</span>-&gt;d3d);
+      }
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;adapterOrdinal = <span class='fn'>magGraphicsD3D9FindAdapter</span>(<span class='tp'>state</span>-&gt;d3d, presentation);
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+    <span class='fn'>magGraphicsD3D9SetPresentParameters</span>(<span class='tp'>state</span>, hWnd, reservoirSize, presentation);
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;flipEx &amp;&amp; !<span class='tp'>state</span>-&gt;d3dEx)
+    {
+      <span class='fn'>IDirect3D9_Release</span>(<span class='tp'>state</span>-&gt;d3d);
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dEx)
+    {
+      <span class='kw'>const</span> <span class='tp'>DWORD</span> behaviorFlags =
+        D3DCREATE_HARDWARE_VERTEXPROCESSING |
+        D3DCREATE_FPU_PRESERVE |
+        (<span class='tp'>state</span>-&gt;flipEx ? D3DCREATE_ENABLE_PRESENTSTATS : <span class='num'>0</span>);
+      hr = <span class='fn'>IDirect3D9Ex_CreateDeviceEx</span>(
+        <span class='tp'>state</span>-&gt;d3dEx,
+        <span class='tp'>state</span>-&gt;adapterOrdinal,
+        D3DDEVTYPE_HAL,
+        hWnd,
+        behaviorFlags,
+        &amp;<span class='tp'>state</span>-&gt;present,
+        NULL,
+        &amp;<span class='tp'>state</span>-&gt;deviceEx);
+      <span class='tp'>state</span>-&gt;device = (IDirect3DDevice9*)<span class='tp'>state</span>-&gt;deviceEx;
+    }
+    <span class='kw'>else</span>
+    {
+      hr = <span class='fn'>IDirect3D9_CreateDevice</span>(
+        <span class='tp'>state</span>-&gt;d3d,
+        <span class='tp'>state</span>-&gt;adapterOrdinal,
+        D3DDEVTYPE_HAL,
+        hWnd,
+        D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE,
+        &amp;<span class='tp'>state</span>-&gt;present,
+        &amp;<span class='tp'>state</span>-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dEx)
+      {
+        <span class='kw'>const</span> <span class='tp'>DWORD</span> behaviorFlags =
+          D3DCREATE_SOFTWARE_VERTEXPROCESSING |
+          D3DCREATE_FPU_PRESERVE |
+          (<span class='tp'>state</span>-&gt;flipEx ? D3DCREATE_ENABLE_PRESENTSTATS : <span class='num'>0</span>);
+        hr = <span class='fn'>IDirect3D9Ex_CreateDeviceEx</span>(
+          <span class='tp'>state</span>-&gt;d3dEx,
+          <span class='tp'>state</span>-&gt;adapterOrdinal,
+          D3DDEVTYPE_HAL,
+          hWnd,
+          behaviorFlags,
+          &amp;<span class='tp'>state</span>-&gt;present,
+          NULL,
+          &amp;<span class='tp'>state</span>-&gt;deviceEx);
+        <span class='tp'>state</span>-&gt;device = (IDirect3DDevice9*)<span class='tp'>state</span>-&gt;deviceEx;
+      }
+      <span class='kw'>else</span>
+      {
+        hr = <span class='fn'>IDirect3D9_CreateDevice</span>(
+          <span class='tp'>state</span>-&gt;d3d,
+          <span class='tp'>state</span>-&gt;adapterOrdinal,
+          D3DDEVTYPE_HAL,
+          hWnd,
+          D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE,
+          &amp;<span class='tp'>state</span>-&gt;present,
+          &amp;<span class='tp'>state</span>-&gt;device);
+      }
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !<span class='fn'>magGraphicsD3D9CreateTexture</span>(<span class='tp'>state</span>, reservoirSize) ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(
+          &amp;<span class='tp'>state</span>-&gt;compositor,
+          (<span class='tp'>UINT</span>)reservoirSize.cx,
+          (<span class='tp'>UINT</span>)reservoirSize.cy))
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device)
+      {
+        <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;deviceEx)
+        {
+          <span class='fn'>IDirect3DDevice9Ex_Release</span>(<span class='tp'>state</span>-&gt;deviceEx);
+        }
+        <span class='kw'>else</span>
+        {
+          <span class='fn'>IDirect3DDevice9_Release</span>(<span class='tp'>state</span>-&gt;device);
+        }
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dEx)
+      {
+        <span class='fn'>IDirect3D9Ex_Release</span>(<span class='tp'>state</span>-&gt;d3dEx);
+      }
+      <span class='kw'>else</span>
+      {
+        <span class='fn'>IDirect3D9_Release</span>(<span class='tp'>state</span>-&gt;d3d);
+      }
+      <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;<span class='tp'>state</span>-&gt;compositor);
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    *stateOut = <span class='tp'>state</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsD3D9Destroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState)
+{
+    MAGD3D9STATE* <span class='tp'>state</span> = (MAGD3D9STATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>magGraphicsD3D9ReleaseDeviceResources</span>(<span class='tp'>state</span>);
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;deviceEx)
+      {
+        <span class='fn'>IDirect3DDevice9Ex_Release</span>(<span class='tp'>state</span>-&gt;deviceEx);
+      }
+      <span class='kw'>else</span>
+      {
+        <span class='fn'>IDirect3DDevice9_Release</span>(<span class='tp'>state</span>-&gt;device);
+      }
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3d)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dEx)
+      {
+        <span class='fn'>IDirect3D9Ex_Release</span>(<span class='tp'>state</span>-&gt;d3dEx);
+      }
+      <span class='kw'>else</span>
+      {
+        <span class='fn'>IDirect3D9_Release</span>(<span class='tp'>state</span>-&gt;d3d);
+      }
+    }
+    <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;<span class='tp'>state</span>-&gt;compositor);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9Reset</span>(<span class='tp'>HWND</span> hWnd, MAGD3D9STATE* <span class='tp'>state</span>, <span class='tp'>SIZE</span> clientSize)
+{
+    <span class='tp'>HRESULT</span> hr;
+    <span class='tp'>SIZE</span> reservoirSize;
+
+    <span class='kw'>if</span> (clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+    reservoirSize.cx = <span class='fn'>max</span>(reservoirSize.cx, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityWidth);
+    reservoirSize.cy = <span class='fn'>max</span>(reservoirSize.cy, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityHeight);
+    <span class='fn'>magGraphicsD3D9ReleaseDeviceResources</span>(<span class='tp'>state</span>);
+    <span class='tp'>state</span>-&gt;present.BackBufferWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    <span class='tp'>state</span>-&gt;present.BackBufferHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    hr = <span class='tp'>state</span>-&gt;deviceEx
+      ? <span class='fn'>IDirect3DDevice9Ex_ResetEx</span>(<span class='tp'>state</span>-&gt;deviceEx, &amp;<span class='tp'>state</span>-&gt;present, NULL)
+      : <span class='fn'>IDirect3DDevice9_Reset</span>(<span class='tp'>state</span>-&gt;device, &amp;<span class='tp'>state</span>-&gt;present);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !<span class='fn'>magGraphicsD3D9CreateTexture</span>(<span class='tp'>state</span>, reservoirSize))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9Resize</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>SIZE</span> clientSize)
+{
+    MAGD3D9STATE* <span class='tp'>state</span> = (MAGD3D9STATE*)opaqueState;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;width &lt;= <span class='tp'>state</span>-&gt;capacityWidth &amp;&amp; <span class='tp'>state</span>-&gt;height &lt;= <span class='tp'>state</span>-&gt;capacityHeight)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>return</span> <span class='fn'>magGraphicsD3D9Reset</span>(hWnd, <span class='tp'>state</span>, clientSize);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9EnsureReady</span>(<span class='tp'>HWND</span> hWnd, MAGD3D9STATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>const</span> <span class='tp'>HRESULT</span> hr = <span class='fn'>IDirect3DDevice9_TestCooperativeLevel</span>(<span class='tp'>state</span>-&gt;device);
+
+    <span class='kw'>if</span> (D3DERR_DEVICELOST == hr)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (D3DERR_DEVICENOTRESET == hr)
+    {
+      <span class='tp'>RECT</span> <span class='tp'>rect</span>;
+      <span class='tp'>SIZE</span> size;
+
+      <span class='fn'>GetClientRect</span>(hWnd, &amp;<span class='tp'>rect</span>);
+      size.cx = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='mc'>RECTWIDTH</span>(<span class='tp'>rect</span>));
+      size.cy = <span class='fn'>max</span>(<span class='num'>1</span>, <span class='mc'>RECTHEIGHT</span>(<span class='tp'>rect</span>));
+      <span class='kw'>return</span> <span class='fn'>magGraphicsD3D9Reset</span>(hWnd, <span class='tp'>state</span>, size);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsD3D9Render</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    MAGD3D9STATE* <span class='tp'>state</span> = (MAGD3D9STATE*)opaqueState;
+    <span class='tp'>MAGPIXELBUFFER</span> composed;
+    D3DLOCKED_RECT locked;
+    MAGD3D9VERTEX vertices[<span class='num'>4</span>];
+    <span class='tp'>RECT</span> sourceRect;
+    <span class='tp'>RECT</span> destinationRect;
+    <span class='tp'>FLOAT</span> uMax;
+    <span class='tp'>FLOAT</span> vMax;
+    <span class='tp'>FLOAT</span> drawWidth;
+    <span class='tp'>FLOAT</span> drawHeight;
+    <span class='tp'>UINT</span> y;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(intent);
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !frame || frame-&gt;width != <span class='tp'>state</span>-&gt;width || frame-&gt;height != <span class='tp'>state</span>-&gt;height ||
+        !<span class='fn'>magGraphicsD3D9EnsureReady</span>(hWnd, <span class='tp'>state</span>) ||
+        !<span class='fn'>magGraphicsComposeFrame</span>(&amp;<span class='tp'>state</span>-&gt;compositor, frame, ui, &amp;composed))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>IDirect3DTexture9_LockRect</span>(<span class='tp'>state</span>-&gt;texture, <span class='num'>0</span>, &amp;locked, NULL, D3DLOCK_DISCARD);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>for</span> (y = <span class='num'>0</span>; y &lt; composed.height; ++y)
+    {
+      <span class='fn'>CopyMemory</span>(
+        (<span class='tp'>BYTE</span>*)locked.pBits + (<span class='tp'>SIZE_T</span>)y * locked.Pitch,
+        composed.<span class='tp'>pixels</span> + (<span class='tp'>SIZE_T</span>)y * composed.stride,
+        (<span class='tp'>SIZE_T</span>)composed.width * <span class='num'>4U</span>);
+    }
+    <span class='fn'>IDirect3DTexture9_UnlockRect</span>(<span class='tp'>state</span>-&gt;texture, <span class='num'>0</span>);
+
+    <span class='fn'>IDirect3DDevice9_SetRenderState</span>(<span class='tp'>state</span>-&gt;device, D3DRS_CULLMODE, D3DCULL_NONE);
+    <span class='fn'>IDirect3DDevice9_SetRenderState</span>(<span class='tp'>state</span>-&gt;device, D3DRS_ZENABLE, FALSE);
+    <span class='fn'>IDirect3DDevice9_SetRenderState</span>(<span class='tp'>state</span>-&gt;device, D3DRS_ALPHABLENDENABLE, FALSE);
+    <span class='fn'>IDirect3DDevice9_SetSamplerState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    <span class='fn'>IDirect3DDevice9_SetSamplerState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    <span class='fn'>IDirect3DDevice9_SetSamplerState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    <span class='fn'>IDirect3DDevice9_SetSamplerState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    <span class='fn'>IDirect3DDevice9_SetTextureStageState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    <span class='fn'>IDirect3DDevice9_SetTextureStageState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    <span class='fn'>IDirect3DDevice9_SetTextureStageState</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    <span class='fn'>IDirect3DDevice9_SetFVF</span>(<span class='tp'>state</span>-&gt;device, <span class='mc'>MAG_D3D9_FVF</span>);
+    <span class='fn'>IDirect3DDevice9_SetTexture</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>0</span>, (IDirect3DBaseTexture9*)<span class='tp'>state</span>-&gt;texture);
+
+    uMax = (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;width / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityWidth;
+    vMax = (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;height / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityHeight;
+    drawWidth = D3DSWAPEFFECT_COPY == <span class='tp'>state</span>-&gt;present.SwapEffect
+      ? (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;width
+      : (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityWidth;
+    drawHeight = D3DSWAPEFFECT_COPY == <span class='tp'>state</span>-&gt;present.SwapEffect
+      ? (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;height
+      : (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityHeight;
+    vertices[<span class='num'>0</span>] = (MAGD3D9VERTEX){ -<span class='num'>0.5f</span>, -<span class='num'>0.5f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>, <span class='num'>0xFFFFFFFF</span>, <span class='num'>0.0f</span>, <span class='num'>0.0f</span> };
+    vertices[<span class='num'>1</span>] = (MAGD3D9VERTEX){ drawWidth - <span class='num'>0.5f</span>, -<span class='num'>0.5f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>, <span class='num'>0xFFFFFFFF</span>, uMax, <span class='num'>0.0f</span> };
+    vertices[<span class='num'>2</span>] = (MAGD3D9VERTEX){ -<span class='num'>0.5f</span>, drawHeight - <span class='num'>0.5f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>, <span class='num'>0xFFFFFFFF</span>, <span class='num'>0.0f</span>, vMax };
+    vertices[<span class='num'>3</span>] = (MAGD3D9VERTEX){ drawWidth - <span class='num'>0.5f</span>, drawHeight - <span class='num'>0.5f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>, <span class='num'>0xFFFFFFFF</span>, uMax, vMax };
+
+    hr = <span class='fn'>IDirect3DDevice9_BeginScene</span>(<span class='tp'>state</span>-&gt;device);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IDirect3DDevice9_DrawPrimitiveUP</span>(
+        <span class='tp'>state</span>-&gt;device,
+        D3DPT_TRIANGLESTRIP,
+        <span class='num'>2</span>,
+        vertices,
+        <span class='kw'>sizeof</span>(vertices[<span class='num'>0</span>]));
+      <span class='fn'>IDirect3DDevice9_EndScene</span>(<span class='tp'>state</span>-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;flipEx)
+    {
+      <span class='tp'>DWORD</span> presentFlags = <span class='num'>0</span>;
+
+      <span class='kw'>if</span> (intent &amp;&amp; intent-&gt;<span class='tp'>restartSequence</span>)
+      {
+        presentFlags |= D3DPRESENT_FORCEIMMEDIATE;
+      }
+      <span class='kw'>if</span> (intent &amp;&amp; !intent-&gt;synchronize)
+      {
+        presentFlags |= D3DPRESENT_FORCEIMMEDIATE | D3DPRESENT_DONOTWAIT;
+      }
+      hr = <span class='fn'>IDirect3DDevice9Ex_PresentEx</span>(
+        <span class='tp'>state</span>-&gt;deviceEx,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        presentFlags);
+      <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr) || D3DERR_WASSTILLDRAWING == hr;
+    }
+
+    <span class='kw'>if</span> (D3DSWAPEFFECT_COPY == <span class='tp'>state</span>-&gt;present.SwapEffect)
+    {
+      <span class='fn'>SetRect</span>(&amp;sourceRect, <span class='num'>0</span>, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;width, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;height);
+      <span class='fn'>GetClientRect</span>(hWnd, &amp;destinationRect);
+      hr = <span class='fn'>IDirect3DDevice9_Present</span>(
+        <span class='tp'>state</span>-&gt;device,
+        &amp;sourceRect,
+        &amp;destinationRect,
+        NULL,
+        NULL);
+    }
+    <span class='kw'>else</span>
+    {
+      hr = <span class='fn'>IDirect3DDevice9_Present</span>(
+        <span class='tp'>state</span>-&gt;device,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
+    }
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='kw'>static</span> <span class='tp'>HANDLE</span> <span class='fn'>magGraphicsD3D9GetFrameWaitHandle</span>(<span class='kw'>void</span>* <span class='tp'>state</span>)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(<span class='tp'>state</span>);
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magGraphicsD3D9GetResourceGeneration</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGD3D9STATE* <span class='tp'>state</span> = (MAGD3D9STATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span> ? <span class='tp'>state</span>-&gt;resourceGeneration + <span class='tp'>state</span>-&gt;compositor.generation : <span class='num'>0</span>;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsD3D9Backend =
+{
+  GRAPHICS_API_D3D9,
+  <span class='fn'>TEXT</span>(<span class='str'>&quot;Direct3D 9&quot;</span>),
+  TRUE,
+  magGraphicsD3D9IsAvailable,
+  magGraphicsD3D9Create,
+  magGraphicsD3D9Destroy,
+  magGraphicsD3D9Resize,
+  magGraphicsSetPresentationEnabledNoop,
+  magGraphicsD3D9Render,
+  magGraphicsD3D9GetFrameWaitHandle,
+  magGraphicsD3D9GetResourceGeneration,
+  NULL,
+  NULL,
+};
+</pre>
+<p class="source-nav"><a href='graphics_d3d12_c.htm'>&larr; graphics_d3d12.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_dcomp_c.htm'>graphics_dcomp.c &rarr;</a></p>
+</body>
+</html>

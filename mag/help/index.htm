@@ -10,63 +10,85 @@
 
 <h1>MAG Screen Magnifier</h1>
 
-<p>
-  MAG is a lightweight, high-performance screen magnifier for Windows. It renders a
-  real-time zoomed view using OpenGL, with vblank-paced updates, high-DPI support,
-  and multi-monitor capture support.
-</p>
-
-<h2>Getting Started</h2>
-<p>
-  When MAG launches, a resizable magnifier window appears on your desktop. The window
-  shows an enlarged view of whatever is beneath it.
-</p>
-<ul>
-  <li>Scroll the <strong>mouse wheel</strong> over the window to zoom in or out.</li>
-  <li>Drag the window by its frame to position it anywhere on screen.</li>
-  <li><strong>Right-click</strong> the window frame to open the context menu.</li>
-  <li>Open <strong>Settings</strong> to choose the capture backend and optional mouse-relative wheel zoom.</li>
-</ul>
-
-<div class="tip">
-  <strong>Tip:</strong> Use <em>Window</em> mode for a fixed magnifier, <em>Follow Mouse</em>
-  to keep the window in place while centering capture on the cursor, or <em>Lens</em>
-  for a click-through lens that follows the cursor.
+<div class="hero">
+  <p class="lead">
+    MAG is a native Windows magnifier with independently selectable capture, graphics,
+    UI, text, presentation, composition, surface, copy-policy, and adapter paths.
+    It renders during interactive move and resize and activates each compatible setting change immediately.
+  </p>
+  <p><span class="badge">Start here</span> Leave presentation fields on Auto, choose a capture and graphics API, and read Configuration status before changing exact-target or copy-policy requirements.</p>
 </div>
 
-<h2>View Modes</h2>
-<table>
+<h2>Quick start</h2>
+<div class="steps">
+  <div class="step"><strong>Move and resize:</strong> drag the frame, an edge, or a corner. MAG updates the visible frame while the modal move/resize loop is active.</div>
+  <div class="step"><strong>Zoom:</strong> rotate the mouse wheel over MAG. Enable mouse-relative wheel zoom in Settings when the desktop point beneath the pointer should stay fixed.</div>
+  <div class="step"><strong>Choose behavior:</strong> right-click MAG's frame or tray icon and select Window, Follow Mouse, or Lens.</div>
+  <div class="step"><strong>Choose a pipeline:</strong> open Settings, select rendering/capture, then use Auto presentation choices until a specific Windows model is required.</div>
+  <div class="step"><strong>Read the route:</strong> the Settings DAG shows the active capture-to-display pipeline. Every node is interactive; unavailable choices show their reason without replacing the working route.</div>
+</div>
+
+<div class="help-figure">
+  <img src="images/using-mag.png" width="760" alt="MAG over a desktop, with mouse-wheel zoom, resize handles, and the minimap source rectangle illustrated.">
+  <p class="caption">Core interaction: wheel to zoom, frame to move, edges/corners to resize, and the minimap source rectangle to pan.</p>
+</div>
+
+<h2>Open MAG commands and Help</h2>
+<table class="gallery-table">
   <tr>
-    <th>Mode</th>
-    <th>Behavior</th>
-  </tr>
-  <tr>
-    <td class="key">Window</td>
-    <td>The capture is tied to the magnifier window position. At 1.0x scale, the view matches the desktop area behind the window.</td>
-  </tr>
-  <tr>
-    <td class="key">Follow Mouse</td>
-    <td>The window stays where it is, but the capture is centered on the cursor and clipped to the active capture bounds.</td>
-  </tr>
-  <tr>
-    <td class="key">Lens</td>
-    <td>The magnifier follows the cursor and remains click-through so pointer input reaches the window underneath.</td>
+    <td>
+      <img src="images/mag-context-menu.png" alt="Actual MAG context menu captured on an isolated Windows desktop.">
+      <p class="caption"><strong>MAG context menu:</strong> one flat list for the three modes, Settings, Help, and Exit. The current mode is checked.</p>
+    </td>
+    <td>
+      <img src="images/mag-help-contents.png" alt="Actual MAG compiled Help viewer showing the Contents tree and start page.">
+      <p class="caption"><strong>Compiled Help:</strong> Contents provides the guided structure; Index locates named APIs/features; Search covers every topic and embedded source page.</p>
+    </td>
   </tr>
 </table>
 
-<h2>Topics</h2>
+<h2>View modes</h2>
+<table>
+  <tr><th>Mode</th><th>Behavior</th><th>Return path</th></tr>
+  <tr><td class="key">Window</td><td>The source normally follows MAG's screen position. At 1.0&times;, it aligns with the desktop behind the window unless minimap panning pins another origin.</td><td>Select Window from the context menu.</td></tr>
+  <tr><td class="key">Follow Mouse</td><td>MAG remains stationary while the captured source follows the pointer.</td><td>Press Space or select Window.</td></tr>
+  <tr><td class="key">Lens</td><td>A topmost, non-activating, click-through magnifier follows the pointer so input reaches the application below.</td><td>Use the tray icon menu to select another mode.</td></tr>
+</table>
+
+<h2>Complete Help map</h2>
+<table class="topic-grid">
+  <tr>
+    <td><strong><a href="controls.htm">Controls and Shortcuts</a></strong><br>Move, resize, zoom, minimap, tray, keyboard, and all three modes with real MAG mode captures.</td>
+    <td><strong><a href="context_menu.htm">Context Menu and Help</a></strong><br>Every command, the active-mode check, and Contents/Index/Search navigation.</td>
+  </tr>
+  <tr>
+    <td><strong><a href="settings.htm">Settings Reference</a></strong><br>The interactive Route DAG, immediate changes, Auto/Custom preset behavior, valid ranges, compatibility reasons, and persistence.</td>
+    <td><strong><a href="capture_rendering.htm">Capture and Rendering</a></strong><br>All capture, graphics, UI, and text choices with their exact MAG dropdowns.</td>
+  </tr>
+  <tr>
+    <td><strong><a href="presentation.htm">Presentation and Composition</a></strong><br>Every presentation model, surface, host, copy class, alpha mode, adapter, buffer, latency, sync, and tearing setting.</td>
+    <td><strong><a href="graphics_architecture.htm">Windows Graphics Architecture</a></strong><br>DXGI, DWM Private Visual, DirectComposition, WDDM/drivers, D3D9/11/12, D2D, DWrite, OpenGL, Vulkan, GDI, and GDI+ diagrams.</td>
+  </tr>
+  <tr>
+    <td><strong><a href="troubleshooting.htm">Troubleshooting</a></strong><br>Rejected combinations, blank/stale output, flicker, performance, adapter changes, startup, and settings reset.</td>
+    <td><strong><a href="source.htm">Embedded Source Code</a></strong><br>The current project-owned C, headers, resources, renderer backends, presentation code, and private-visual implementation.</td>
+  </tr>
+</table>
+
+<h2>System requirements</h2>
 <ul>
-  <li><a href="controls.htm">Controls &amp; Keyboard Shortcuts</a></li>
-  <li><a href="context_menu.htm">Context Menu</a></li>
-  <li><a href="source.htm">Source Code</a></li>
+  <li>Windows 10 or later and a graphics driver supporting the selected API.</li>
+  <li>Windows 11 runtime support when Presentation Manager is selected.</li>
+  <li>Runtime availability for the selected capture API, compositor path, adapter, output, session, and desktop.</li>
+  <li>A compatible render/display adapter relationship for routes that cannot cross adapters without a copy.</li>
 </ul>
 
-<h2>System Requirements</h2>
-<ul>
-  <li>Windows 10 or later</li>
-  <li>OpenGL-capable graphics adapter</li>
-  <li>Capture backend availability depends on the Windows version, graphics driver, and desktop configuration.</li>
-</ul>
+<div class="note">
+  <strong>DWM Private Visual:</strong> MAG retains a DWM shared desktop source plus positioned
+  per-window visuals for desktop, taskbar, and application content. MAG applies zoom and pan to an
+  app-owned wrapper visual and publishes geometry atomically. See
+  <a href="graphics_architecture.htm">Windows Graphics Architecture</a>.
+</div>
 
 </body>
 </html>

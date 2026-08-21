@@ -3,33 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Source Code - MAG</title>
+  <title>Embedded Source Code - MAG</title>
   <link rel="stylesheet" type="text/css" href="help.css">
 </head>
 <body>
-<p class="breadcrumb"><a href="index.htm">MAG Help</a> &rsaquo; Source Code</p>
-<h1>Source Code</h1>
-<p>Complete source code for MAG. Each file is shown with its full, unmodified contents.</p>
-<ul>
-  <li><a href="source/d3dkmtx_c.htm">d3dkmtx.c</a></li>
-  <li><a href="source/d3dkmtx_h.htm">d3dkmtx.h</a></li>
-  <li><a href="source/dwmapix_c.htm">dwmapix.c</a></li>
-  <li><a href="source/dwmapix_h.htm">dwmapix.h</a></li>
-  <li><a href="source/framework_h.htm">framework.h</a></li>
-  <li><a href="source/help_c.htm">help.c</a></li>
-  <li><a href="source/help_h.htm">help.h</a></li>
-  <li><a href="source/mag_c.htm">mag.c</a></li>
-  <li><a href="source/mag_h.htm">mag.h</a></li>
-  <li><a href="source/main_c.htm">main.c</a></li>
-  <li><a href="source/render_c.htm">render.c</a></li>
-  <li><a href="source/render_h.htm">render.h</a></li>
-  <li><a href="source/resource_h.htm">resource.h</a></li>
-  <li><a href="source/Resource_rc.htm">Resource.rc</a></li>
-  <li><a href="source/targetver_h.htm">targetver.h</a></li>
-  <li><a href="source/wingdix_c.htm">wingdix.c</a></li>
-  <li><a href="source/wingdix_h.htm">wingdix.h</a></li>
-  <li><a href="source/winuserx_c.htm">winuserx.c</a></li>
-  <li><a href="source/winuserx_h.htm">winuserx.h</a></li>
-</ul>
+<p class="breadcrumb"><a href="index.htm">MAG Help</a> &rsaquo; Embedded Source Code</p>
+<h1>Embedded Source Code</h1>
+<div class="hero">
+  <p class="lead">The CHM embeds the complete current project-owned C, header, and resource inputs: 45 files, 28110 lines, and 849099 bytes.</p>
+  <p>No preprocessed output and no Windows SDK header contents are included. COM-based Windows graphics APIs are consumed from C through their ABI declarations and vtables.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/mag-help-source.png" width="1000" alt="MAG compiled Help viewer open to the Embedded Source Code topic with the Developer Reference tree expanded.">
+  <p class="caption">The embedded source browser in the compiled MAG Help viewer. Expand Developer Reference to open any current project compilation input.</p>
+</div>
+<h2>Start with the major subsystems</h2>
+<table class="topic-grid">
+  <tr><td><strong><a href="source/mag_c.htm">mag.c</a></strong><br>Window messages, Settings, modes, persistence, and interaction.</td><td><strong><a href="source/render_c.htm">render.c</a></strong><br>Capture/render orchestration, geometry, presentation, and live-resize contracts.</td></tr>
+  <tr><td><strong><a href="source/dwmprivate_c.htm">dwmprivate.c</a></strong><br>Shared DWM sources, per-window visuals, wrapper transform/clip, overlay reservoir, and atomic commit.</td><td><strong><a href="source/presentation_c.htm">presentation.c</a></strong><br>Targets, surfaces, hosts, copy classes, adapter resolution, and complete-route validation.</td></tr>
+  <tr><td><strong><a href="source/graphics_d3d12_c.htm">graphics_d3d12.c</a></strong><br>Explicit D3D12 resources, commands, fences, and DXGI presentation.</td><td><strong><a href="source/graphics_vulkan_c.htm">graphics_vulkan.c</a></strong><br>Vulkan loader, device, swapchain, command, synchronization, and present path.</td></tr>
+</table>
+<h2>All project compilation inputs</h2>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Responsibility</th></tr>
+  <tr><td class='key'><a href='source/d2dwriteabi_h.htm'>d2dwriteabi.h</a></td><td>293</td><td>C ABI declarations for the Direct2D/DirectWrite interfaces used by MAG.</td></tr>
+  <tr><td class='key'><a href='source/d3dkmtx_c.htm'>d3dkmtx.c</a></td><td>362</td><td>Project-owned C implementation.</td></tr>
+  <tr><td class='key'><a href='source/d3dkmtx_h.htm'>d3dkmtx.h</a></td><td>62</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/dcompabi_h.htm'>dcompabi.h</a></td><td>191</td><td>C ABI declarations for the DirectComposition interfaces used by MAG.</td></tr>
+  <tr><td class='key'><a href='source/dwmapix_c.htm'>dwmapix.c</a></td><td>22</td><td>Project-owned C implementation.</td></tr>
+  <tr><td class='key'><a href='source/dwmapix_h.htm'>dwmapix.h</a></td><td>15</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/dwmprivate_c.htm'>dwmprivate.c</a></td><td>1818</td><td>Private DWM shared desktop/window visuals, retained DirectComposition tree, transform/clip, overlay reservoir, and atomic updates.</td></tr>
+  <tr><td class='key'><a href='source/dwmprivate_h.htm'>dwmprivate.h</a></td><td>86</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/framework_h.htm'>framework.h</a></td><td>30</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/gdiplusabi_h.htm'>gdiplusabi.h</a></td><td>112</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/graphics_c.htm'>graphics.c</a></td><td>349</td><td>Graphics backend catalog and shared backend dispatch.</td></tr>
+  <tr><td class='key'><a href='source/graphics_h.htm'>graphics.h</a></td><td>201</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/graphics_d3d11_c.htm'>graphics_d3d11.c</a></td><td>768</td><td>Direct3D 11/DXGI renderer and presentation backend.</td></tr>
+  <tr><td class='key'><a href='source/graphics_d3d12_c.htm'>graphics_d3d12.c</a></td><td>977</td><td>Direct3D 12 command, resource, fence, and DXGI presentation backend.</td></tr>
+  <tr><td class='key'><a href='source/graphics_d3d9_c.htm'>graphics_d3d9.c</a></td><td>596</td><td>Direct3D 9 renderer and presentation backend.</td></tr>
+  <tr><td class='key'><a href='source/graphics_dcomp_c.htm'>graphics_dcomp.c</a></td><td>294</td><td>DirectComposition presentation host.</td></tr>
+  <tr><td class='key'><a href='source/graphics_dcomp_h.htm'>graphics_dcomp.h</a></td><td>30</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/graphics_gdi_c.htm'>graphics_gdi.c</a></td><td>482</td><td>GDI DIB/HDC renderer and CPU frame path.</td></tr>
+  <tr><td class='key'><a href='source/graphics_gdiplus_c.htm'>graphics_gdiplus.c</a></td><td>605</td><td>Project-owned C implementation.</td></tr>
+  <tr><td class='key'><a href='source/graphics_layered_c.htm'>graphics_layered.c</a></td><td>209</td><td>Traditional User32 layered-window presenter and capacity reservoir.</td></tr>
+  <tr><td class='key'><a href='source/graphics_layered_h.htm'>graphics_layered.h</a></td><td>28</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/graphics_opengl_c.htm'>graphics_opengl.c</a></td><td>546</td><td>WGL/OpenGL context, texture, overlay/text, and SwapBuffers path.</td></tr>
+  <tr><td class='key'><a href='source/graphics_presentation_manager_c.htm'>graphics_presentation_manager.c</a></td><td>787</td><td>Windows 11 Presentation Manager host and surface lifecycle.</td></tr>
+  <tr><td class='key'><a href='source/graphics_presentation_manager_h.htm'>graphics_presentation_manager.h</a></td><td>54</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/graphics_vulkan_c.htm'>graphics_vulkan.c</a></td><td>1289</td><td>Vulkan loader/device/swapchain, resource, command, synchronization, and present path.</td></tr>
+  <tr><td class='key'><a href='source/help_c.htm'>help.c</a></td><td>42</td><td>Project-owned C implementation.</td></tr>
+  <tr><td class='key'><a href='source/help_h.htm'>help.h</a></td><td>7</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/mag_c.htm'>mag.c</a></td><td>6283</td><td>MAG window procedure, message crackers, modes, Settings dialog, persistence, and window behavior.</td></tr>
+  <tr><td class='key'><a href='source/mag_h.htm'>mag.h</a></td><td>15</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/main_c.htm'>main.c</a></td><td>736</td><td>Process startup, DPI awareness, window class registration, message loop, and command-line entry.</td></tr>
+  <tr><td class='key'><a href='source/presentation_c.htm'>presentation.c</a></td><td>1355</td><td>Presentation models, surface/host/copy/adapter resolution, validation, and status reporting.</td></tr>
+  <tr><td class='key'><a href='source/presentation_h.htm'>presentation.h</a></td><td>354</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/presentation_observer_c.htm'>presentation_observer.c</a></td><td>1612</td><td>Process-scoped DxgKrnl/Win32k ETW presentation observation, exact mode classification, and provider diagnostics.</td></tr>
+  <tr><td class='key'><a href='source/presentation_observer_h.htm'>presentation_observer.h</a></td><td>38</td><td>Presentation observer lifecycle, status, and exact observed-mode callback contract.</td></tr>
+  <tr><td class='key'><a href='source/render_c.htm'>render.c</a></td><td>5650</td><td>Capture orchestration, source/view geometry, rendering lifecycle, presentation, resize/move contracts, and verification.</td></tr>
+  <tr><td class='key'><a href='source/render_h.htm'>render.h</a></td><td>236</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/resource_h.htm'>resource.h</a></td><td>80</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/Resource_rc.htm'>Resource.rc</a></td><td>166</td><td>Dialogs, icons, strings, embedded CHM, and native resources.</td></tr>
+  <tr><td class='key'><a href='source/targetver_h.htm'>targetver.h</a></td><td>7</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/ui_renderer_c.htm'>ui_renderer.c</a></td><td>736</td><td>Backend-neutral UI draw list, Direct2D UI, text selection, and overlay resources.</td></tr>
+  <tr><td class='key'><a href='source/ui_renderer_h.htm'>ui_renderer.h</a></td><td>36</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/wingdix_c.htm'>wingdix.c</a></td><td>198</td><td>Extended Win32/GDI helpers and message-cracker support implementation.</td></tr>
+  <tr><td class='key'><a href='source/wingdix_h.htm'>wingdix.h</a></td><td>185</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+  <tr><td class='key'><a href='source/winuserx_c.htm'>winuserx.c</a></td><td>141</td><td>Extended User32/resource helpers.</td></tr>
+  <tr><td class='key'><a href='source/winuserx_h.htm'>winuserx.h</a></td><td>27</td><td>Project-owned C declarations, types, constants, and ABI surface.</td></tr>
+</table>
 </body>
 </html>

@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>presentation.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; presentation.c</p>
+<h1>presentation.c</h1>
+<p>Presentation models, surface/host/copy/adapter resolution, validation, and status reporting.</p>
+<div class="source-meta"><strong>1355 lines</strong> &middot; 50298 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='main_c.htm'>&larr; main.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_h.htm'>presentation.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;dxgi&quot;)</span>
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationIsGdiFamily</span>(<span class='tp'>GRAPHICSAPI</span> graphicsApi)
+{
+    <span class='kw'>return</span> GRAPHICS_API_GDI == graphicsApi ||
+      GRAPHICS_API_GDIPLUS == graphicsApi;
+}
+
+<span class='pp'>#define MAG_PRESENTATION_SETTINGS_VERSION 1U</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_presentationTargets[] =
+{
+  { MAG_PRESENT_AUTO, <span class='fn'>TEXT</span>(<span class='str'>&quot;Auto (highest performance)&quot;</span>) },
+  { MAG_PRESENT_HARDWARE_LEGACY_FLIP, <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware: Legacy Flip&quot;</span>) },
+  { MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER, <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware: Legacy Copy to front buffer&quot;</span>) },
+  { MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware: Independent Flip&quot;</span>) },
+  { MAG_PRESENT_COMPOSED_FLIP, <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed: Flip&quot;</span>) },
+  { MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware Composed: Independent Flip&quot;</span>) },
+  { MAG_PRESENT_COMPOSED_COPY_GPU_GDI, <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed: Copy with GPU GDI&quot;</span>) },
+  { MAG_PRESENT_COMPOSED_COPY_CPU_GDI, <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed: Copy with CPU GDI&quot;</span>) },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_surfaceOwnershipOptions[] =
+{
+  { MAG_SURFACE_AUTO, <span class='fn'>TEXT</span>(<span class='str'>&quot;Auto (host-owned)&quot;</span>) },
+  { MAG_SURFACE_REDIRECTION, <span class='fn'>TEXT</span>(<span class='str'>&quot;DWM redirection surface&quot;</span>) },
+  { MAG_SURFACE_NO_REDIRECTION, <span class='fn'>TEXT</span>(<span class='str'>&quot;No redirection surface&quot;</span>) },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_compositionHostOptions[] =
+{
+  { MAG_HOST_AUTO, <span class='fn'>TEXT</span>(<span class='str'>&quot;Auto (highest performance)&quot;</span>) },
+  { MAG_HOST_REDIRECTED_HWND, <span class='fn'>TEXT</span>(<span class='str'>&quot;Redirected HWND&quot;</span>) },
+  { MAG_HOST_TRADITIONAL_LAYERED, <span class='fn'>TEXT</span>(<span class='str'>&quot;Traditional layered window&quot;</span>) },
+  { MAG_HOST_DIRECTCOMPOSITION, <span class='fn'>TEXT</span>(<span class='str'>&quot;DirectComposition&quot;</span>) },
+  { MAG_HOST_PRESENTATION_MANAGER, <span class='fn'>TEXT</span>(<span class='str'>&quot;Windows 11 Presentation Manager&quot;</span>) },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_copyRequirementOptions[] =
+{
+  { MAG_COPY_AUTO_FASTEST, <span class='fn'>TEXT</span>(<span class='str'>&quot;Auto (fastest valid route)&quot;</span>) },
+  { MAG_COPY_STRICT_ZERO_COPY, <span class='fn'>TEXT</span>(<span class='str'>&quot;Strict zero-copy&quot;</span>) },
+  { MAG_COPY_ALLOW_GPU_LOCAL, <span class='fn'>TEXT</span>(<span class='str'>&quot;Allow GPU-local copy&quot;</span>) },
+  { MAG_COPY_ALLOW_CPU_ROUND_TRIP, <span class='fn'>TEXT</span>(<span class='str'>&quot;Allow CPU round trip (diagnostic)&quot;</span>) },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_layeredAlphaOptions[] =
+{
+  { MAG_LAYER_ALPHA_OPAQUE, <span class='fn'>TEXT</span>(<span class='str'>&quot;Opaque&quot;</span>) },
+  { MAG_LAYER_ALPHA_CONSTANT, <span class='fn'>TEXT</span>(<span class='str'>&quot;Constant alpha&quot;</span>) },
+  { MAG_LAYER_ALPHA_COLOR_KEY, <span class='fn'>TEXT</span>(<span class='str'>&quot;Color key&quot;</span>) },
+  { MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED, <span class='fn'>TEXT</span>(<span class='str'>&quot;Per-pixel premultiplied alpha&quot;</span>) },
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span> g_waitableSwapChainOptions[] =
+{
+  { MAG_WAITABLE_SWAP_CHAIN_AUTO, <span class='fn'>TEXT</span>(<span class='str'>&quot;Auto (only while IF/MPO eligible)&quot;</span>) },
+  { MAG_WAITABLE_SWAP_CHAIN_ENABLED, <span class='fn'>TEXT</span>(<span class='str'>&quot;Enabled (DXGI latency object)&quot;</span>) },
+  { MAG_WAITABLE_SWAP_CHAIN_DISABLED, <span class='fn'>TEXT</span>(<span class='str'>&quot;Disabled (driver queue)&quot;</span>) },
+};
+
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_presentationTargets) == MAG_PRESENT_COUNT);
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_surfaceOwnershipOptions) == MAG_SURFACE_COUNT);
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_compositionHostOptions) == MAG_HOST_COUNT);
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_copyRequirementOptions) == MAG_COPY_COUNT);
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_layeredAlphaOptions) == MAG_LAYER_ALPHA_COUNT);
+<span class='fn'>C_ASSERT</span>(<span class='fn'>ARRAYSIZE</span>(g_waitableSwapChainOptions) == MAG_WAITABLE_SWAP_CHAIN_MODE_COUNT);
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magPresentationSetReason</span>(LPTSTR destination, <span class='tp'>UINT</span> destinationCount, <span class='tp'>LPCTSTR</span> value)
+{
+    <span class='kw'>if</span> (destination &amp;&amp; destinationCount)
+    {
+      <span class='fn'>lstrcpyn</span>(destination, value ? value : <span class='fn'>TEXT</span>(<span class='str'>&quot;&quot;</span>), destinationCount);
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationFunctionAvailable</span>(<span class='tp'>LPCWSTR</span> moduleName, <span class='tp'>LPCSTR</span> functionName)
+{
+    <span class='tp'>HMODULE</span> module = <span class='fn'>LoadLibraryW</span>(moduleName);
+    <span class='tp'>BOOL</span> available = FALSE;
+
+    <span class='kw'>if</span> (module)
+    {
+      available = NULL != <span class='fn'>GetProcAddress</span>(module, functionName);
+      <span class='fn'>FreeLibrary</span>(module);
+    }
+    <span class='kw'>return</span> available;
+}
+
+<span class='kw'>void</span> <span class='fn'>magPresentationSettingsSetDefaults</span>(<span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings)
+{
+    <span class='kw'>if</span> (!settings)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>ZeroMemory</span>(settings, <span class='kw'>sizeof</span>(*settings));
+    settings-&gt;<span class='tp'>version</span> = <span class='mc'>MAG_PRESENTATION_SETTINGS_VERSION</span>;
+    settings-&gt;target = MAG_PRESENT_AUTO;
+    settings-&gt;surfaceOwnership = MAG_SURFACE_AUTO;
+    settings-&gt;host = MAG_HOST_AUTO;
+    settings-&gt;copyRequirement = MAG_COPY_AUTO_FASTEST;
+    settings-&gt;alphaMode = MAG_LAYER_ALPHA_OPAQUE;
+    settings-&gt;constantAlpha = <span class='num'>255</span>;
+    settings-&gt;strictTarget = TRUE;
+    settings-&gt;allowTearing = TRUE;
+    settings-&gt;waitableSwapChainMode = MAG_WAITABLE_SWAP_CHAIN_AUTO;
+    settings-&gt;bufferCount = <span class='num'>3</span>;
+    settings-&gt;maximumFrameLatency = <span class='num'>1</span>;
+    settings-&gt;syncInterval = <span class='num'>1</span>;
+    settings-&gt;display.<span class='tp'>mode</span> = MAG_DISPLAY_ADAPTER_AUTO;
+    settings-&gt;hardware.<span class='tp'>mode</span> = MAG_HARDWARE_ADAPTER_AUTO;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationSettingsEqual</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* <span class='tp'>left</span>,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* right)
+{
+    <span class='kw'>return</span> <span class='tp'>left</span> &amp;&amp; right &amp;&amp;
+      <span class='tp'>left</span>-&gt;<span class='tp'>version</span> == right-&gt;<span class='tp'>version</span> &amp;&amp;
+      <span class='tp'>left</span>-&gt;target == right-&gt;target &amp;&amp;
+      <span class='tp'>left</span>-&gt;surfaceOwnership == right-&gt;surfaceOwnership &amp;&amp;
+      <span class='tp'>left</span>-&gt;host == right-&gt;host &amp;&amp;
+      <span class='tp'>left</span>-&gt;copyRequirement == right-&gt;copyRequirement &amp;&amp;
+      <span class='tp'>left</span>-&gt;alphaMode == right-&gt;alphaMode &amp;&amp;
+      <span class='tp'>left</span>-&gt;constantAlpha == right-&gt;constantAlpha &amp;&amp;
+      <span class='tp'>left</span>-&gt;colorKey == right-&gt;colorKey &amp;&amp;
+      <span class='tp'>left</span>-&gt;strictTarget == right-&gt;strictTarget &amp;&amp;
+      <span class='tp'>left</span>-&gt;allowTearing == right-&gt;allowTearing &amp;&amp;
+      <span class='tp'>left</span>-&gt;waitableSwapChainMode == right-&gt;waitableSwapChainMode &amp;&amp;
+      <span class='tp'>left</span>-&gt;bufferCount == right-&gt;bufferCount &amp;&amp;
+      <span class='tp'>left</span>-&gt;maximumFrameLatency == right-&gt;maximumFrameLatency &amp;&amp;
+      <span class='tp'>left</span>-&gt;syncInterval == right-&gt;syncInterval &amp;&amp;
+      <span class='tp'>left</span>-&gt;display.<span class='tp'>mode</span> == right-&gt;display.<span class='tp'>mode</span> &amp;&amp;
+      <span class='fn'>magAdapterLuidEqual</span>(<span class='tp'>left</span>-&gt;display.adapterLuid, right-&gt;display.adapterLuid) &amp;&amp;
+      <span class='num'>0</span> == <span class='fn'>lstrcmpi</span>(<span class='tp'>left</span>-&gt;display.deviceName, right-&gt;display.deviceName) &amp;&amp;
+      <span class='tp'>left</span>-&gt;hardware.<span class='tp'>mode</span> == right-&gt;hardware.<span class='tp'>mode</span> &amp;&amp;
+      <span class='fn'>magAdapterLuidEqual</span>(<span class='tp'>left</span>-&gt;hardware.adapterLuid, right-&gt;hardware.adapterLuid);
+}
+
+<span class='pp'>#define MAG_DEFINE_OPTION_ACCESSORS(prefix, array) \</span>
+  <span class='tp'>UINT</span> prefix##<span class='fn'>Count</span>(<span class='kw'>void</span>) { <span class='kw'>return</span> <span class='fn'>ARRAYSIZE</span>(array); } \
+  <span class='kw'>const</span> <span class='tp'>MAGNAMEDOPTION</span>* prefix##<span class='fn'>At</span>(<span class='tp'>UINT</span> index) { <span class='kw'>return</span> index &lt; <span class='fn'>ARRAYSIZE</span>(array) ? &amp;array[index] : NULL; }
+
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magPresentationTarget, g_presentationTargets)
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magSurfaceOwnership, g_surfaceOwnershipOptions)
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magCompositionHost, g_compositionHostOptions)
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magCopyRequirement, g_copyRequirementOptions)
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magLayeredAlphaMode, g_layeredAlphaOptions)
+<span class='mc'>MAG_DEFINE_OPTION_ACCESSORS</span>(magWaitableSwapChainMode, g_waitableSwapChainOptions)
+
+<span class='tp'>LPCTSTR</span> <span class='fn'>magPresentationTargetName</span>(<span class='tp'>MAGPRESENTATIONTARGET</span> target)
+{
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='fn'>ARRAYSIZE</span>(g_presentationTargets); ++index)
+    {
+      <span class='kw'>if</span> (g_presentationTargets[index].<span class='tp'>id</span> == (<span class='tp'>UINT</span>)target)
+      {
+        <span class='kw'>return</span> g_presentationTargets[index].name;
+      }
+    }
+    <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;Unknown presentation target&quot;</span>);
+}
+
+<span class='tp'>LPCTSTR</span> <span class='fn'>magPresentationObservationSourceName</span>(
+  <span class='tp'>MAGPRESENTATIONOBSERVATIONSOURCE</span> source)
+{
+    <span class='kw'>switch</span> (source)
+    {
+    <span class='kw'>case</span> MAG_PRESENT_OBSERVATION_PRESENTATION_MANAGER:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation Manager statistics&quot;</span>);
+    <span class='kw'>case</span> MAG_PRESENT_OBSERVATION_ETW:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;process-scoped ETW&quot;</span>);
+    <span class='kw'>case</span> MAG_PRESENT_OBSERVATION_NONE:
+    <span class='kw'>default</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;no runtime observer&quot;</span>);
+    }
+}
+
+<span class='tp'>LPCTSTR</span> <span class='fn'>magCrossAdapterSupportTierName</span>(<span class='tp'>UINT</span> tier)
+{
+    <span class='kw'>switch</span> (tier)
+    {
+    <span class='kw'>case</span> <span class='num'>1</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;copy&quot;</span>);
+    <span class='kw'>case</span> <span class='num'>2</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;texture&quot;</span>);
+    <span class='kw'>case</span> <span class='num'>3</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;scanout&quot;</span>);
+    <span class='kw'>case</span> <span class='num'>0</span>:
+    <span class='kw'>default</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;none&quot;</span>);
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterLuidEqual</span>(LUID <span class='tp'>left</span>, LUID right)
+{
+    <span class='kw'>return</span> <span class='tp'>left</span>.HighPart == right.HighPart &amp;&amp; <span class='tp'>left</span>.LowPart == right.LowPart;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magAdapterCatalogContains</span>(<span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog, LUID <span class='tp'>luid</span>)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; catalog-&gt;<span class='tp'>adapterCount</span>; ++i)
+    {
+      <span class='kw'>if</span> (<span class='fn'>magAdapterLuidEqual</span>(catalog-&gt;adapters[i].<span class='tp'>luid</span>, <span class='tp'>luid</span>))
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magAdapterCatalogAppend</span>(
+  <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  IDXGIAdapter1* adapter)
+{
+    DXGI_ADAPTER_DESC1 desc;
+    <span class='tp'>MAGADAPTERINFO</span>* adapterInfo;
+    <span class='tp'>UINT</span> <span class='tp'>adapterIndex</span>;
+    <span class='tp'>UINT</span> outputIndex;
+
+    <span class='kw'>if</span> (!catalog || !adapter || catalog-&gt;<span class='tp'>adapterCount</span> &gt;= <span class='fn'>ARRAYSIZE</span>(catalog-&gt;adapters) ||
+        <span class='fn'>FAILED</span>(<span class='fn'>IDXGIAdapter1_GetDesc1</span>(adapter, &amp;desc)) ||
+        <span class='fn'>magAdapterCatalogContains</span>(catalog, desc.AdapterLuid))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>adapterIndex</span> = catalog-&gt;<span class='tp'>adapterCount</span>++;
+    adapterInfo = &amp;catalog-&gt;adapters[<span class='tp'>adapterIndex</span>];
+    <span class='fn'>ZeroMemory</span>(adapterInfo, <span class='kw'>sizeof</span>(*adapterInfo));
+    adapterInfo-&gt;<span class='tp'>luid</span> = desc.AdapterLuid;
+    adapterInfo-&gt;dedicatedVideoMemory = desc.DedicatedVideoMemory;
+    adapterInfo-&gt;software = <span class='num'>0</span> != (desc.Flags &amp; DXGI_ADAPTER_FLAG_SOFTWARE);
+    adapterInfo-&gt;remote = <span class='num'>0</span> != (desc.Flags &amp; DXGI_ADAPTER_FLAG_REMOTE);
+    <span class='fn'>lstrcpyn</span>(adapterInfo-&gt;description, desc.Description, <span class='fn'>ARRAYSIZE</span>(adapterInfo-&gt;description));
+
+    <span class='kw'>for</span> (outputIndex = <span class='num'>0</span>; catalog-&gt;outputCount &lt; <span class='fn'>ARRAYSIZE</span>(catalog-&gt;outputs); ++outputIndex)
+    {
+      IDXGIOutput* output = NULL;
+      DXGI_OUTPUT_DESC outputDesc;
+      <span class='tp'>MAGOUTPUTINFO</span>* outputInfo;
+      <span class='tp'>HRESULT</span> hr = <span class='fn'>IDXGIAdapter1_EnumOutputs</span>(adapter, outputIndex, &amp;output);
+
+      <span class='kw'>if</span> (DXGI_ERROR_NOT_FOUND == hr)
+      {
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !output)
+      {
+        <span class='kw'>continue</span>;
+      }
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>IDXGIOutput_GetDesc</span>(output, &amp;outputDesc)))
+      {
+        <span class='fn'>IDXGIOutput_Release</span>(output);
+        <span class='kw'>continue</span>;
+      }
+
+      outputInfo = &amp;catalog-&gt;outputs[catalog-&gt;outputCount++];
+      <span class='fn'>ZeroMemory</span>(outputInfo, <span class='kw'>sizeof</span>(*outputInfo));
+      outputInfo-&gt;<span class='tp'>adapterIndex</span> = <span class='tp'>adapterIndex</span>;
+      outputInfo-&gt;monitor = outputDesc.Monitor;
+      outputInfo-&gt;desktopCoordinates = outputDesc.DesktopCoordinates;
+      outputInfo-&gt;attachedToDesktop = outputDesc.AttachedToDesktop;
+      <span class='fn'>lstrcpyn</span>(outputInfo-&gt;deviceName, outputDesc.DeviceName, <span class='fn'>ARRAYSIZE</span>(outputInfo-&gt;deviceName));
+
+      {
+        DEVMODE <span class='tp'>mode</span> = { <span class='num'>0</span> };
+        <span class='tp'>mode</span>.dmSize = <span class='kw'>sizeof</span>(<span class='tp'>mode</span>);
+        <span class='kw'>if</span> (<span class='fn'>EnumDisplaySettings</span>(outputDesc.DeviceName, ENUM_CURRENT_SETTINGS, &amp;<span class='tp'>mode</span>))
+        {
+          outputInfo-&gt;refreshNumerator = <span class='tp'>mode</span>.dmDisplayFrequency;
+          outputInfo-&gt;refreshDenominator = <span class='num'>1</span>;
+        }
+      }
+      {
+        IDXGIOutput6* output6 = NULL;
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput_QueryInterface</span>(output, &amp;IID_IDXGIOutput6, (<span class='kw'>void</span>**)&amp;output6)))
+        {
+          DXGI_OUTPUT_DESC1 desc1;
+          <span class='tp'>UINT</span> hardwareCompositionSupport = <span class='num'>0</span>;
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput6_GetDesc1</span>(output6, &amp;desc1)))
+          {
+            outputInfo-&gt;hdr = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 == desc1.ColorSpace;
+          }
+          <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput6_CheckHardwareCompositionSupport</span>(
+                output6,
+                &amp;hardwareCompositionSupport)))
+          {
+            outputInfo-&gt;hardwareCompositionSupportKnown = TRUE;
+            outputInfo-&gt;hardwareCompositionSupport = hardwareCompositionSupport;
+          }
+          <span class='fn'>IDXGIOutput6_Release</span>(output6);
+        }
+      }
+      {
+        <span class='tp'>MAGD3DKMTDISPLAYPLANECAPS</span> planeCaps;
+
+        <span class='kw'>if</span> (<span class='fn'>D3DKMTQueryDisplayPlaneCaps</span>(
+              outputDesc.DeviceName,
+              &amp;planeCaps))
+        {
+          outputInfo-&gt;displayPlaneCapsKnown = planeCaps.<span class='tp'>queried</span>;
+          outputInfo-&gt;directFlipCapable = planeCaps.directFlip;
+          outputInfo-&gt;independentFlipCapable = planeCaps.independentFlip;
+          outputInfo-&gt;multiPlaneOverlayCapable = planeCaps.multiPlaneOverlay;
+          outputInfo-&gt;multiPlaneOverlayDecodeCapable =
+            planeCaps.multiPlaneOverlayDecode;
+          outputInfo-&gt;panelFitterCapable = planeCaps.panelFitter;
+          outputInfo-&gt;mpo3DdiCapable = planeCaps.mpo3Ddi;
+          outputInfo-&gt;mpoKernelCapsCapable = planeCaps.mpoKernelCaps;
+          outputInfo-&gt;mpoHudKernelCapable = planeCaps.mpoHudKernel;
+          outputInfo-&gt;mpoHudCapable = planeCaps.mpoHud;
+          outputInfo-&gt;mpoSecondaryCapable = planeCaps.mpoSecondary;
+          outputInfo-&gt;independentFlipSecondaryCapable =
+            planeCaps.independentFlipSecondary;
+          outputInfo-&gt;mpoStretchCapable = planeCaps.mpoStretch;
+          outputInfo-&gt;overlayCapsKnown = planeCaps.overlayCapsKnown;
+          outputInfo-&gt;postCompositionCapsKnown =
+            planeCaps.postCompositionCaps;
+          outputInfo-&gt;overlayRotationCapable = planeCaps.overlayRotation;
+          outputInfo-&gt;overlayRotationWithoutIndependentFlip =
+            planeCaps.overlayRotationWithoutIndependentFlip;
+          outputInfo-&gt;overlayVerticalFlipCapable =
+            planeCaps.overlayVerticalFlip;
+          outputInfo-&gt;overlayHorizontalFlipCapable =
+            planeCaps.overlayHorizontalFlip;
+          outputInfo-&gt;overlayStretchRgbCapable = planeCaps.overlayStretchRgb;
+          outputInfo-&gt;overlayStretchYuvCapable = planeCaps.overlayStretchYuv;
+          outputInfo-&gt;overlayBilinearFilterCapable =
+            planeCaps.overlayBilinearFilter;
+          outputInfo-&gt;overlayHighFilterCapable = planeCaps.overlayHighFilter;
+          outputInfo-&gt;overlaySharedAcrossOutputs = planeCaps.overlayShared;
+          outputInfo-&gt;overlayImmediateCapable = planeCaps.overlayImmediate;
+          outputInfo-&gt;overlayPlane0ForVirtualModeOnly =
+            planeCaps.overlayPlane0ForVirtualModeOnly;
+          outputInfo-&gt;overlayVersion3DdiCapable =
+            planeCaps.overlayVersion3Ddi;
+          outputInfo-&gt;displayCapsKnown = planeCaps.displayCapsKnown;
+          outputInfo-&gt;displayPreferPhysicallyContiguous =
+            planeCaps.displayPreferPhysicallyContiguous;
+          outputInfo-&gt;displayCursorScaledWithMpoPlane0 =
+            planeCaps.displayCursorScaledWithMpoPlane0;
+          outputInfo-&gt;displayCursorNoXorWithMpo =
+            planeCaps.displayCursorNoXorWithMpo;
+          outputInfo-&gt;scanoutCapsKnown = planeCaps.scanoutCapsKnown;
+          outputInfo-&gt;crossAdapterSupportKnown =
+            planeCaps.crossAdapterSupportKnown;
+          outputInfo-&gt;wddm3CapsKnown = planeCaps.wddm3CapsKnown;
+          outputInfo-&gt;hardwareFlipQueueSupported =
+            planeCaps.hardwareFlipQueueSupported;
+          outputInfo-&gt;hardwareFlipQueueEnabled =
+            planeCaps.hardwareFlipQueueEnabled;
+          outputInfo-&gt;displayableSupported = planeCaps.displayableSupported;
+          outputInfo-&gt;hardwareFlipQueueSupportState =
+            planeCaps.hardwareFlipQueueSupportState;
+          outputInfo-&gt;vidPnSourceId = planeCaps.vidPnSourceId;
+          outputInfo-&gt;maxPlanes = planeCaps.maxPlanes;
+          outputInfo-&gt;maxRgbPlanes = planeCaps.maxRgbPlanes;
+          outputInfo-&gt;maxYuvPlanes = planeCaps.maxYuvPlanes;
+          outputInfo-&gt;overlayCaps = planeCaps.overlayCaps;
+          outputInfo-&gt;scanoutCaps = planeCaps.scanoutCaps;
+          outputInfo-&gt;crossAdapterSupportTier =
+            planeCaps.crossAdapterSupportTier;
+          outputInfo-&gt;maxStretchFactor = planeCaps.maxStretchFactor;
+          outputInfo-&gt;maxShrinkFactor = planeCaps.maxShrinkFactor;
+          outputInfo-&gt;postCompositionMaxStretchFactor =
+            planeCaps.postCompositionMaxStretchFactor;
+          outputInfo-&gt;postCompositionMaxShrinkFactor =
+            planeCaps.postCompositionMaxShrinkFactor;
+        }
+      }
+      <span class='fn'>IDXGIOutput_Release</span>(output);
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterCatalogEnumerate</span>(<span class='tp'>MAGADAPTERCATALOG</span>* catalog, LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    IDXGIFactory1* factory1 = NULL;
+    IDXGIFactory6* factory6 = NULL;
+    <span class='tp'>HRESULT</span> hr;
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!catalog)
+    {
+      <span class='fn'>magPresentationSetReason</span>(reason, reasonCount, <span class='fn'>TEXT</span>(<span class='str'>&quot;The adapter catalog destination is invalid.&quot;</span>));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>ZeroMemory</span>(catalog, <span class='kw'>sizeof</span>(*catalog));
+    hr = <span class='fn'>CreateDXGIFactory1</span>(&amp;IID_IDXGIFactory1, (<span class='kw'>void</span>**)&amp;factory1);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>magPresentationSetReason</span>(reason, reasonCount, <span class='fn'>TEXT</span>(<span class='str'>&quot;DXGI could not enumerate display adapters.&quot;</span>));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory1_QueryInterface</span>(factory1, &amp;IID_IDXGIFactory6, (<span class='kw'>void</span>**)&amp;factory6)))
+    {
+      <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='mc'>MAG_MAX_ADAPTERS</span>; ++index)
+      {
+        IDXGIAdapter1* adapter = NULL;
+        hr = <span class='fn'>IDXGIFactory6_EnumAdapterByGpuPreference</span>(
+          factory6,
+          index,
+          DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+          &amp;IID_IDXGIAdapter1,
+          (<span class='kw'>void</span>**)&amp;adapter);
+        <span class='kw'>if</span> (DXGI_ERROR_NOT_FOUND == hr)
+        {
+          <span class='kw'>break</span>;
+        }
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; adapter)
+        {
+          <span class='fn'>magAdapterCatalogAppend</span>(catalog, adapter);
+          <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+        }
+      }
+      <span class='fn'>IDXGIFactory6_Release</span>(factory6);
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='mc'>MAG_MAX_ADAPTERS</span>; ++index)
+      {
+        IDXGIAdapter1* adapter = NULL;
+        hr = <span class='fn'>IDXGIFactory1_EnumAdapters1</span>(factory1, index, &amp;adapter);
+        <span class='kw'>if</span> (DXGI_ERROR_NOT_FOUND == hr)
+        {
+          <span class='kw'>break</span>;
+        }
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; adapter)
+        {
+          <span class='fn'>magAdapterCatalogAppend</span>(catalog, adapter);
+          <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+        }
+      }
+    }
+    <span class='fn'>IDXGIFactory1_Release</span>(factory1);
+
+    <span class='kw'>if</span> (!catalog-&gt;<span class='tp'>adapterCount</span>)
+    {
+      <span class='fn'>magPresentationSetReason</span>(reason, reasonCount, <span class='fn'>TEXT</span>(<span class='str'>&quot;DXGI reported no usable adapters.&quot;</span>));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>magPresentationSetReason</span>(reason, reasonCount, <span class='fn'>TEXT</span>(<span class='str'>&quot;&quot;</span>));
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGADAPTERINFO</span>* <span class='fn'>magAdapterCatalogFindAdapter</span>(<span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog, LUID <span class='tp'>luid</span>)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!catalog)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; catalog-&gt;<span class='tp'>adapterCount</span>; ++i)
+    {
+      <span class='kw'>if</span> (<span class='fn'>magAdapterLuidEqual</span>(catalog-&gt;adapters[i].<span class='tp'>luid</span>, <span class='tp'>luid</span>))
+      {
+        <span class='kw'>return</span> &amp;catalog-&gt;adapters[i];
+      }
+    }
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magAdapterOpenDxgi</span>(LUID <span class='tp'>luid</span>, IDXGIAdapter1** adapterOut)
+{
+    IDXGIFactory1* factory1 = NULL;
+    IDXGIFactory4* factory4 = NULL;
+    <span class='tp'>UINT</span> index;
+    <span class='tp'>BOOL</span> found = FALSE;
+
+    <span class='kw'>if</span> (!adapterOut)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *adapterOut = NULL;
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(<span class='fn'>CreateDXGIFactory1</span>(&amp;IID_IDXGIFactory1, (<span class='kw'>void</span>**)&amp;factory1)))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory1_QueryInterface</span>(factory1, &amp;IID_IDXGIFactory4, (<span class='kw'>void</span>**)&amp;factory4)))
+    {
+      found = <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIFactory4_EnumAdapterByLuid</span>(
+        factory4,
+        <span class='tp'>luid</span>,
+        &amp;IID_IDXGIAdapter1,
+        (<span class='kw'>void</span>**)adapterOut));
+      <span class='fn'>IDXGIFactory4_Release</span>(factory4);
+    }
+    <span class='kw'>if</span> (!found)
+    {
+      <span class='kw'>for</span> (index = <span class='num'>0</span>; ; ++index)
+      {
+        IDXGIAdapter1* adapter = NULL;
+        DXGI_ADAPTER_DESC1 desc;
+        <span class='tp'>HRESULT</span> hr = <span class='fn'>IDXGIFactory1_EnumAdapters1</span>(factory1, index, &amp;adapter);
+
+        <span class='kw'>if</span> (DXGI_ERROR_NOT_FOUND == hr)
+        {
+          <span class='kw'>break</span>;
+        }
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; adapter &amp;&amp;
+            <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIAdapter1_GetDesc1</span>(adapter, &amp;desc)) &amp;&amp;
+            <span class='fn'>magAdapterLuidEqual</span>(desc.AdapterLuid, <span class='tp'>luid</span>))
+        {
+          *adapterOut = adapter;
+          found = TRUE;
+          <span class='kw'>break</span>;
+        }
+        <span class='kw'>if</span> (adapter)
+        {
+          <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+        }
+      }
+    }
+    <span class='fn'>IDXGIFactory1_Release</span>(factory1);
+    <span class='kw'>return</span> found;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* <span class='fn'>magAdapterCatalogFindOutput</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  LUID adapterLuid,
+  <span class='tp'>LPCTSTR</span> deviceName)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!catalog)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; catalog-&gt;outputCount; ++i)
+    {
+      <span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* output = &amp;catalog-&gt;outputs[i];
+      <span class='kw'>if</span> (output-&gt;<span class='tp'>adapterIndex</span> &lt; catalog-&gt;<span class='tp'>adapterCount</span> &amp;&amp;
+          <span class='fn'>magAdapterLuidEqual</span>(catalog-&gt;adapters[output-&gt;<span class='tp'>adapterIndex</span>].<span class='tp'>luid</span>, adapterLuid) &amp;&amp;
+          (!deviceName || !deviceName[<span class='num'>0</span>] || <span class='num'>0</span> == <span class='fn'>lstrcmpi</span>(output-&gt;deviceName, deviceName)))
+      {
+        <span class='kw'>return</span> output;
+      }
+    }
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* <span class='fn'>magPresentationFindWindowOutput</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog)
+{
+    <span class='tp'>HMONITOR</span> monitor = <span class='fn'>MonitorFromWindow</span>(hWnd, MONITOR_DEFAULTTONEAREST);
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; catalog &amp;&amp; i &lt; catalog-&gt;outputCount; ++i)
+    {
+      <span class='kw'>if</span> (catalog-&gt;outputs[i].monitor == monitor)
+      {
+        <span class='kw'>return</span> &amp;catalog-&gt;outputs[i];
+      }
+    }
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationResolveDisplay</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* requested,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved,
+  <span class='tp'>MAGPRESENTATIONSTATUS</span>* status)
+{
+    <span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* output = NULL;
+
+    <span class='kw'>if</span> (MAG_DISPLAY_ADAPTER_EXPLICIT == requested-&gt;display.<span class='tp'>mode</span>)
+    {
+      output = <span class='fn'>magAdapterCatalogFindOutput</span>(
+        catalog,
+        requested-&gt;display.adapterLuid,
+        requested-&gt;display.deviceName);
+      <span class='kw'>if</span> (!output)
+      {
+        <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The saved Display Adapter is disconnected or unavailable.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='kw'>else</span>
+    {
+      output = <span class='fn'>magPresentationFindWindowOutput</span>(hWnd, catalog);
+      <span class='kw'>if</span> (!output &amp;&amp; catalog-&gt;outputCount)
+      {
+        output = &amp;catalog-&gt;outputs[<span class='num'>0</span>];
+      }
+    }
+
+    <span class='kw'>if</span> (!output || output-&gt;<span class='tp'>adapterIndex</span> &gt;= catalog-&gt;<span class='tp'>adapterCount</span>)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;No active output can satisfy the Display Adapter selection.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    resolved-&gt;display.adapterLuid = catalog-&gt;adapters[output-&gt;<span class='tp'>adapterIndex</span>].<span class='tp'>luid</span>;
+    <span class='fn'>lstrcpyn</span>(resolved-&gt;display.deviceName, output-&gt;deviceName, <span class='fn'>ARRAYSIZE</span>(resolved-&gt;display.deviceName));
+    status-&gt;displayAdapterLuid = resolved-&gt;display.adapterLuid;
+    status-&gt;displayAdapterResolved = TRUE;
+    status-&gt;hardwareCompositionSupportKnown =
+      output-&gt;hardwareCompositionSupportKnown;
+    status-&gt;hardwareCompositionSupport =
+      output-&gt;hardwareCompositionSupport;
+    status-&gt;displayPlaneCapsKnown = output-&gt;displayPlaneCapsKnown;
+    status-&gt;directFlipCapable = output-&gt;directFlipCapable;
+    status-&gt;independentFlipCapable = output-&gt;independentFlipCapable;
+    status-&gt;multiPlaneOverlayCapable = output-&gt;multiPlaneOverlayCapable;
+    status-&gt;multiPlaneOverlayDecodeCapable =
+      output-&gt;multiPlaneOverlayDecodeCapable;
+    status-&gt;panelFitterCapable = output-&gt;panelFitterCapable;
+    status-&gt;mpo3DdiCapable = output-&gt;mpo3DdiCapable;
+    status-&gt;mpoKernelCapsCapable = output-&gt;mpoKernelCapsCapable;
+    status-&gt;mpoHudKernelCapable = output-&gt;mpoHudKernelCapable;
+    status-&gt;mpoHudCapable = output-&gt;mpoHudCapable;
+    status-&gt;mpoSecondaryCapable = output-&gt;mpoSecondaryCapable;
+    status-&gt;independentFlipSecondaryCapable =
+      output-&gt;independentFlipSecondaryCapable;
+    status-&gt;mpoStretchCapable = output-&gt;mpoStretchCapable;
+    status-&gt;overlayCapsKnown = output-&gt;overlayCapsKnown;
+    status-&gt;postCompositionCapsKnown = output-&gt;postCompositionCapsKnown;
+    status-&gt;overlayRotationCapable = output-&gt;overlayRotationCapable;
+    status-&gt;overlayRotationWithoutIndependentFlip =
+      output-&gt;overlayRotationWithoutIndependentFlip;
+    status-&gt;overlayVerticalFlipCapable = output-&gt;overlayVerticalFlipCapable;
+    status-&gt;overlayHorizontalFlipCapable = output-&gt;overlayHorizontalFlipCapable;
+    status-&gt;overlayStretchRgbCapable = output-&gt;overlayStretchRgbCapable;
+    status-&gt;overlayStretchYuvCapable = output-&gt;overlayStretchYuvCapable;
+    status-&gt;overlayBilinearFilterCapable =
+      output-&gt;overlayBilinearFilterCapable;
+    status-&gt;overlayHighFilterCapable = output-&gt;overlayHighFilterCapable;
+    status-&gt;overlaySharedAcrossOutputs = output-&gt;overlaySharedAcrossOutputs;
+    status-&gt;overlayImmediateCapable = output-&gt;overlayImmediateCapable;
+    status-&gt;overlayPlane0ForVirtualModeOnly =
+      output-&gt;overlayPlane0ForVirtualModeOnly;
+    status-&gt;overlayVersion3DdiCapable = output-&gt;overlayVersion3DdiCapable;
+    status-&gt;displayCapsKnown = output-&gt;displayCapsKnown;
+    status-&gt;displayPreferPhysicallyContiguous =
+      output-&gt;displayPreferPhysicallyContiguous;
+    status-&gt;displayCursorScaledWithMpoPlane0 =
+      output-&gt;displayCursorScaledWithMpoPlane0;
+    status-&gt;displayCursorNoXorWithMpo = output-&gt;displayCursorNoXorWithMpo;
+    status-&gt;scanoutCapsKnown = output-&gt;scanoutCapsKnown;
+    status-&gt;crossAdapterSupportKnown = output-&gt;crossAdapterSupportKnown;
+    status-&gt;wddm3CapsKnown = output-&gt;wddm3CapsKnown;
+    status-&gt;hardwareFlipQueueSupported = output-&gt;hardwareFlipQueueSupported;
+    status-&gt;hardwareFlipQueueEnabled = output-&gt;hardwareFlipQueueEnabled;
+    status-&gt;displayableSupported = output-&gt;displayableSupported;
+    status-&gt;hardwareFlipQueueSupportState =
+      output-&gt;hardwareFlipQueueSupportState;
+    status-&gt;vidPnSourceId = output-&gt;vidPnSourceId;
+    status-&gt;maxPlanes = output-&gt;maxPlanes;
+    status-&gt;maxRgbPlanes = output-&gt;maxRgbPlanes;
+    status-&gt;maxYuvPlanes = output-&gt;maxYuvPlanes;
+    status-&gt;overlayCaps = output-&gt;overlayCaps;
+    status-&gt;scanoutCaps = output-&gt;scanoutCaps;
+    status-&gt;crossAdapterSupportTier = output-&gt;crossAdapterSupportTier;
+    status-&gt;maxStretchFactor = output-&gt;maxStretchFactor;
+    status-&gt;maxShrinkFactor = output-&gt;maxShrinkFactor;
+    status-&gt;postCompositionMaxStretchFactor =
+      output-&gt;postCompositionMaxStretchFactor;
+    status-&gt;postCompositionMaxShrinkFactor =
+      output-&gt;postCompositionMaxShrinkFactor;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationResolveHardware</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* requested,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved,
+  <span class='tp'>MAGPRESENTATIONSTATUS</span>* status)
+{
+    <span class='kw'>const</span> <span class='tp'>MAGADAPTERINFO</span>* adapter = NULL;
+
+    <span class='kw'>switch</span> (requested-&gt;hardware.<span class='tp'>mode</span>)
+    {
+    <span class='kw'>case</span> MAG_HARDWARE_ADAPTER_WARP:
+      status-&gt;hardwareAdapterResolved = TRUE;
+      status-&gt;hardwareAdapterLuid.LowPart = <span class='num'>0</span>;
+      status-&gt;hardwareAdapterLuid.HighPart = <span class='num'>0</span>;
+      <span class='kw'>return</span> TRUE;
+    <span class='kw'>case</span> MAG_HARDWARE_ADAPTER_EXPLICIT:
+      adapter = <span class='fn'>magAdapterCatalogFindAdapter</span>(catalog, requested-&gt;hardware.adapterLuid);
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_HARDWARE_ADAPTER_SAME_AS_DISPLAY:
+    <span class='kw'>case</span> MAG_HARDWARE_ADAPTER_SAME_AS_CAPTURE:
+      adapter = <span class='fn'>magAdapterCatalogFindAdapter</span>(catalog, resolved-&gt;display.adapterLuid);
+      <span class='kw'>break</span>;
+    <span class='kw'>case</span> MAG_HARDWARE_ADAPTER_AUTO:
+    <span class='kw'>default</span>:
+      {
+        <span class='tp'>UINT</span> i;
+        <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; catalog-&gt;<span class='tp'>adapterCount</span>; ++i)
+        {
+          <span class='kw'>if</span> (!catalog-&gt;adapters[i].software &amp;&amp; !catalog-&gt;adapters[i].remote)
+          {
+            adapter = &amp;catalog-&gt;adapters[i];
+            <span class='kw'>break</span>;
+          }
+        }
+      }
+      <span class='kw'>break</span>;
+    }
+
+    <span class='kw'>if</span> (!adapter || adapter-&gt;software)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected Hardware Adapter is disconnected, software-only, or unavailable.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    resolved-&gt;hardware.adapterLuid = adapter-&gt;<span class='tp'>luid</span>;
+    status-&gt;hardwareAdapterLuid = adapter-&gt;<span class='tp'>luid</span>;
+    status-&gt;hardwareAdapterResolved = TRUE;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationIsModernFlipTarget</span>(
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target)
+{
+    <span class='kw'>return</span> MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == target ||
+      MAG_PRESENT_COMPOSED_FLIP == target ||
+      MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == target;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationClientCoversOutput</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved)
+{
+    <span class='kw'>const</span> <span class='tp'>MAGOUTPUTINFO</span>* output;
+    <span class='tp'>RECT</span> client;
+    <span class='tp'>POINT</span> points[<span class='num'>2</span>];
+
+    <span class='kw'>if</span> (!hWnd || !catalog || !resolved)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    output = <span class='fn'>magAdapterCatalogFindOutput</span>(
+      catalog,
+      resolved-&gt;display.adapterLuid,
+      resolved-&gt;display.deviceName);
+    <span class='kw'>if</span> (!output || !<span class='fn'>GetClientRect</span>(hWnd, &amp;client))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    points[<span class='num'>0</span>].<span class='tp'>x</span> = client.<span class='tp'>left</span>;
+    points[<span class='num'>0</span>].y = client.top;
+    points[<span class='num'>1</span>].<span class='tp'>x</span> = client.right;
+    points[<span class='num'>1</span>].y = client.bottom;
+    <span class='kw'>if</span> (!<span class='fn'>ClientToScreen</span>(hWnd, &amp;points[<span class='num'>0</span>]) ||
+        !<span class='fn'>ClientToScreen</span>(hWnd, &amp;points[<span class='num'>1</span>]))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> points[<span class='num'>0</span>].<span class='tp'>x</span> &lt;= output-&gt;desktopCoordinates.<span class='tp'>left</span> &amp;&amp;
+      points[<span class='num'>0</span>].y &lt;= output-&gt;desktopCoordinates.top &amp;&amp;
+      points[<span class='num'>1</span>].<span class='tp'>x</span> &gt;= output-&gt;desktopCoordinates.right &amp;&amp;
+      points[<span class='num'>1</span>].y &gt;= output-&gt;desktopCoordinates.bottom;
+}
+
+<span class='kw'>static</span> <span class='tp'>MAGCOMPOSITIONHOST</span> <span class='fn'>magPresentationChooseAutoHost</span>(
+  <span class='tp'>GRAPHICSAPI</span> graphicsApi,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSTATUS</span>* status)
+{
+    <span class='kw'>if</span> (CAPTURE_API_DWM_THUMBNAIL == captureApi ||
+        CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi)
+    {
+      <span class='kw'>return</span> MAG_HOST_DIRECTCOMPOSITION;
+    }
+    <span class='kw'>if</span> (MAG_PRESENT_COMPOSED_COPY_CPU_GDI == target)
+    {
+      <span class='kw'>return</span> <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi)
+        ? MAG_HOST_REDIRECTED_HWND
+        : MAG_HOST_TRADITIONAL_LAYERED;
+    }
+    <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_FLIP == target ||
+        MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == target ||
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI == target)
+    {
+      <span class='kw'>return</span> MAG_HOST_REDIRECTED_HWND;
+    }
+    <span class='kw'>if</span> (MAG_PRESENT_COMPOSED_FLIP == target &amp;&amp;
+        (GRAPHICS_API_D3D11 == graphicsApi ||
+         GRAPHICS_API_D3D12 == graphicsApi) &amp;&amp;
+        status-&gt;directCompositionAvailable)
+    {
+      <span class='kw'>return</span> MAG_HOST_DIRECTCOMPOSITION;
+    }
+    <span class='kw'>if</span> (<span class='fn'>magPresentationIsModernFlipTarget</span>(target) &amp;&amp;
+        (GRAPHICS_API_D3D11 == graphicsApi ||
+         GRAPHICS_API_D3D12 == graphicsApi ||
+         <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi)) &amp;&amp;
+        status-&gt;presentationManagerAvailable &amp;&amp;
+        <span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>return</span> MAG_HOST_PRESENTATION_MANAGER;
+    }
+    <span class='kw'>if</span> (MAG_PRESENT_AUTO == target &amp;&amp;
+        (GRAPHICS_API_D3D11 == graphicsApi ||
+         GRAPHICS_API_D3D12 == graphicsApi ||
+         <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi)) &amp;&amp;
+        status-&gt;presentationManagerAvailable &amp;&amp;
+        <span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>return</span> MAG_HOST_PRESENTATION_MANAGER;
+    }
+    <span class='kw'>if</span> ((MAG_PRESENT_AUTO == target || MAG_PRESENT_COMPOSED_FLIP == target) &amp;&amp;
+        (GRAPHICS_API_D3D11 == graphicsApi ||
+         GRAPHICS_API_D3D12 == graphicsApi) &amp;&amp;
+        status-&gt;directCompositionAvailable)
+    {
+      <span class='kw'>return</span> MAG_HOST_DIRECTCOMPOSITION;
+    }
+    <span class='kw'>return</span> MAG_HOST_REDIRECTED_HWND;
+}
+
+<span class='kw'>static</span> <span class='tp'>MAGPRESENTATIONTARGET</span> <span class='fn'>magPresentationChooseAutoTarget</span>(
+  <span class='tp'>GRAPHICSAPI</span> graphicsApi,
+  <span class='tp'>MAGCOMPOSITIONHOST</span> host)
+{
+    <span class='kw'>if</span> (MAG_HOST_TRADITIONAL_LAYERED == host)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_COMPOSED_COPY_CPU_GDI;
+    }
+    <span class='kw'>if</span> (MAG_HOST_PRESENTATION_MANAGER == host)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
+    }
+    <span class='kw'>if</span> (MAG_HOST_DIRECTCOMPOSITION == host)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_COMPOSED_FLIP;
+    }
+    <span class='kw'>if</span> (GRAPHICS_API_D3D11 == graphicsApi ||
+        GRAPHICS_API_D3D12 == graphicsApi ||
+        GRAPHICS_API_D3D9 == graphicsApi)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
+    }
+    <span class='kw'>if</span> (GRAPHICS_API_OPENGL == graphicsApi)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_HARDWARE_LEGACY_FLIP;
+    }
+    <span class='kw'>if</span> (GRAPHICS_API_VULKAN == graphicsApi)
+    {
+      <span class='kw'>return</span> MAG_PRESENT_COMPOSED_FLIP;
+    }
+    <span class='kw'>return</span> MAG_PRESENT_COMPOSED_COPY_CPU_GDI;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationValidateTargetProfile</span>(
+  <span class='tp'>GRAPHICSAPI</span> graphicsApi,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved,
+  <span class='tp'>MAGPRESENTATIONSTATUS</span>* status)
+{
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> compositorCapture =
+      CAPTURE_API_DWM_THUMBNAIL == captureApi ||
+      CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi;
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> d3dModern =
+      GRAPHICS_API_D3D11 == graphicsApi ||
+      GRAPHICS_API_D3D12 == graphicsApi;
+    <span class='kw'>const</span> <span class='tp'>BOOL</span> presentationManagerRenderer =
+      d3dModern || <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi);
+
+    <span class='kw'>if</span> (compositorCapture)
+    {
+      <span class='kw'>if</span> (MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host &amp;&amp;
+          MAG_PRESENT_COMPOSED_FLIP == resolved-&gt;target)
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;A compositor-owned DWM capture is a DirectComposition visual-tree route; it can be observed as Composed Flip but cannot be relabeled as an app-owned scanout plane.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>switch</span> (resolved-&gt;target)
+    {
+    <span class='kw'>case</span> MAG_PRESENT_HARDWARE_LEGACY_FLIP:
+      <span class='kw'>if</span> ((GRAPHICS_API_D3D9 == graphicsApi ||
+           GRAPHICS_API_OPENGL == graphicsApi) &amp;&amp;
+          MAG_HOST_REDIRECTED_HWND == resolved-&gt;host)
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware Legacy Flip requires the redirected Direct3D 9 D3DSWAPEFFECT_FLIP profile or an exchange-model WGL pixel format.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER:
+      <span class='kw'>if</span> ((GRAPHICS_API_D3D9 == graphicsApi ||
+           GRAPHICS_API_OPENGL == graphicsApi) &amp;&amp;
+          MAG_HOST_REDIRECTED_HWND == resolved-&gt;host)
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware Legacy Copy requires the redirected Direct3D 9 D3DSWAPEFFECT_COPY profile or a copy-model WGL pixel format.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP:
+      <span class='kw'>if</span> (MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host &amp;&amp;
+          presentationManagerRenderer)
+      {
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>if</span> (MAG_HOST_REDIRECTED_HWND == resolved-&gt;host &amp;&amp;
+          (d3dModern || GRAPHICS_API_D3D9 == graphicsApi ||
+           GRAPHICS_API_OPENGL == graphicsApi ||
+           GRAPHICS_API_VULKAN == graphicsApi))
+      {
+        <span class='kw'>break</span>;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Independent Flip requires an HWND flip-model chain or displayable Presentation Manager buffers on the selected adapter.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP:
+      <span class='kw'>if</span> ((MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host &amp;&amp;
+           presentationManagerRenderer) ||
+          (MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host &amp;&amp; d3dModern) ||
+          (MAG_HOST_REDIRECTED_HWND == resolved-&gt;host &amp;&amp;
+           (d3dModern || GRAPHICS_API_D3D9 == graphicsApi ||
+            GRAPHICS_API_OPENGL == graphicsApi ||
+            GRAPHICS_API_VULKAN == graphicsApi)))
+      {
+        <span class='kw'>break</span>;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Hardware-composed Independent Flip requires a displayable Presentation Manager surface, an MPO-eligible DirectComposition chain, or a windowed flip/exchange presenter.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_COMPOSED_FLIP:
+      <span class='kw'>if</span> ((MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host &amp;&amp;
+           presentationManagerRenderer) ||
+          (MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host &amp;&amp; d3dModern) ||
+          (MAG_HOST_REDIRECTED_HWND == resolved-&gt;host &amp;&amp;
+           (d3dModern || GRAPHICS_API_D3D9 == graphicsApi ||
+            GRAPHICS_API_OPENGL == graphicsApi ||
+            GRAPHICS_API_VULKAN == graphicsApi)))
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed Flip requires a flip-model DXGI, D3D9Ex, Vulkan, DirectComposition, or Presentation Manager presenter.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_COMPOSED_COPY_GPU_GDI:
+      <span class='kw'>if</span> (MAG_HOST_REDIRECTED_HWND == resolved-&gt;host &amp;&amp;
+          (GRAPHICS_API_D3D11 == graphicsApi ||
+           GRAPHICS_API_D3D9 == graphicsApi ||
+           GRAPHICS_API_OPENGL == graphicsApi))
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed Copy with GPU GDI requires the D3D11 DXGI BitBlt presenter, the D3D9 redirected BitBlt presenter, or a copy-model WGL pixel format.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>case</span> MAG_PRESENT_COMPOSED_COPY_CPU_GDI:
+      <span class='kw'>if</span> (MAG_HOST_TRADITIONAL_LAYERED == resolved-&gt;host ||
+          (MAG_HOST_REDIRECTED_HWND == resolved-&gt;host &amp;&amp;
+           <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi)))
+      {
+        <span class='kw'>return</span> TRUE;
+      }
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Composed Copy with CPU GDI requires the redirected GDI/GDI+ presenter or the CPU-backed traditional layered presenter.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+
+    <span class='kw'>default</span>:
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;The presentation target is invalid.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationResolve</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>GRAPHICSAPI</span> graphicsApi,
+  <span class='tp'>CAPTUREAPI</span> captureApi,
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* requested,
+  <span class='kw'>const</span> <span class='tp'>MAGADAPTERCATALOG</span>* catalog,
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span>* resolved,
+  <span class='tp'>MAGPRESENTATIONSTATUS</span>* status)
+{
+    <span class='tp'>BOOL</span> noRedirection;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(uiApi);
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(textRenderer);
+
+    <span class='kw'>if</span> (!requested || !catalog || !resolved || !status ||
+        requested-&gt;target &gt;= MAG_PRESENT_COUNT ||
+        requested-&gt;surfaceOwnership &gt;= MAG_SURFACE_COUNT ||
+        requested-&gt;host &gt;= MAG_HOST_COUNT ||
+        requested-&gt;copyRequirement &gt;= MAG_COPY_COUNT ||
+        requested-&gt;alphaMode &gt;= MAG_LAYER_ALPHA_COUNT ||
+        requested-&gt;waitableSwapChainMode &gt;= MAG_WAITABLE_SWAP_CHAIN_MODE_COUNT ||
+        requested-&gt;display.<span class='tp'>mode</span> &gt;= MAG_DISPLAY_ADAPTER_MODE_COUNT ||
+        requested-&gt;hardware.<span class='tp'>mode</span> &gt;= MAG_HARDWARE_ADAPTER_MODE_COUNT)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>ZeroMemory</span>(status, <span class='kw'>sizeof</span>(*status));
+    *resolved = *requested;
+    status-&gt;presentationManagerAvailable = <span class='fn'>magPresentationFunctionAvailable</span>(L<span class='str'>&quot;dcomp.dll&quot;</span>, <span class='str'>&quot;CreatePresentationFactory&quot;</span>);
+    status-&gt;directCompositionAvailable = <span class='fn'>magPresentationFunctionAvailable</span>(L<span class='str'>&quot;dcomp.dll&quot;</span>, <span class='str'>&quot;DCompositionCreateDevice&quot;</span>);
+
+    <span class='kw'>if</span> (!<span class='fn'>magPresentationResolveDisplay</span>(hWnd, requested, catalog, resolved, status) ||
+        !<span class='fn'>magPresentationResolveHardware</span>(requested, catalog, resolved, status))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (requested-&gt;bufferCount &lt; <span class='num'>2</span> || requested-&gt;bufferCount &gt; <span class='num'>16</span> ||
+        requested-&gt;maximumFrameLatency &lt; <span class='num'>1</span> || requested-&gt;maximumFrameLatency &gt; <span class='num'>16</span> ||
+        requested-&gt;syncInterval &gt; <span class='num'>4</span>)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation pacing values are outside their supported ranges.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (MAG_HOST_AUTO == resolved-&gt;host)
+    {
+      resolved-&gt;host = <span class='fn'>magPresentationChooseAutoHost</span>(
+        graphicsApi,
+        captureApi,
+        resolved-&gt;target,
+        status);
+    }
+    <span class='kw'>if</span> (MAG_SURFACE_AUTO == resolved-&gt;surfaceOwnership)
+    {
+      resolved-&gt;surfaceOwnership =
+        MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host ||
+        MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host
+          ? MAG_SURFACE_NO_REDIRECTION
+          : MAG_SURFACE_REDIRECTION;
+    }
+    noRedirection = MAG_SURFACE_NO_REDIRECTION == resolved-&gt;surfaceOwnership;
+
+    <span class='kw'>if</span> (MAG_HARDWARE_ADAPTER_WARP == resolved-&gt;hardware.<span class='tp'>mode</span> &amp;&amp;
+        GRAPHICS_API_D3D11 != graphicsApi &amp;&amp; GRAPHICS_API_D3D12 != graphicsApi &amp;&amp;
+        !(<span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi) &amp;&amp;
+          MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host))
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;WARP is available to Direct3D renderers and to the GDI-to-Presentation-Manager bridge.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host &amp;&amp; !status-&gt;presentationManagerAvailable)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation Manager is unavailable on this Windows/driver configuration.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host &amp;&amp;
+        GRAPHICS_API_D3D11 != graphicsApi &amp;&amp;
+        GRAPHICS_API_D3D12 != graphicsApi &amp;&amp;
+        !<span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi))
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected renderer does not expose an adapter-compatible native frame to the Presentation Manager bridge.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host &amp;&amp; !status-&gt;directCompositionAvailable)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;DirectComposition is unavailable on this Windows configuration.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> ((GRAPHICS_API_D3D11 == graphicsApi || GRAPHICS_API_D3D12 == graphicsApi) &amp;&amp;
+        MAG_HOST_DIRECTCOMPOSITION != resolved-&gt;host &amp;&amp;
+        MAG_HOST_PRESENTATION_MANAGER != resolved-&gt;host &amp;&amp;
+        MAG_HOST_REDIRECTED_HWND != resolved-&gt;host &amp;&amp;
+        MAG_HOST_TRADITIONAL_LAYERED != resolved-&gt;host)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;This Direct3D backend currently requires its DirectComposition presentation host.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (GRAPHICS_API_D3D11 != graphicsApi &amp;&amp; GRAPHICS_API_D3D12 != graphicsApi &amp;&amp;
+        !(<span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi) &amp;&amp;
+          MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host) &amp;&amp;
+        CAPTURE_API_DWM_THUMBNAIL != captureApi &amp;&amp;
+        CAPTURE_API_DWM_PRIVATE_VISUAL != captureApi &amp;&amp;
+        MAG_HOST_REDIRECTED_HWND != resolved-&gt;host &amp;&amp;
+        MAG_HOST_TRADITIONAL_LAYERED != resolved-&gt;host)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected graphics backend currently supports only its redirected HWND host.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (noRedirection &amp;&amp; MAG_HOST_DIRECTCOMPOSITION != resolved-&gt;host &amp;&amp; MAG_HOST_PRESENTATION_MANAGER != resolved-&gt;host)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;No-redirection requires DirectComposition or Presentation Manager content.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_LAYER_ALPHA_OPAQUE != resolved-&gt;alphaMode &amp;&amp;
+        MAG_HOST_TRADITIONAL_LAYERED != resolved-&gt;host &amp;&amp;
+        MAG_HOST_DIRECTCOMPOSITION != resolved-&gt;host &amp;&amp;
+        MAG_HOST_PRESENTATION_MANAGER != resolved-&gt;host)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected alpha mode is unavailable until the host-specific premultiplied/constant/color-key path passes the flicker-free matrix.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (MAG_PRESENT_AUTO == resolved-&gt;target)
+    {
+      resolved-&gt;target = <span class='fn'>magPresentationChooseAutoTarget</span>(
+        graphicsApi,
+        resolved-&gt;host);
+    }
+    <span class='kw'>if</span> (!<span class='fn'>magPresentationValidateTargetProfile</span>(
+          graphicsApi,
+          captureApi,
+          resolved,
+          status))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    status-&gt;fullscreenHardwareCompositionCapable =
+      status-&gt;hardwareCompositionSupportKnown &amp;&amp;
+      <span class='num'>0</span> != (status-&gt;hardwareCompositionSupport &amp;
+        DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAG_FULLSCREEN);
+    status-&gt;windowedHardwareCompositionCapable =
+      status-&gt;hardwareCompositionSupportKnown &amp;&amp;
+      <span class='num'>0</span> != (status-&gt;hardwareCompositionSupport &amp;
+        DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAG_WINDOWED);
+    status-&gt;hardwareCompositionCursorStretchRisk =
+      status-&gt;hardwareCompositionSupportKnown &amp;&amp;
+      <span class='num'>0</span> != (status-&gt;hardwareCompositionSupport &amp;
+        DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAG_CURSOR_STRETCHED);
+    status-&gt;directFlipGeometryEligible =
+      <span class='fn'>magPresentationClientCoversOutput</span>(hWnd, catalog, resolved);
+    status-&gt;independentFlipEligible =
+      <span class='fn'>magPresentationIsModernFlipTarget</span>(resolved-&gt;target) &amp;&amp;
+      MAG_LAYER_ALPHA_OPAQUE == resolved-&gt;alphaMode &amp;&amp;
+      <span class='fn'>magAdapterLuidEqual</span>(
+        status-&gt;hardwareAdapterLuid,
+        status-&gt;displayAdapterLuid) &amp;&amp;
+      ((status-&gt;directFlipCapable &amp;&amp;
+        status-&gt;independentFlipCapable &amp;&amp;
+        status-&gt;directFlipGeometryEligible) ||
+       (status-&gt;independentFlipCapable &amp;&amp;
+        status-&gt;multiPlaneOverlayCapable &amp;&amp;
+        status-&gt;maxRgbPlanes &gt; <span class='num'>0</span> &amp;&amp;
+        status-&gt;windowedHardwareCompositionCapable) ||
+       MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host);
+    {
+      <span class='kw'>const</span> <span class='tp'>BOOL</span> waitableSwapChainSupported =
+        (GRAPHICS_API_D3D11 == graphicsApi ||
+         GRAPHICS_API_D3D12 == graphicsApi) &amp;&amp;
+        MAG_HOST_PRESENTATION_MANAGER != resolved-&gt;host &amp;&amp;
+        <span class='fn'>magPresentationIsModernFlipTarget</span>(resolved-&gt;target);
+
+      <span class='kw'>if</span> (MAG_WAITABLE_SWAP_CHAIN_AUTO == resolved-&gt;waitableSwapChainMode)
+      {
+        resolved-&gt;waitableSwapChainMode =
+          waitableSwapChainSupported &amp;&amp; status-&gt;independentFlipEligible
+            ? MAG_WAITABLE_SWAP_CHAIN_ENABLED
+            : MAG_WAITABLE_SWAP_CHAIN_DISABLED;
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (MAG_WAITABLE_SWAP_CHAIN_ENABLED ==
+                 resolved-&gt;waitableSwapChainMode &amp;&amp;
+               !waitableSwapChainSupported)
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;A waitable swap chain requires a D3D11/D3D12 flip-model DXGI presenter; Presentation Manager uses its own buffer-available event.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    status-&gt;observedTarget = MAG_PRESENT_AUTO;
+    status-&gt;observedTargetValid = FALSE;
+    status-&gt;strictTargetSatisfied =
+      !requested-&gt;strictTarget || MAG_PRESENT_AUTO == requested-&gt;target;
+    <span class='kw'>if</span> (MAG_HOST_TRADITIONAL_LAYERED == resolved-&gt;host &amp;&amp; noRedirection)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Traditional layered windows require the User32 layered-window surface.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_LAYER_ALPHA_COLOR_KEY == resolved-&gt;alphaMode &amp;&amp;
+        (MAG_HOST_DIRECTCOMPOSITION == resolved-&gt;host ||
+         MAG_HOST_PRESENTATION_MANAGER == resolved-&gt;host))
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Composition color-key alpha requires the renderer key-to-alpha pass, which is unavailable for this frame route.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == resolved-&gt;alphaMode &amp;&amp;
+        MAG_HOST_TRADITIONAL_LAYERED != resolved-&gt;host &amp;&amp;
+        MAG_HOST_DIRECTCOMPOSITION != resolved-&gt;host &amp;&amp;
+        MAG_HOST_PRESENTATION_MANAGER != resolved-&gt;host)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Per-pixel alpha requires a layered or composition host.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_HOST_TRADITIONAL_LAYERED == resolved-&gt;host &amp;&amp;
+        (CAPTURE_API_DWM_THUMBNAIL == captureApi || CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi))
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;A compositor-owned DWM visual cannot be redirected through the User32 layered-window bitmap host.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_HOST_TRADITIONAL_LAYERED == resolved-&gt;host)
+    {
+      status-&gt;copyClass = MAG_COPY_CLASS_CPU_ROUND_TRIP;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (CAPTURE_API_DWM_THUMBNAIL == captureApi || CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi)
+    {
+      status-&gt;copyClass = MAG_COPY_CLASS_COMPOSITOR_VISUAL;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (CAPTURE_API_GDI_BITBLT == captureApi)
+    {
+      status-&gt;copyClass = <span class='fn'>magPresentationIsGdiFamily</span>(graphicsApi)
+        ? MAG_COPY_CLASS_CPU_SOURCE
+        : MAG_COPY_CLASS_CPU_ROUND_TRIP;
+    }
+    <span class='kw'>else</span>
+    {
+      status-&gt;copyClass = MAG_COPY_CLASS_CPU_ROUND_TRIP;
+    }
+
+    <span class='kw'>if</span> (MAG_COPY_STRICT_ZERO_COPY == resolved-&gt;copyRequirement &amp;&amp;
+        MAG_COPY_CLASS_TRUE_ZERO_COPY != status-&gt;copyClass &amp;&amp;
+        MAG_COPY_CLASS_COMPOSITOR_VISUAL != status-&gt;copyClass)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The active capture-to-present route crosses a CPU map/upload boundary and cannot satisfy strict zero-copy.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_COPY_ALLOW_GPU_LOCAL == resolved-&gt;copyRequirement &amp;&amp;
+        (MAG_COPY_CLASS_CPU_SOURCE == status-&gt;copyClass ||
+         MAG_COPY_CLASS_CPU_ROUND_TRIP == status-&gt;copyClass))
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;This route requires CPU-owned pixels; the selected copy policy allows GPU-local copies only.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (!<span class='fn'>magAdapterLuidEqual</span>(status-&gt;hardwareAdapterLuid, status-&gt;displayAdapterLuid) &amp;&amp;
+        MAG_COPY_STRICT_ZERO_COPY == resolved-&gt;copyRequirement)
+    {
+      <span class='fn'>lstrcpyn</span>(status-&gt;reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected Hardware Adapter differs from the Display Adapter; no validated cross-adapter zero-copy route is active.&quot;</span>), <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      <span class='kw'>return</span> FALSE;
+    }
+
+    status-&gt;<span class='tp'>configurationSupported</span> = TRUE;
+    status-&gt;flickerFree = TRUE;
+    <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == resolved-&gt;target &amp;&amp;
+        status-&gt;displayPlaneCapsKnown &amp;&amp;
+        (!status-&gt;multiPlaneOverlayCapable ||
+         !status-&gt;maxRgbPlanes))
+    {
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;The MPO-eligible presenter is configured, but the selected VidPN source reports no usable RGB overlay plane; Windows will compose until a hardware plane becomes available.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == resolved-&gt;target &amp;&amp;
+             !status-&gt;independentFlipEligible)
+    {
+      <span class='kw'>if</span> (!<span class='fn'>magAdapterLuidEqual</span>(
+            status-&gt;hardwareAdapterLuid,
+            status-&gt;displayAdapterLuid))
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;The flip-model presenter is configured, but the render and display adapters differ; Independent Flip is not eligible without a validated direct cross-adapter scanout path.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (MAG_LAYER_ALPHA_OPAQUE != resolved-&gt;alphaMode)
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;The flip-model presenter is configured, but this alpha mode requires composition; select Opaque to make DirectFlip or Independent Flip eligible.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (status-&gt;displayPlaneCapsKnown &amp;&amp;
+               !status-&gt;independentFlipCapable)
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;The flip-model presenter is configured, but the selected VidPN source reports no Independent Flip support.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (!status-&gt;directFlipGeometryEligible &amp;&amp;
+               (!status-&gt;multiPlaneOverlayCapable ||
+                !status-&gt;maxRgbPlanes))
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;The flip-model presenter is configured, but the client does not cover the output and no usable RGB MPO plane is reported; Windows will remain in Composed Flip.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      }
+      <span class='kw'>else</span>
+      {
+        <span class='fn'>lstrcpyn</span>(
+          status-&gt;reason,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;The flip-model presenter is configured and plane-eligible; Windows decides the active mode dynamically from occlusion, scaling, and display state.&quot;</span>),
+          <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+      }
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='fn'>lstrcpyn</span>(
+        status-&gt;reason,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Configuration passed the presenter, display-plane, copy, pacing, and resize-capacity gates.&quot;</span>),
+        <span class='fn'>ARRAYSIZE</span>(status-&gt;reason));
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>LPCTSTR</span> <span class='fn'>magCopyClassName</span>(<span class='tp'>MAGCOPYCLASS</span> copyClass)
+{
+    <span class='kw'>switch</span> (copyClass)
+    {
+    <span class='kw'>case</span> MAG_COPY_CLASS_TRUE_ZERO_COPY:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;True zero-copy&quot;</span>);
+    <span class='kw'>case</span> MAG_COPY_CLASS_COMPOSITOR_VISUAL:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;Compositor visual&quot;</span>);
+    <span class='kw'>case</span> MAG_COPY_CLASS_GPU_LOCAL:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;GPU-local copy&quot;</span>);
+    <span class='kw'>case</span> MAG_COPY_CLASS_CPU_SOURCE:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;CPU source&quot;</span>);
+    <span class='kw'>case</span> MAG_COPY_CLASS_CPU_ROUND_TRIP:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;CPU round trip&quot;</span>);
+    <span class='kw'>default</span>:
+      <span class='kw'>return</span> <span class='fn'>TEXT</span>(<span class='str'>&quot;Unknown&quot;</span>);
+    }
+}
+</pre>
+<p class="source-nav"><a href='main_c.htm'>&larr; main.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_h.htm'>presentation.h &rarr;</a></p>
+</body>
+</html>

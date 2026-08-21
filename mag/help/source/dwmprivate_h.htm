@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>dwmprivate.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dwmprivate.h</p>
+<h1>dwmprivate.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>86 lines</strong> &middot; 2291 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='dwmprivate_c.htm'>&larr; dwmprivate.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='framework_h.htm'>framework.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &lt;windows.h&gt;</span>
+
+<span class='pp'>#define DWM_PRIVATE_MAX_DRAW_COMMANDS 64</span>
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>DWMPRIVATEDRAWCOMMANDTYPE</span>
+{
+  DWM_PRIVATE_DRAW_FILL = <span class='num'>0</span>,
+  DWM_PRIVATE_DRAW_STROKE
+} <span class='tp'>DWMPRIVATEDRAWCOMMANDTYPE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>
+{
+  <span class='tp'>DWMPRIVATEDRAWCOMMANDTYPE</span> <span class='tp'>type</span>;
+  <span class='tp'>RECT</span>                      <span class='tp'>rc</span>;
+  <span class='tp'>FLOAT</span>                     color[<span class='num'>4</span>];
+  <span class='tp'>UINT</span>                      thickness;
+} <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>, *<span class='tp'>LPDWMPRIVATEDRAWCOMMAND</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMPRIVATEVIEWTRANSFORM</span>
+{
+  <span class='tp'>FLOAT</span> <span class='tp'>m11</span>;
+  <span class='tp'>FLOAT</span> m12;
+  <span class='tp'>FLOAT</span> m21;
+  <span class='tp'>FLOAT</span> m22;
+  <span class='tp'>FLOAT</span> dx;
+  <span class='tp'>FLOAT</span> dy;
+  <span class='tp'>RECT</span>  clip;
+} <span class='tp'>DWMPRIVATEVIEWTRANSFORM</span>, *<span class='tp'>LPDWMPRIVATEVIEWTRANSFORM</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>enum</span> <span class='tp'>DWMPRIVATEWINDOWCOVERAGE</span>
+{
+  DWM_PRIVATE_WINDOW_COVERAGE_NONE = <span class='num'>0</span>,
+  DWM_PRIVATE_WINDOW_COVERAGE_SHARED = <span class='num'>0x1</span>,
+  DWM_PRIVATE_WINDOW_COVERAGE_DESKTOP = <span class='num'>0x2</span>,
+  DWM_PRIVATE_WINDOW_COVERAGE_TASKBAR = <span class='num'>0x4</span>,
+  DWM_PRIVATE_WINDOW_COVERAGE_EXCLUDED = <span class='num'>0x8</span>,
+  DWM_PRIVATE_WINDOW_COVERAGE_APPLICATION = <span class='num'>0x10</span>
+} <span class='tp'>DWMPRIVATEWINDOWCOVERAGE</span>;
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='kw'>extern</span> <span class='str'>&quot;C&quot;</span> {
+<span class='pp'>#endif</span>
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureCreate</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>DWMPRIVATECAPTURESTATE</span>** lplpState);
+
+<span class='kw'>void</span> <span class='fn'>DwmPrivateCaptureDestroy</span>(<span class='tp'>DWMPRIVATECAPTURESTATE</span>* lpState);
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCalculateViewTransform</span>(
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* lprcDesktop,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* lprcViewSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>* lprcViewDestination,
+  <span class='tp'>DWMPRIVATEVIEWTRANSFORM</span>* lpTransform);
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureUpdate</span>(
+  <span class='tp'>DWMPRIVATECAPTURESTATE</span>* lpState,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>*             lprcDesktop,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>*             lprcViewSource,
+  <span class='kw'>const</span> <span class='tp'>RECT</span>*             lprcViewDestination,
+  <span class='tp'>SIZE</span>                    targetSize,
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATEDRAWCOMMAND</span>* lpDrawCommands,
+  <span class='tp'>UINT</span>                    drawCommandCount,
+  <span class='tp'>BOOL</span>                    <span class='tp'>restartSequence</span>,
+  <span class='tp'>BOOL</span>                    synchronize);
+
+<span class='tp'>UINT64</span> <span class='fn'>DwmPrivateCaptureGetResourceGeneration</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* lpState);
+
+<span class='tp'>UINT</span> <span class='fn'>DwmPrivateCaptureGetWindowCoverage</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* lpState,
+  <span class='tp'>HWND</span>                          hWnd);
+
+<span class='tp'>BOOL</span> <span class='fn'>DwmPrivateCaptureGetWindowVisualPlacement</span>(
+  <span class='kw'>const</span> <span class='tp'>DWMPRIVATECAPTURESTATE</span>* lpState,
+  <span class='tp'>HWND</span>                          hWnd,
+  <span class='tp'>RECT</span>*                         lprcWindow,
+  <span class='tp'>POINT</span>*                        lpVisualOffset,
+  <span class='tp'>UINT</span>*                         lpZOrder);
+
+<span class='pp'>#ifdef __cplusplus</span>
+}
+<span class='pp'>#endif</span>
+</pre>
+<p class="source-nav"><a href='dwmprivate_c.htm'>&larr; dwmprivate.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='framework_h.htm'>framework.h &rarr;</a></p>
+</body>
+</html>

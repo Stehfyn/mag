@@ -3,21 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>winuserx.c - Source Code</title>
+  <title>winuserx.c - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; winuserx.c</p>
 <h1>winuserx.c</h1>
-<pre class="source-code"><span class='pp'>#include "winuserx.h"</span>
+<p>Extended User32/resource helpers.</p>
+<div class="source-meta"><strong>141 lines</strong> &middot; 3377 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='wingdix_h.htm'>&larr; wingdix.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='winuserx_h.htm'>winuserx.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;winuserx.h&quot;</span>
 
-BOOL <span class='fn'>SetWindowAlwaysOnTop</span>(HWND hWnd, BOOL fEnable)
+<span class='tp'>BOOL</span> <span class='fn'>SetWindowAlwaysOnTop</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>BOOL</span> fEnable)
 {
-    HWND hWndInsertAfter = fEnable ? HWND_TOPMOST : HWND_NOTOPMOST;
+    <span class='tp'>HWND</span> hWndInsertAfter = fEnable ? HWND_TOPMOST : HWND_NOTOPMOST;
     <span class='kw'>return</span> <span class='fn'>SetWindowPos</span>(hWnd, hWndInsertAfter, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, SWP_NOMOVE | SWP_NOSIZE);
 }
 
-BOOL <span class='fn'>SetWindowOwner</span>(HWND hWnd, HWND hWndOwner)
+<span class='tp'>BOOL</span> <span class='fn'>SetWindowOwner</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>HWND</span> hWndOwner)
 {
     LONG_PTR offset;
 
@@ -28,17 +31,17 @@ BOOL <span class='fn'>SetWindowOwner</span>(HWND hWnd, HWND hWndOwner)
     <span class='kw'>return</span> (<span class='num'>0</span> == offset) &amp;&amp; (NO_ERROR != <span class='fn'>GetLastError</span>());
 }
 
-BOOL <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>)
+<span class='tp'>BOOL</span> <span class='fn'>SetCurrentProcessEfficiencyQoS</span>(<span class='kw'>void</span>)
 {
-    PROCESS_POWER_THROTTLING_STATE state = { PROCESS_POWER_THROTTLING_CURRENT_VERSION };
+    PROCESS_POWER_THROTTLING_STATE <span class='tp'>state</span> = { PROCESS_POWER_THROTTLING_CURRENT_VERSION };
 
-    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-    state.StateMask = <span class='num'>0</span>;
-    <span class='kw'>return</span> <span class='fn'>SetProcessInformation</span>(<span class='fn'>GetCurrentProcess</span>(), ProcessPowerThrottling, &amp;state, <span class='kw'>sizeof</span>(state));
+    <span class='tp'>state</span>.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    <span class='tp'>state</span>.StateMask = <span class='num'>0</span>;
+    <span class='kw'>return</span> <span class='fn'>SetProcessInformation</span>(<span class='fn'>GetCurrentProcess</span>(), ProcessPowerThrottling, &amp;<span class='tp'>state</span>, <span class='kw'>sizeof</span>(<span class='tp'>state</span>));
 
 }
 
-BOOL <span class='fn'>InMenu</span>(<span class='kw'>void</span>)
+<span class='tp'>BOOL</span> <span class='fn'>InMenu</span>(<span class='kw'>void</span>)
 {
     GUITHREADINFO gti = { <span class='kw'>sizeof</span>(gti) };
 
@@ -50,10 +53,10 @@ BOOL <span class='fn'>InMenu</span>(<span class='kw'>void</span>)
     <span class='kw'>return</span> FALSE;
 }
 
-HMENU <span class='fn'>LoadPopupMenu</span>(HINSTANCE hInstance, LPCTSTR lpMenuName)
+<span class='tp'>HMENU</span> <span class='fn'>LoadPopupMenu</span>(<span class='tp'>HINSTANCE</span> hInstance, <span class='tp'>LPCTSTR</span> lpMenuName)
 {
-    HMENU hMenu;
-    HMENU hSubMenu = NULL;
+    <span class='tp'>HMENU</span> hMenu;
+    <span class='tp'>HMENU</span> hSubMenu = NULL;
 
     <span class='kw'>if</span> (hMenu = <span class='fn'>LoadMenu</span>(hInstance, lpMenuName))
     {
@@ -68,10 +71,10 @@ HMENU <span class='fn'>LoadPopupMenu</span>(HINSTANCE hInstance, LPCTSTR lpMenuN
     <span class='fn'>PeekMessage</span>(lpMsg, NULL, WM_TIMER, WM_TIMER, PM_NOREMOVE);
 }
 
-BOOL <span class='fn'>PumpMessageQueue</span>(HWND hwndPump)
+<span class='tp'>BOOL</span> <span class='fn'>PumpMessageQueue</span>(<span class='tp'>HWND</span> hwndPump)
 {
     MSG  msg;
-    BOOL fQuit = FALSE;
+    <span class='tp'>BOOL</span> fQuit = FALSE;
     <span class='fn'>SecureZeroMemory</span>(&amp;msg, <span class='kw'>sizeof</span>(msg));
 
     <span class='kw'>if</span> (hwndPump &amp;&amp; <span class='fn'>IsWindow</span>(hwndPump))
@@ -92,22 +95,22 @@ BOOL <span class='fn'>PumpMessageQueue</span>(HWND hwndPump)
       <span class='fn'>TranslateMessage</span>(&amp;msg);
       <span class='fn'>DispatchMessage</span>(&amp;msg);
     }
-    
+&#32;&#32;&#32;&#32;
     <span class='kw'>return</span> !fQuit;
 }
 
 
-HANDLE
+<span class='tp'>HANDLE</span>
 <span class='fn'>UnloadFile</span>(
     LPTSTR  lpszName,
-    LPCVOID lpBuffer,
-    DWORD   nNumberOfBytesToWrite)
+    <span class='tp'>LPCVOID</span> lpBuffer,
+    <span class='tp'>DWORD</span>   nNumberOfBytesToWrite)
 {
-    HANDLE hFile = <span class='fn'>CreateFile</span>(lpszName, GENERIC_WRITE, <span class='num'>0</span>, <span class='num'>0</span>, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, <span class='num'>0</span>);
+    <span class='tp'>HANDLE</span> hFile = <span class='fn'>CreateFile</span>(lpszName, GENERIC_WRITE, <span class='num'>0</span>, <span class='num'>0</span>, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, <span class='num'>0</span>);
 
     <span class='kw'>if</span> (INVALID_HANDLE_VALUE != hFile)
     {
-      DWORD nNumberOfBytesWritten = <span class='num'>0</span>;
+      <span class='tp'>DWORD</span> nNumberOfBytesWritten = <span class='num'>0</span>;
       <span class='kw'>if</span> (!<span class='fn'>WriteFile</span>(hFile, lpBuffer, nNumberOfBytesToWrite, &amp;nNumberOfBytesWritten, <span class='num'>0</span>))
       {
         <span class='fn'>CloseHandle</span>(hFile);
@@ -118,24 +121,24 @@ HANDLE
     <span class='kw'>return</span> hFile;
 }
 
-HANDLE
+<span class='tp'>HANDLE</span>
 <span class='fn'>UnloadResource</span>(
-    HMODULE hModule, 
-    UINT    nResourceId, 
+    <span class='tp'>HMODULE</span> hModule,&#32;
+    <span class='tp'>UINT</span>    nResourceId,&#32;
     LPTSTR  lpszName)
 {
-    HANDLE hOut = NULL;
-    HRSRC  hResourceInfo = <span class='fn'>FindResource</span>(hModule, <span class='fn'>MAKEINTRESOURCE</span>(nResourceId), RT_RCDATA);
+    <span class='tp'>HANDLE</span> hOut = NULL;
+    <span class='tp'>HRSRC</span>  hResourceInfo = <span class='fn'>FindResource</span>(hModule, <span class='fn'>MAKEINTRESOURCE</span>(nResourceId), RT_RCDATA);
 
     <span class='kw'>if</span> (hResourceInfo)
     {
-      HGLOBAL hResourceData = <span class='fn'>LoadResource</span>(hModule, hResourceInfo);
+      <span class='tp'>HGLOBAL</span> hResourceData = <span class='fn'>LoadResource</span>(hModule, hResourceInfo);
       <span class='kw'>if</span> (hResourceData)
       {
-        LPCVOID lpResourceData = (LPCVOID)<span class='fn'>LockResource</span>(hResourceData);
+        <span class='tp'>LPCVOID</span> lpResourceData = (<span class='tp'>LPCVOID</span>)<span class='fn'>LockResource</span>(hResourceData);
         <span class='kw'>if</span> (lpResourceData)
         {
-          DWORD dwResourceSize = <span class='fn'>SizeofResource</span>(hModule, hResourceInfo);
+          <span class='tp'>DWORD</span> dwResourceSize = <span class='fn'>SizeofResource</span>(hModule, hResourceInfo);
           <span class='kw'>if</span> (dwResourceSize)
           {
             hOut = <span class='fn'>UnloadFile</span>(lpszName, lpResourceData, dwResourceSize);
@@ -150,5 +153,6 @@ HANDLE
     <span class='kw'>return</span> hOut;
 }
 </pre>
+<p class="source-nav"><a href='wingdix_h.htm'>&larr; wingdix.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='winuserx_h.htm'>winuserx.h &rarr;</a></p>
 </body>
 </html>

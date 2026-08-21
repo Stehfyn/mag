@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>dcompabi.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dcompabi.h</p>
+<h1>dcompabi.h</h1>
+<p>C ABI declarations for the DirectComposition interfaces used by MAG.</p>
+<div class="source-meta"><strong>191 lines</strong> &middot; 8414 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='d3dkmtx_h.htm'>&larr; d3dkmtx.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmapix_c.htm'>dwmapix.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &lt;windows.h&gt;</span>
+<span class='pp'>#include &lt;unknwn.h&gt;</span>
+<span class='pp'>#include &lt;dxgi1_2.h&gt;</span>
+
+<span class='cm'>/* The Windows SDK dcomp.h interface declarations use C++ overloads and
+   references.  DirectComposition is still a COM ABI, so the C build uses the
+   stable vtable layout directly and names only the slots MAG consumes. */</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_DCOMPOSITION_FRAME_STATISTICS</span>
+{
+  <span class='tp'>LARGE_INTEGER</span> <span class='tp'>lastFrameTime</span>;
+  <span class='kw'>struct</span> { <span class='tp'>UINT</span> Numerator; <span class='tp'>UINT</span> Denominator; } <span class='tp'>currentCompositionRate</span>;
+  <span class='tp'>LARGE_INTEGER</span> currentTime;
+  <span class='tp'>LARGE_INTEGER</span> timeFrequency;
+  <span class='tp'>LARGE_INTEGER</span> nextEstimatedFrameTime;
+} <span class='tp'>MAG_DCOMPOSITION_FRAME_STATISTICS</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDevice</span> <span class='tp'>MAG_IDCompositionDevice</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDesktopDevice</span> <span class='tp'>MAG_IDCompositionDesktopDevice</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionTarget</span> <span class='tp'>MAG_IDCompositionTarget</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionVisual</span> <span class='tp'>MAG_IDCompositionVisual</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionEffectGroup</span> <span class='tp'>MAG_IDCompositionEffectGroup</span>;
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionSurface</span> <span class='tp'>MAG_IDCompositionSurface</span>;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDeviceVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionDevice</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* Commit)(<span class='tp'>MAG_IDCompositionDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* WaitForCommitCompletion)(<span class='tp'>MAG_IDCompositionDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* GetFrameStatistics)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>MAG_DCOMPOSITION_FRAME_STATISTICS</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateTargetForHwnd)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>HWND</span>, <span class='tp'>BOOL</span>, <span class='tp'>MAG_IDCompositionTarget</span>**);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateVisual)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>MAG_IDCompositionVisual</span>**);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurface)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>UINT</span>, <span class='tp'>UINT</span>, DXGI_FORMAT, DXGI_ALPHA_MODE, <span class='tp'>MAG_IDCompositionSurface</span>**);
+  <span class='kw'>void</span>* <span class='tp'>CreateVirtualSurface</span>;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurfaceFromHandle)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>HANDLE</span>, IUnknown**);
+  <span class='kw'>void</span>* CreateSurfaceFromHwnd;
+  <span class='kw'>void</span>* CreateTranslateTransform;
+  <span class='kw'>void</span>* CreateScaleTransform;
+  <span class='kw'>void</span>* CreateRotateTransform;
+  <span class='kw'>void</span>* CreateSkewTransform;
+  <span class='kw'>void</span>* CreateMatrixTransform;
+  <span class='kw'>void</span>* CreateTransformGroup;
+  <span class='kw'>void</span>* CreateTranslateTransform3D;
+  <span class='kw'>void</span>* CreateScaleTransform3D;
+  <span class='kw'>void</span>* CreateRotateTransform3D;
+  <span class='kw'>void</span>* CreateMatrixTransform3D;
+  <span class='kw'>void</span>* CreateTransform3DGroup;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateEffectGroup)(<span class='tp'>MAG_IDCompositionDevice</span>*, <span class='tp'>MAG_IDCompositionEffectGroup</span>**);
+  <span class='kw'>void</span>* CreateRectangleClip;
+  <span class='kw'>void</span>* CreateAnimation;
+  <span class='kw'>void</span>* CheckDeviceState;
+} <span class='tp'>MAG_IDCompositionDeviceVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDevice</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionDeviceVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDesktopDeviceVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* Commit)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* WaitForCommitCompletion)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* GetFrameStatistics)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>MAG_DCOMPOSITION_FRAME_STATISTICS</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateVisual)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>MAG_IDCompositionVisual</span>**);
+  <span class='kw'>void</span>* <span class='tp'>CreateSurfaceFactory</span>;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurface)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>UINT</span>, <span class='tp'>UINT</span>, DXGI_FORMAT, DXGI_ALPHA_MODE, <span class='tp'>MAG_IDCompositionSurface</span>**);
+  <span class='kw'>void</span>* <span class='tp'>CreateVirtualSurface</span>;
+  <span class='kw'>void</span>* CreateTranslateTransform;
+  <span class='kw'>void</span>* CreateScaleTransform;
+  <span class='kw'>void</span>* CreateRotateTransform;
+  <span class='kw'>void</span>* CreateSkewTransform;
+  <span class='kw'>void</span>* CreateMatrixTransform;
+  <span class='kw'>void</span>* CreateTransformGroup;
+  <span class='kw'>void</span>* CreateTranslateTransform3D;
+  <span class='kw'>void</span>* CreateScaleTransform3D;
+  <span class='kw'>void</span>* CreateRotateTransform3D;
+  <span class='kw'>void</span>* CreateMatrixTransform3D;
+  <span class='kw'>void</span>* CreateTransform3DGroup;
+  <span class='kw'>void</span>* CreateEffectGroup;
+  <span class='kw'>void</span>* CreateRectangleClip;
+  <span class='kw'>void</span>* CreateAnimation;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateTargetForHwnd)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>HWND</span>, <span class='tp'>BOOL</span>, <span class='tp'>MAG_IDCompositionTarget</span>**);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* CreateSurfaceFromHandle)(<span class='tp'>MAG_IDCompositionDesktopDevice</span>*, <span class='tp'>HANDLE</span>, IUnknown**);
+  <span class='kw'>void</span>* CreateSurfaceFromHwnd;
+} <span class='tp'>MAG_IDCompositionDesktopDeviceVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionDesktopDevice</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionDesktopDeviceVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionSurfaceVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionSurface</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionSurface</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionSurface</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* BeginDraw)(<span class='tp'>MAG_IDCompositionSurface</span>*, <span class='kw'>const</span> <span class='tp'>RECT</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**, <span class='tp'>POINT</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* EndDraw)(<span class='tp'>MAG_IDCompositionSurface</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SuspendDraw)(<span class='tp'>MAG_IDCompositionSurface</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* ResumeDraw)(<span class='tp'>MAG_IDCompositionSurface</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* Scroll)(<span class='tp'>MAG_IDCompositionSurface</span>*, <span class='kw'>const</span> <span class='tp'>RECT</span>*, <span class='kw'>const</span> <span class='tp'>RECT</span>*, <span class='kw'>int</span>, <span class='kw'>int</span>);
+} <span class='tp'>MAG_IDCompositionSurfaceVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionSurface</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionSurfaceVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionTargetVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionTarget</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionTarget</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionTarget</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetRoot)(<span class='tp'>MAG_IDCompositionTarget</span>*, <span class='tp'>MAG_IDCompositionVisual</span>*);
+} <span class='tp'>MAG_IDCompositionTargetVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionTarget</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionTargetVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionVisualVtbl</span>
+{
+  <span class='cm'>/* MSVC lays the overloaded object-taking slots before their scalar/struct
+     counterparts.  That ABI order differs from their textual order in
+     dcomp.h and is required when consuming the Windows implementation. */</span>
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionVisual</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionVisual</span>*);
+  <span class='kw'>void</span>* <span class='tp'>SetOffsetXAnimation</span>;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetOffsetXValue)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>FLOAT</span>);
+  <span class='kw'>void</span>* SetOffsetYAnimation;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetOffsetYValue)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>FLOAT</span>);
+  <span class='kw'>void</span>* SetTransformObject;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetTransformMatrix)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='kw'>const</span> <span class='kw'>void</span>*);
+  <span class='kw'>void</span>* SetTransformParent;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetEffect)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='kw'>void</span>*);
+  <span class='kw'>void</span>* SetBitmapInterpolationMode;
+  <span class='kw'>void</span>* SetBorderMode;
+  <span class='kw'>void</span>* SetClipObject;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetClipRect)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='kw'>const</span> <span class='kw'>void</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetContent)(<span class='tp'>MAG_IDCompositionVisual</span>*, IUnknown*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* AddVisual)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>BOOL</span>, <span class='tp'>MAG_IDCompositionVisual</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* RemoveVisual)(<span class='tp'>MAG_IDCompositionVisual</span>*, <span class='tp'>MAG_IDCompositionVisual</span>*);
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* RemoveAllVisuals)(<span class='tp'>MAG_IDCompositionVisual</span>*);
+  <span class='kw'>void</span>* SetCompositeMode;
+} <span class='tp'>MAG_IDCompositionVisualVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionVisual</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionVisualVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionEffectGroupVtbl</span>
+{
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* QueryInterface)(<span class='tp'>MAG_IDCompositionEffectGroup</span>*, <span class='tp'>REFIID</span>, <span class='kw'>void</span>**);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* AddRef)(<span class='tp'>MAG_IDCompositionEffectGroup</span>*);
+  <span class='tp'>ULONG</span> (STDMETHODCALLTYPE* Release)(<span class='tp'>MAG_IDCompositionEffectGroup</span>*);
+  <span class='kw'>void</span>* <span class='tp'>SetOpacityAnimation</span>;
+  <span class='tp'>HRESULT</span> (STDMETHODCALLTYPE* SetOpacityValue)(<span class='tp'>MAG_IDCompositionEffectGroup</span>*, <span class='tp'>FLOAT</span>);
+  <span class='kw'>void</span>* SetTransform3D;
+} <span class='tp'>MAG_IDCompositionEffectGroupVtbl</span>;
+
+<span class='kw'>struct</span> <span class='tp'>MAG_IDCompositionEffectGroup</span>
+{
+  <span class='kw'>const</span> <span class='tp'>MAG_IDCompositionEffectGroupVtbl</span>* lpVtbl;
+};
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IDCompositionDevice =
+  { <span class='num'>0xc37ea93a</span>, <span class='num'>0xe7aa</span>, <span class='num'>0x450d</span>, { <span class='num'>0xb1</span>, <span class='num'>0x6f</span>, <span class='num'>0x97</span>, <span class='num'>0x46</span>, <span class='num'>0xcb</span>, <span class='num'>0x04</span>, <span class='num'>0x07</span>, <span class='num'>0xf3</span> } };
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IDCompositionDesktopDevice =
+  { <span class='num'>0x5f4633fe</span>, <span class='num'>0x1e08</span>, <span class='num'>0x4cb8</span>, { <span class='num'>0x8c</span>, <span class='num'>0x75</span>, <span class='num'>0xce</span>, <span class='num'>0x24</span>, <span class='num'>0x33</span>, <span class='num'>0x3f</span>, <span class='num'>0x56</span>, <span class='num'>0x02</span> } };
+
+<span class='pp'>#define MAG_COMPOSITIONOBJECT_ALL_ACCESS 0x0003L</span>
+
+<span class='tp'>HRESULT</span> <span class='kw'>WINAPI</span> <span class='fn'>DCompositionCreateDevice</span>(
+  IUnknown* renderingDevice,
+  <span class='tp'>REFIID</span> iid,
+  <span class='kw'>void</span>** dcompositionDevice);
+<span class='tp'>HRESULT</span> <span class='kw'>WINAPI</span> <span class='fn'>DCompositionCreateSurfaceHandle</span>(
+  <span class='tp'>DWORD</span> desiredAccess,
+  SECURITY_ATTRIBUTES* securityAttributes,
+  <span class='tp'>HANDLE</span>* surfaceHandle);
+</pre>
+<p class="source-nav"><a href='d3dkmtx_h.htm'>&larr; d3dkmtx.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmapix_c.htm'>dwmapix.c &rarr;</a></p>
+</body>
+</html>

@@ -29,7 +29,11 @@ typedef struct MAGD3D11STATE
   UINT                 bufferCount;
   UINT                 syncInterval;
   UINT                 presentFlags;
+  UINT                 swapChainFlags;
+  MAGPRESENTATIONTARGET configuredTarget;
   BOOL                 warp;
+  BOOL                 flipModel;
+  BOOL                 waitableSwapChain;
   BOOL                 compositionHost;
   BOOL                 presentationManagerHost;
   BOOL                 presentationEnabled;
@@ -120,6 +124,7 @@ static HRESULT magGraphicsD3D11CreateDevice(
 {
     DXGI_SWAP_CHAIN_DESC1 swapDesc = { 0 };
     IDXGIDevice* dxgiDevice = NULL;
+    IDXGIDevice1* dxgiDevice1 = NULL;
     IDXGIAdapter1* selectedAdapter = NULL;
     IDXGIAdapter* deviceAdapter = NULL;
     IDXGIFactory2* factory = NULL;
@@ -136,6 +141,8 @@ static HRESULT magGraphicsD3D11CreateDevice(
     D3D_FEATURE_LEVEL selectedFeatureLevel;
     D3D_DRIVER_TYPE driverType;
     BOOL allowTearing = FALSE;
+    BOOL flipModel;
+    BOOL waitableSwapChain;
     BOOL compositionHost;
     BOOL presentationManagerHost;
     UINT deviceFlags;
@@ -146,6 +153,16 @@ static HRESULT magGraphicsD3D11CreateDevice(
       return E_INVALIDARG;
     }
     state->warp = MAG_HARDWARE_ADAPTER_WARP == presentation->hardware.mode;
+    state->configuredTarget = presentation->target;
+    flipModel = MAG_PRESENT_COMPOSED_COPY_GPU_GDI != presentation->target;
+    waitableSwapChain = flipModel &&
+      MAG_WAITABLE_SWAP_CHAIN_ENABLED == presentation->waitableSwapChainMode;
+    state->flipModel = flipModel;
+    state->waitableSwapChain = waitableSwapChain;
+    if (!flipModel)
+    {
+      reservoirSize = clientSize;
+    }
     compositionHost = MAG_HOST_DIRECTCOMPOSITION == presentation->host;
     presentationManagerHost = MAG_HOST_PRESENTATION_MANAGER == presentation->host;
     state->compositionHost = compositionHost;
@@ -170,12 +187,16 @@ static HRESULT magGraphicsD3D11CreateDevice(
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapDesc.BufferCount = presentation->bufferCount;
     swapDesc.Scaling = DXGI_SCALING_STRETCH;
-    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapDesc.SwapEffect = flipModel
+      ? DXGI_SWAP_EFFECT_FLIP_DISCARD
+      : DXGI_SWAP_EFFECT_DISCARD;
     swapDesc.AlphaMode = compositionHost &&
       MAG_LAYER_ALPHA_OPAQUE != presentation->alphaMode
       ? DXGI_ALPHA_MODE_PREMULTIPLIED
       : DXGI_ALPHA_MODE_IGNORE;
-    swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    swapDesc.Flags = waitableSwapChain
+      ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+      : 0;
 
     hr = D3D11CreateDevice(
       (IDXGIAdapter*)selectedAdapter,
@@ -239,6 +260,19 @@ static HRESULT magGraphicsD3D11CreateDevice(
     {
       hr = ID3D11Device_QueryInterface(state->device, &IID_IDXGIDevice, (void**)&dxgiDevice);
     }
+    if (SUCCEEDED(hr) && !waitableSwapChain)
+    {
+      hr = IDXGIDevice_QueryInterface(
+        dxgiDevice,
+        &IID_IDXGIDevice1,
+        (void**)&dxgiDevice1);
+      if (SUCCEEDED(hr))
+      {
+        hr = IDXGIDevice1_SetMaximumFrameLatency(
+          dxgiDevice1,
+          presentation->maximumFrameLatency);
+      }
+    }
     if (SUCCEEDED(hr))
     {
       hr = IDXGIDevice_GetAdapter(dxgiDevice, &deviceAdapter);
@@ -247,7 +281,8 @@ static HRESULT magGraphicsD3D11CreateDevice(
     {
       hr = IDXGIAdapter_GetParent(deviceAdapter, &IID_IDXGIFactory2, (void**)&factory);
     }
-    if (SUCCEEDED(hr) && presentation->allowTearing && 0 == presentation->syncInterval &&
+    if (SUCCEEDED(hr) && flipModel && presentation->allowTearing &&
+        0 == presentation->syncInterval &&
         SUCCEEDED(IDXGIFactory2_QueryInterface(factory, &IID_IDXGIFactory5, (void**)&factory5)))
     {
       UINT featureSize = sizeof(allowTearing);
@@ -288,7 +323,7 @@ static HRESULT magGraphicsD3D11CreateDevice(
     {
       hr = IDXGISwapChain1_QueryInterface(swapChain1, &IID_IDXGISwapChain2, (void**)&state->swapChain);
     }
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && waitableSwapChain)
     {
       hr = IDXGISwapChain2_SetMaximumFrameLatency(
         state->swapChain,
@@ -296,17 +331,30 @@ static HRESULT magGraphicsD3D11CreateDevice(
     }
     if (SUCCEEDED(hr))
     {
-      state->frameWaitHandle = IDXGISwapChain2_GetFrameLatencyWaitableObject(state->swapChain);
-      if (!state->frameWaitHandle ||
-          FAILED(IDXGISwapChain2_SetSourceSize(
-            state->swapChain,
-            (UINT)clientSize.cx,
-            (UINT)clientSize.cy)) ||
-          (compositionHost &&
-           !magDCompPresenterCreate(hWnd, (IUnknown*)state->swapChain, &state->composition)))
+      if (waitableSwapChain)
+      {
+        state->frameWaitHandle =
+          IDXGISwapChain2_GetFrameLatencyWaitableObject(state->swapChain);
+      }
+      if (waitableSwapChain && !state->frameWaitHandle)
       {
         hr = E_FAIL;
       }
+    }
+    if (SUCCEEDED(hr) && flipModel)
+    {
+      hr = IDXGISwapChain2_SetSourceSize(
+        state->swapChain,
+        (UINT)clientSize.cx,
+        (UINT)clientSize.cy);
+    }
+    if (SUCCEEDED(hr) && compositionHost &&
+        !magDCompPresenterCreate(
+          hWnd,
+          (IUnknown*)state->swapChain,
+          &state->composition))
+    {
+      hr = E_FAIL;
     }
 
     if (swapChain1)
@@ -329,6 +377,10 @@ static HRESULT magGraphicsD3D11CreateDevice(
     {
       IDXGIDevice_Release(dxgiDevice);
     }
+    if (dxgiDevice1)
+    {
+      IDXGIDevice1_Release(dxgiDevice1);
+    }
     if (SUCCEEDED(hr))
     {
       state->capacityWidth = (UINT)reservoirSize.cx;
@@ -336,6 +388,7 @@ static HRESULT magGraphicsD3D11CreateDevice(
       state->bufferCount = presentation->bufferCount;
       state->syncInterval = presentation->syncInterval;
       state->presentFlags = allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
+      state->swapChainFlags = swapDesc.Flags;
       state->presentationEnabled = TRUE;
     }
     if (selectedAdapter)
@@ -379,7 +432,10 @@ static BOOL magGraphicsD3D11Create(
           state->capacityWidth,
           state->capacityHeight))
     {
+      const DWORD failure = FAILED(hr) ? (DWORD)hr : ERROR_NOT_ENOUGH_MEMORY;
+
       magGraphicsD3D11Destroy(hWnd, state);
+      SetLastError(failure);
       return FALSE;
     }
 
@@ -453,6 +509,26 @@ static BOOL magGraphicsD3D11Resize(HWND hWnd, void* opaqueState, SIZE clientSize
         state->presentationManager,
         clientSize);
     }
+    if (!state->flipModel)
+    {
+      magGraphicsD3D11ReleaseTexture(&state->uploadTexture);
+      magGraphicsD3D11ReleaseTexture(&state->backBuffer);
+      ID3D11DeviceContext_ClearState(state->context);
+      ID3D11DeviceContext_Flush(state->context);
+      hr = IDXGISwapChain2_ResizeBuffers(
+        state->swapChain,
+        state->bufferCount,
+        state->width,
+        state->height,
+        DXGI_FORMAT_B8G8R8A8_UNORM,
+        state->swapChainFlags);
+      return SUCCEEDED(hr) &&
+        magGraphicsD3D11CreateFrameResources(state, clientSize) &&
+        magGraphicsReserveCpuCompositor(
+          &state->compositor,
+          state->width,
+          state->height);
+    }
     if (state->width <= state->capacityWidth && state->height <= state->capacityHeight)
     {
       return SUCCEEDED(IDXGISwapChain2_SetSourceSize(
@@ -474,8 +550,7 @@ static BOOL magGraphicsD3D11Resize(HWND hWnd, void* opaqueState, SIZE clientSize
       (UINT)reservoirSize.cx,
       (UINT)reservoirSize.cy,
       DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT |
-        (state->presentFlags ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0));
+      state->swapChainFlags);
     return SUCCEEDED(hr) &&
       magGraphicsD3D11CreateFrameResources(state, reservoirSize) &&
       SUCCEEDED(IDXGISwapChain2_SetSourceSize(
@@ -577,12 +652,18 @@ static BOOL magGraphicsD3D11Render(
       (ID3D11Resource*)state->backBuffer,
       (ID3D11Resource*)state->uploadTexture);
 
-    if (intent && intent->restartSequence)
+    if (state->flipModel && intent && intent->restartSequence)
     {
       HRESULT first = IDXGISwapChain2_Present(
         state->swapChain,
         0,
-        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT | DXGI_PRESENT_RESTART);
+        state->presentFlags | DXGI_PRESENT_RESTART |
+          (state->waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : 0));
+
+      if (!intent->synchronize && !state->waitableSwapChain)
+      {
+        return SUCCEEDED(first);
+      }
       HRESULT second = IDXGISwapChain2_Present(
         state->swapChain,
         intent->synchronize ? 1 : 0,
@@ -599,7 +680,8 @@ static BOOL magGraphicsD3D11Render(
       hr = IDXGISwapChain2_Present(
         state->swapChain,
         0,
-        state->presentFlags | DXGI_PRESENT_DO_NOT_WAIT);
+        state->presentFlags |
+          (state->waitableSwapChain ? DXGI_PRESENT_DO_NOT_WAIT : 0));
       return SUCCEEDED(hr);
     }
 
@@ -657,9 +739,6 @@ static BOOL magGraphicsD3D11GetObservedPresentationTarget(
   UINT* target)
 {
     MAGD3D11STATE* state = (MAGD3D11STATE*)opaqueState;
-    IDXGISwapChainMedia* media = NULL;
-    DXGI_FRAME_STATISTICS_MEDIA statistics = { 0 };
-    BOOL observed = FALSE;
 
     if (state && state->presentationManagerHost)
     {
@@ -667,36 +746,7 @@ static BOOL magGraphicsD3D11GetObservedPresentationTarget(
         state->presentationManager,
         target);
     }
-    if (!state || !state->swapChain || !target ||
-        FAILED(IDXGISwapChain2_QueryInterface(
-          state->swapChain,
-          &IID_IDXGISwapChainMedia,
-          (void**)&media)))
-    {
-      return FALSE;
-    }
-    if (SUCCEEDED(IDXGISwapChainMedia_GetFrameStatisticsMedia(media, &statistics)))
-    {
-      switch (statistics.CompositionMode)
-      {
-      case DXGI_FRAME_PRESENTATION_MODE_COMPOSED:
-        *target = MAG_PRESENT_COMPOSED_FLIP;
-        observed = TRUE;
-        break;
-      case DXGI_FRAME_PRESENTATION_MODE_OVERLAY:
-        *target = MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP;
-        observed = TRUE;
-        break;
-      case DXGI_FRAME_PRESENTATION_MODE_NONE:
-        *target = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
-        observed = TRUE;
-        break;
-      default:
-        break;
-      }
-    }
-    IDXGISwapChainMedia_Release(media);
-    return observed;
+    return FALSE;
 }
 
 const MAGGRAPHICSBACKEND g_magGraphicsD3D11Backend =

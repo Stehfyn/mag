@@ -84,6 +84,7 @@ typedef struct MAGSTATE
   BOOL             fWinRtInitialized;
   BOOL             fUseSourceOrigin;
   BOOL             fMouseRelativeZoom;
+  BOOL             fAutoSettingsPreset;
   BOOL             fMiniMapDragging;
   BOOL             fMiniMapHoldVisible;
   BOOL             fMiniMapHaveLastCursor;
@@ -99,6 +100,8 @@ typedef struct MAGSTATE
   MAGPRESENTATIONSETTINGS presentationSettings;
   MAGPRESENTATIONSETTINGS resolvedPresentation;
   MAGPRESENTATIONSTATUS presentationStatus;
+  MAGPRESENTATIONTARGET lastObservedTarget;
+  UINT             observedTargetConsecutiveFrames;
   MAGLAYEREDPRESENTER* layeredPresenter;
   SRWLOCK          graphicsLock;
   const MAGGRAPHICSBACKEND* graphicsBackend;

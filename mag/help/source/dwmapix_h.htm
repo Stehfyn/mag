@@ -3,26 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>dwmapix.h - Source Code</title>
+  <title>dwmapix.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; dwmapix.h</p>
 <h1>dwmapix.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>15 lines</strong> &middot; 269 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='dwmapix_c.htm'>&larr; dwmapix.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmprivate_c.htm'>dwmprivate.c &rarr;</a></p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
 
-BOOL <span class='fn'>DwmInitPrivate</span>(<span class='kw'>void</span>);
+<span class='tp'>BOOL</span> <span class='fn'>DwmInitPrivate</span>(<span class='kw'>void</span>);
 
-BOOL <span class='fn'>DwmCreateDevice</span>(<span class='kw'>void</span>);
+<span class='tp'>BOOL</span> <span class='fn'>DwmCreateDevice</span>(<span class='kw'>void</span>);
 
-BOOL <span class='fn'>DwmCreateThumbnail</span>(HWND hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>DwmCreateThumbnail</span>(<span class='tp'>HWND</span> hWnd);
 
-BOOL <span class='fn'>DwmUpdateVisual</span>(HWND hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>DwmUpdateVisual</span>(<span class='tp'>HWND</span> hWnd);
 
-BOOL <span class='fn'>DwmBindVisual</span>(HWND hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>DwmBindVisual</span>(<span class='tp'>HWND</span> hWnd);
 
-BOOL <span class='fn'>DwmEnableWindowComposition</span>(HWND hWnd, BOOL fEnable);</pre>
+<span class='tp'>BOOL</span> <span class='fn'>DwmEnableWindowComposition</span>(<span class='tp'>HWND</span> hWnd, <span class='tp'>BOOL</span> fEnable);</pre>
+<p class="source-nav"><a href='dwmapix_c.htm'>&larr; dwmapix.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dwmprivate_c.htm'>dwmprivate.c &rarr;</a></p>
 </body>
 </html>

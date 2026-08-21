@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Troubleshooting - MAG Screen Magnifier Help</title>
+  <link rel="stylesheet" type="text/css" href="help.css">
+</head>
+<body>
+
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Troubleshooting</p>
+
+<h1>Troubleshooting</h1>
+
+<div class="hero">
+  <p class="lead">Blank content, missing windows, stale pixels, visible old frames, resize flicker, or waiting until resize ends are defects, not acceptable tradeoffs between settings. Use the status and one-change-at-a-time process below to isolate the failing route.</p>
+</div>
+
+<table class="gallery-table">
+  <tr>
+    <td><img src="images/mag-settings-compositor-status.png" alt="Successful MAG compositor visual route in the interactive DAG."><p class="caption"><strong>Passing example:</strong> the graph reports an active Custom compositor-visual route immediately.</p></td>
+    <td><img src="images/mag-settings-target-options.png" alt="MAG Target dropdown showing Available and Unavailable choices."><p class="caption"><strong>Unavailable example:</strong> choices remain inspectable and include the failed prerequisite without replacing the active route.</p></td>
+  </tr>
+</table>
+
+<h2>A choice is unavailable</h2>
+<ol>
+  <li>Read the persistent status area; it identifies the first unsupported route requirement.</li>
+  <li>Restore Target, Surface, Host, and Copy policy to <strong>Auto</strong>.</li>
+  <li>Restore Buffers 3, Latency 1, Sync 1, Alpha 255, and a six-digit color key.</li>
+  <li>Use automatic Display and Hardware Adapter selection.</li>
+  <li>Then change one node at a time. Compatible changes activate immediately.</li>
+</ol>
+
+<h2>A window is missing from captured content</h2>
+<p>
+  DWM Private Visual is expected to show the composed desktop, taskbar, and other windows.
+  Missing application content is not an expected feature limitation. Reapply the route,
+  confirm the selected host and surface in Configuration status, and compare another
+  capture API only to isolate which capture path is failing.
+</p>
+<ol>
+  <li>Confirm the missing window is visible on the same desktop and not minimized or cloaked.</li>
+  <li>With DWM Private Visual selected, move the source window and verify that its magnified visual moves in the same frame and retains correct z-order.</li>
+  <li>Check desktop wallpaper, taskbar, a classic HWND application, Chrome/Edge, and an Electron application such as GitHub Desktop.</li>
+  <li>Change only Capture API to compare coverage, then restore the failing route before recording evidence.</li>
+</ol>
+<p>
+  When reporting the defect, include the capture API, graphics API, host, surface, adapters,
+  presentation target, and complete Configuration status text.
+</p>
+
+<h2>Blank or transparent MAG window</h2>
+<ul>
+  <li>No-redirection must be paired with DirectComposition or Presentation Manager.</li>
+  <li>Return Surface and Host to Auto to restore a compatible ownership pair.</li>
+  <li>Use Opaque alpha while diagnosing content attachment.</li>
+  <li>If only one backend is blank, select GDI as a baseline and inspect the status reason for the original backend.</li>
+</ul>
+
+<h2>Flicker, stale pixels, or late frames during move/resize</h2>
+<ul>
+  <li>Switch Target, Surface, and Host to Auto and retest before changing the capture API.</li>
+  <li>Use sync interval 1 and latency 1 while diagnosing pacing.</li>
+  <li>If the problem occurs only with one capture API, compare another API to isolate the capture path without treating the fallback as a fix.</li>
+  <li>Record the selected graphics/capture/host combination and the complete Configuration status text when reporting the defect.</li>
+</ul>
+
+<h3>What to observe</h3>
+<ul>
+  <li>The enlarged client area must be initialized before it becomes visible; no white frame, transparent hole, or previous desktop area should appear.</li>
+  <li>The magnified source, minimap, outline, and hit-test/UI rectangles must correspond to the same published client geometry.</li>
+  <li>Moving, activation changes, and resizing must not resurrect an older queued frame.</li>
+  <li>Visual updates must continue during the modal loop rather than appearing only after the mouse button is released.</li>
+  <li>Resource-generation diagnostics should remain stable for moves/activation and should change on resize only when capacity is actually exceeded.</li>
+</ul>
+
+<h2>Move is smooth but resize is slow</h2>
+<ol>
+  <li>Restore Auto target/surface/host/copy policy, sync 1, latency 1, and three buffers.</li>
+  <li>Observe whether the slowdown begins only after crossing a particular width/height. That boundary can identify reservoir growth or swap-chain buffer replacement.</li>
+  <li>Compare repeated resize within the new larger capacity. Continuous reallocation at every size is a defect.</li>
+  <li>Capture the graphics/capture/host route and Configuration status together with the requested and actual client sizes.</li>
+</ol>
+
+<h2>Startup is slow or shows a white frame/busy cursor</h2>
+<ul>
+  <li>MAG should not show an uninitialized application frame while expensive graphics/capture resources are still being created.</li>
+  <li>Restore automatic adapters and presentation choices to rule out repeated initialization of an unavailable explicit route.</li>
+  <li>If startup differs by backend, record time-to-first-valid-frame for GDI and the failing GPU backend without treating GDI as the permanent fix.</li>
+  <li>Record whether Help extraction, adapter enumeration, capture permission/runtime activation, or renderer creation precedes the delay.</li>
+</ul>
+
+<h2>An adapter disappeared</h2>
+<p>
+  Explicit selections are stored by adapter LUID and output device name. Docking,
+  driver changes, Remote Desktop, GPU disablement, or monitor removal can invalidate
+  them. Reopen Settings and select Auto, the current display, or an available hardware
+  adapter. Strict zero-copy also requires compatible capture, hardware, and display ownership.
+</p>
+
+<h2>High latency or low performance</h2>
+<ul>
+  <li>Use Auto copy policy and Auto hardware adapter.</li>
+  <li>Avoid GDI BitBlt or traditional layered presentation when strict GPU-only performance is required.</li>
+  <li>Avoid WARP except as an explicit diagnostic fallback.</li>
+  <li>Keep maximum frame latency at 1 unless a backend requires otherwise.</li>
+  <li>Cross-adapter routes can require an additional transfer and are rejected by strict zero-copy unless validated.</li>
+</ul>
+
+<h2>UI rectangles or zoom origin are wrong</h2>
+<ul>
+  <li>Verify Windows display scale and the monitor on which MAG is currently located.</li>
+  <li>At 1.0&times;, verify Window mode aligns with the desktop behind MAG unless the minimap source has been pinned.</li>
+  <li>Enable mouse-relative wheel zoom and confirm the desktop point beneath the pointer remains stationary through each zoom step.</li>
+  <li>Check all four client edges, minimap hit testing, and source-rectangle clipping after crossing a monitor with a different DPI.</li>
+</ul>
+
+<h2>Help does not open</h2>
+<p>
+  MAG extracts its embedded help package to the current user's temporary directory.
+  Verify that the temporary directory is writable and that Windows HTML Help is available.
+  Closing MAG closes all of its Help windows and removes the extracted package.
+</p>
+
+<h2>Reset saved settings</h2>
+<p>
+  Close MAG, then remove the per-user <code>HKEY_CURRENT_USER\Software\mag</code>
+  registry key. The next launch recreates defaults: automatic presentation choices,
+  opaque output, 3 buffers, latency 1, sync 1, and automatic adapters.
+</p>
+
+</body>
+</html>

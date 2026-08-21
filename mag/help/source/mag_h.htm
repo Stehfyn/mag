@@ -3,20 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>mag.h - Source Code</title>
+  <title>mag.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; mag.h</p>
 <h1>mag.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>15 lines</strong> &middot; 339 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='mag_c.htm'>&larr; mag.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='main_c.htm'>main.c &rarr;</a></p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
 
 <span class='pp'>#define WM_MAG_RENDER (WM_APP + 2)</span>
+<span class='pp'>#define WM_MAG_PRESENTATION_STATUS (WM_APP + 3)</span>
 
-HWND <span class='fn'>magInitInstance</span>(HINSTANCE, <span class='kw'>int</span>);
-<span class='kw'>void</span> <span class='fn'>mag_OnTimer</span>(HWND hWnd, UINT_PTR idEvent);
+<span class='tp'>HWND</span> <span class='fn'>magInitInstance</span>(<span class='tp'>HINSTANCE</span>, <span class='kw'>int</span>);
+<span class='kw'>void</span> <span class='fn'>mag_OnTimer</span>(<span class='tp'>HWND</span> hWnd, UINT_PTR idEvent);
+<span class='kw'>void</span> <span class='fn'>mag_UpdateViewWindowStyle</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>mag_RunSettingsDialogSmoke</span>(
+  <span class='tp'>HWND</span> hWnd,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
 </pre>
+<p class="source-nav"><a href='mag_c.htm'>&larr; mag.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='main_c.htm'>main.c &rarr;</a></p>
 </body>
 </html>

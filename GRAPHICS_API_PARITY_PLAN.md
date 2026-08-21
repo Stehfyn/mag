@@ -1,10 +1,10 @@
 # MAG graphics, presentation, composition, and zero-copy parity plan
 
-Status: implementation contract approved by user; implementation follows the planning checkpoint commit
+Status: implementation in progress; this file remains the implementation and acceptance contract
 
-Revised: 2026-08-20
+Revised: 2026-08-21
 
-This plan supersedes the earlier graphics-only parity plan. The earlier work established selectable OpenGL, GDI, Direct3D 9, Direct3D 11, Direct3D 12, Vulkan, Direct2D UI, and three text paths, but it did not establish presentation-model parity, surface-ownership parity, honest zero-copy routing, or visible zero-flicker resize. Those are part of the definition of done here.
+This plan supersedes the earlier graphics-only parity plan. The earlier work established selectable OpenGL, GDI, GDI+, Direct3D 9, Direct3D 11, Direct3D 12, Vulkan, Direct2D UI, and three text paths, but it did not establish presentation-model parity, surface-ownership parity, honest zero-copy routing, or visible zero-flicker resize. Those are part of the definition of done here.
 
 ## Non-negotiable outcome
 
@@ -20,8 +20,10 @@ The following rules apply throughout:
 - Explicit legacy and diagnostic presentation targets remain available because full presentation-model parity requires them, but the UI labels their copy class and performance cost.
 - Requested presentation model and observed presentation model are different fields. Independent Flip, Hardware Composed Independent Flip, and multi-plane overlay promotion are system outcomes, not modes an application can force with one API call.
 - Presentation is orthogonal to rendering: `renderer -> native frame -> presenter -> host`. Every target profile is implemented for every renderer through a native shared-resource bridge where the APIs permit one, or through an explicitly classified GPU/CPU transfer where that target inherently requires it. A target must not remain a renderer-specific placeholder or be rejected merely because the selected renderer is not Direct3D 11.
-- Applying a setting is transactional. The old visible host and resources remain usable until the candidate has rendered and submitted a first frame.
+- Every compatible change applies immediately and transactionally. The old visible host and resources remain usable until the candidate has rendered and submitted a first frame.
 - A failed candidate leaves the old configuration active and leaves persisted settings unchanged.
+- `Auto` is a presentation preset, not an opaque global mode. Capture, graphics, UI, and text remain independently configurable; changing an individual presentation field changes the preset indicator to `Custom`.
+- There is no Apply button. Unavailable choices remain inspectable, show their exact failed prerequisite, and never replace the active route.
 - Zero flicker is the minimum viable behavior for every selectable combination. A route that cannot preserve continuous, geometry-matched content during resize is unavailable and explains why; it is never exposed as a working setting with a known flickering fallback.
 - The zero-flicker resize gate is a visual gate. Existing resize code is treated as defective until that gate passes.
 
@@ -30,6 +32,7 @@ The following rules apply throughout:
 ### Presentation taxonomy and modern DXGI behavior
 
 - [Special K Presentation Model](https://wiki.special-k.info/Presentation_Model) supplies the user-facing taxonomy and the relationship among swap effect, window mode, Fullscreen Optimizations, DirectFlip, independent flip, and multi-plane overlays.
+- [Special K SwapChain Science](https://wiki.special-k.info/en/SwapChain) separates the four DXGI swap effects from the presentation model Windows ultimately chooses, distinguishes DirectFlip from Independent Flip and hardware-composed overlay scanout, documents per-output MPO behavior, and lists the flip-model compatibility rules that MAG must satisfy rather than conceal.
 - [PresentMon console documentation](https://github.com/GameTechDev/PresentMon/blob/main/README-ConsoleApplication.md) supplies the exact seven observed present-mode labels used in the UI and telemetry.
 - [DXGI_SWAP_EFFECT](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/ne-dxgi-dxgi_swap_effect) defines the BitBlt and flip swap effects and the restriction that Direct3D 12 supports flip sequential and flip discard only.
 - [For best performance, use DXGI flip model](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/for-best-performance--use-dxgi-flip-model) defines DirectFlip, panel-fitter scaling, multi-plane-overlay eligibility, Independent Flip, tearing, frame-latency wait handles, and the conditions under which the compositor can be bypassed.
@@ -46,7 +49,28 @@ The exact observed values are:
 6. `Composed: Copy with GPU GDI`
 7. `Composed: Copy with CPU GDI`
 
-MAG will expose all seven as strict target profiles plus `Auto`. A target profile configures all controllable prerequisites and then verifies the observed result. If Windows selects a different result, strict Apply fails with an explanation; an optional non-strict experiment can remain active while showing requested and observed values side by side.
+MAG will expose all seven as strict target profiles plus `Auto`. A target profile configures all controllable prerequisites and then verifies the observed result. If Windows selects a different result, an exact-target request remains unavailable with an explanation; an optional non-strict experiment can remain active while showing requested and observed values side by side.
+
+#### Swap-chain configuration is not the observed display plane
+
+The Special K SwapChain page was read as a second implementation source. It describes four DXGI swap effects: flip discard, flip sequential, BitBlt discard, and BitBlt sequential. Those are application-controlled buffer-preservation/copy contracts. They do not directly select DirectFlip, Independent Flip, or MPO. MAG therefore tracks four separate facts:
+
+1. **Requested target**: the user's exact target or Auto preset.
+2. **Configured presenter**: the actual swap effect/presenter/host, buffer count, latency, interval, tearing, alpha, format, surface allocation, and adapters MAG created.
+3. **Current eligibility**: selected-output DirectFlip, panel-fitter, Independent Flip, MPO, displayable-allocation, geometry, opacity, scaling, and cross-adapter prerequisites.
+4. **Observed result**: the mode Windows actually used for a submitted MAG frame, obtained from Presentation Manager statistics or a process-scoped ETW observer.
+
+DirectFlip is a prerequisite/transition, not a separate one of the seven exact PresentMon labels. MAG never maps a generic or `NONE` statistic to Independent Flip and never calls a capability query proof that an overlay plane is active.
+
+The swap-chain contract for MAG is:
+
+- Prefer flip discard for complete-frame modern routes; use flip sequential only where retained/dirty regions are genuinely consumed. BitBlt effects are explicit compatibility/diagnostic routes and are never Auto's choice while a valid flip route exists.
+- Use at least two single-sampled buffers for flip model. Resolve MSAA offscreen if it is ever introduced; do not create an MSAA swap chain.
+- Use one flip-model swap chain per HWND/composition target. Mixed GDI/DXGI drawing into the same HWND is confined to an explicit BitBlt host rather than falsely described as flip compatible.
+- Rebind any D3D11 output-merger state that referenced a presented flip buffer before drawing to it again. After fullscreen/window-state transitions, resize the flip chain before the next present when DXGI requires it.
+- Treat buffer count, maximum frame latency, sync interval, tearing, and waitability as a coordinated pacing profile. `Waitable = Auto` resolves to Enabled only for a D3D11/D3D12 flip-model HWND/DirectComposition route whose current output/geometry snapshot is Independent-Flip or MPO eligible; it resolves to Disabled for composed-only, BitBlt, non-DXGI, and Presentation Manager routes. Explicit Enabled remains available for supported DXGI flip chains. Presentation Manager uses its own buffer-available event. Auto does not assume that a waitable chain is always faster after DirectFlip eligibility is lost.
+- Prefer the newest complete geometry-matched frame during live interaction. Old ready frames are dropped instead of preserving FIFO order and resurfacing stale window geometry.
+- Query MPO per selected VidPN source. Plane count and support can change with monitor topology, format, bit depth, GPU scaling, HDR/SDR state, and driver configuration, so every display migration invalidates and refreshes the capability snapshot.
 
 ### The three requested layering and Direct2D articles
 
@@ -98,27 +122,38 @@ Its requirements for MAG are:
 - [Layered Windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows), [UpdateLayeredWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow), and [SetLayeredWindowAttributes](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setlayeredwindowattributes) define global alpha, color key, premultiplied per-pixel alpha, hit testing, and the rule that `UpdateLayeredWindow` fails after `SetLayeredWindowAttributes` until the layered style is reset.
 - [DirectComposition effects](https://learn.microsoft.com/en-us/windows/win32/directcomp/effects), [animations](https://learn.microsoft.com/en-us/windows/win32/directcomp/animation), [clipping](https://learn.microsoft.com/en-us/windows/win32/directcomp/clipping), and [bitmap surfaces](https://learn.microsoft.com/en-us/windows/win32/directcomp/bitmap-surfaces) define the feature set that the DirectComposition host must expose.
 - [Surface sharing between Windows graphics APIs](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/surface-sharing-between-windows-graphics-apis) and [IDXGISurface1::GetDC](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgisurface1-getdc) define shared-handle and GDI-compatible-surface interoperability.
+- [GDI+ Flat API](https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-flatapi-flat) documents the native functions implemented by `Gdiplus.dll` and declared by `Gdiplusflat.h`. MAG calls that ABI from C through a project-owned, narrowly scoped C declaration header because the Windows SDK umbrella header exposes C++ wrappers. The Microsoft support disclaimer for direct flat-API use is documented rather than hidden.
+- [GdiplusStartup](https://learn.microsoft.com/en-us/windows/win32/api/gdiplusinit/nf-gdiplusinit-gdiplusstartup) requires startup before creating flat-API objects, destruction of every object before shutdown, and one matching shutdown for each startup. MAG follows that lifetime per backend instance and suppresses external codecs because the renderer consumes memory frames rather than encoded images.
 
 ## Current implementation audit
 
-The repository already contains backend files for GDI, OpenGL, Direct3D 9, Direct3D 11, Direct3D 12, and Vulkan plus DirectComposition and UI helpers. That is a useful baseline, not presentation parity.
+The current tree now contains C backends for GDI, flat-ABI GDI+, OpenGL, Direct3D 9/9Ex, Direct3D 11, Direct3D 12, and Vulkan; Direct2D/DirectWrite UI; redirected, layered, DirectComposition, and Presentation Manager presenters; and the requested settings/solver surface. All target names have real candidate routes and capability reasons. None is represented by a generic “Not implemented” placeholder.
 
-The material gaps found in the current code are:
+Implemented and exercised in the private-desktop smoke path:
 
-- GDI, DXGI Desktop Duplication, and Windows Graphics Capture are flattened into a CPU BGRA frame for the common path. D3D11 capture maps a staging texture; WGC maps a staging texture. Every hardware presenter then uploads that CPU image again.
-- OpenGL uses `glTexSubImage2D`; D3D9 updates a texture; D3D11 calls `UpdateSubresource` and copies; D3D12 uses an upload resource; Vulkan uses a staging buffer. None is zero-copy from native DXGI/WGC capture.
-- The current Direct3D 11 HWND swap chain uses legacy `DXGI_SWAP_EFFECT_DISCARD`, so it cannot provide modern flip-model parity.
-- The Direct3D 12 composition swap chain is flip discard, but its frame is still assembled in CPU memory and uploaded.
-- The DirectComposition helper is a presenter attachment, not a complete visual-tree, layering, effects, synchronization, or host-ownership implementation.
-- The settings dialog exposes graphics, capture, UI, and text selections only. It has no presentation target, surface ownership, composition host, alpha/hit-test, zero-copy, observed-mode, or capability controls.
-- The visible window class includes `CS_OWNDC`. That is incompatible with `WS_EX_LAYERED` and makes a single permanent HWND/class unsuitable for all required hosts.
-- `mag_UpdateViewWindowStyle` unconditionally removes `WS_EX_LAYERED`, preventing layered parity.
-- `mag_OnNCCalcSize` returns `WVR_VALIDRECTS` without filling the required source and destination valid rectangles. Windows is therefore allowed to preserve the wrong pixels during resize.
-- `WM_SIZE` immediately reallocates the CPU frame, calls backend resize/`ResizeBuffers`, and destroys the previous-size presentation state while the interactive size transaction is still underway.
-- Vblank-driven `WM_MAG_RENDER` work can interleave with `WM_NCCALCSIZE`, `WM_SIZE`, and `WM_WINDOWPOSCHANGED`; there is no geometry epoch excluding future-size content from an old-size host.
-- Present bookkeeping records a sampled client rectangle, not the geometry and buffer that DWM actually displayed. `DwmFlush` is a compositor barrier, not proof that window geometry, DirectComposition commits, and heterogeneous present queues changed atomically.
+- Versioned presentation, surface, host, copy, alpha, pacing, Display Adapter, and Hardware Adapter settings; per-setting Auto/Custom state; immediate transactional apply; and a clickable Direct2D/DirectWrite route DAG whose nodes expose the active values.
+- Modern flip-discard D3D11/D3D12 presenters with selectable Auto/Enabled/Disabled waitability, legacy BitBlt/flip profiles where meaningful, D3D9Ex FLIPEX, Vulkan present-mode selection, WGL exchange/copy selection, Presentation Manager displayable buffers, and traditional layered presentation. Auto waitability follows current IF/MPO eligibility; changing an HWND swap-chain resource contract serializes the one-chain replacement and rolls back to the last working contract if creation fails.
+- Requested/configured/eligible/observed separation. Presentation Manager statistics are consumed natively. Classic presenters use a process-scoped DxgKrnl/Win32k ETW observer with per-provider diagnostics and no fabricated fallback mode.
+- Per-output `IDXGIOutput6::CheckHardwareCompositionSupport` plus D3DKMT queries for DirectFlip, Independent Flip, secondary-display IF, MPO/MPO decode/MPO3/kernel/HUD/secondary/stretch, panel fitter, current RGB/YUV plane counts, overlay transforms/filters/immediate/shared flags, scaling limits, post-composition limits, display/cursor restrictions, scanout caps, WDDM 3 displayable/hardware-flip-queue state, and cross-adapter resource tier.
+- Geometry epochs, live-resize capacity/reservoir logic, stale/future-frame rejection, matching `WM_WINDOWPOSCHANGED` publication, and resource-class normalization so an IF/composed/MPO outcome change does not recreate identical renderer resources. Layered alpha/UI/text value changes retain the presenter when ownership and capacity do not change.
+- A Settings smoke that fails closed on the input desktop, renders the real D2D/DWrite DAG into a private DIB, verifies every node's interactive registry, visits every page, opens every combo, and asserts that popup geometry stays within the selected monitor work area.
 
-The resize implementation is therefore reopened. The earlier automated old/new-size counters are not accepted as evidence of zero flicker.
+Remaining material gaps before this plan can be marked complete:
+
+- DXGI Desktop Duplication and Windows Graphics Capture still map staging textures into the CPU common frame. D3D11/D3D12/Vulkan/OpenGL/D3D9 then upload or copy that CPU frame. Strict native WGC/DD-to-present zero-copy therefore remains unavailable; only compositor-visual pass-through is currently a truthful no-pixel-copy route.
+- D3D12, Vulkan, OpenGL, and D3D9 native cross-API sharing described below is not complete. A queried cross-adapter support tier is diagnostic evidence, not validation that MAG has activated a synchronized cross-adapter scanout path.
+- DirectComposition property/effect/animation parity and the complete Direct2D 1.1 same-image/D3D11On12 overlay matrix still need the acceptance work below.
+- Automated epoch/resource tests are necessary but do not prove visible zero flicker. The deliberate frame-by-frame resize/move/activation session across every selectable host/API product remains open and the plan stays `implementation in progress` until it passes.
+
+### Verification snapshot: 2026-08-21
+
+- Full `Rebuild` completed with exit code 0 and no compiler diagnostics for `Debug|x64`, `Release|x64`, `Debug|x86`, and `Release|x86` using Visual Studio 18.8.2.
+- `--graphics-smoke` completed with exit code 0 in all four configurations. Each process created and bound a private non-input desktop before creating any test HWND. The smoke includes resolver/classifier tests, every available graphics backend, live geometry epochs, host/target changes, waitable D3D11/D3D12 enabled and disabled routes, settings-page traversal, DAG interaction, and combo-popup work-area checks.
+- `--dwm-private-smoke` completed with exit code 0 in all four configurations on private non-input desktops. It covers desktop, taskbar, and peer-window fixtures, positional tracking, live resize, and move/activation transitions.
+- The Pacing-page illustration in `mag/help/images/mag-settings-pacing.png` was captured from the real Common Controls v6 settings dialog on its private test desktop; the capture helper refuses the input desktop.
+- The generated source help contains 45 project-owned files and 28,110 lines, performs no SDK preprocessing, and the CHM compiler completed 56 topics with 846 local links. A clean decompile of the resulting CHM produced 97 payload files, including all 40 PNG illustrations and the new Pacing and graphics-architecture topics.
+- The classifier's deterministic tests pass, but the live process-scoped ETW observer cannot start unelevated on this machine. The required-observer run exits 4 and reports `result 5; StartTrace 5; DxgKrnl 50; Win32k 50; OpenTrace 21`. Consequently, the UI reports observation unavailable and does not infer an active display plane from capability data.
+- These automated results do not close the native WGC/Desktop Duplication zero-copy gaps or the human-visible zero-flicker acceptance matrix listed above. Those gates remain open, so this plan remains `implementation in progress`.
 
 ## Independent settings and persisted model
 
@@ -172,15 +207,17 @@ typedef enum MAGLAYEREDALPHAMODE {
 
 Persist requested values separately from runtime facts. Add a versioned settings record and migrate old installations to `Auto` without changing their selected graphics/capture/UI/text APIs.
 
-The settings property sheet will have these pages:
+The Settings dialog has an enlarged tabbed layout with a wide Route page and these detail pages:
 
-- **Rendering**: capture API, graphics API, Display Adapter, Hardware Adapter, UI API, text API.
-- **Presentation**: presentation target, host, redirection/no-redirection, swap effect profile, buffer count, maximum frame latency, sync interval, tearing, fullscreen/borderless eligibility, and strict-result toggle.
+- **Route**: a Direct2D/DirectWrite directed acyclic graph of the active capture-to-display pipeline. Capture, transfer/copy policy, renderer, host, target, display, hardware adapter, surface, text, and UI nodes contain the actual setting controls; Layering and Pacing nodes open their detail pages. Node borders, availability counts, and dropdown badges expose what is selectable, while the status area gives the exact incompatibility reason. The graph reflects the active route, not a failed pending request.
+- **Rendering**: capture API, graphics API, UI API, and text API.
+- **Present**: presentation target, host, redirection/no-redirection, copy policy, tearing, and strict-result toggle.
+- **Adapters**: Display Adapter and Hardware Adapter.
 - **Layering**: alpha mode, constant opacity, color key, per-pixel alpha source, hit-test policy, DirectComposition visual/effect/animation options, clip, transform, and overlay ownership.
-- **Performance**: Auto fastest, strict zero-copy, allow one GPU-local copy, or explicit CPU diagnostic routes. Show resource format, adapter LUID, synchronization primitive, and measured copy class.
-- **Status**: requested and observed presentation modes, DirectFlip/MPO capabilities, active host/style/class, queue depth, dropped/late frames, device/adapter, last failure, and why every unavailable choice is unavailable.
+- **Pacing**: buffer count, maximum frame latency, sync interval, DXGI waitable-chain policy, tearing, and mouse-relative zoom. Numeric pacing and alpha values use aligned sliders with live values. The DAG shows requested Auto versus its resolved Enabled/Disabled state.
+- **Status**: the persistent area below the tabs reports the active route or the exact reason an inspected request is unavailable.
 
-Every page is keyboard accessible, has labels associated with controls, exposes capability reasons without relying on color, and supports restoring a known-good configuration.
+Every page is keyboard accessible, has labels associated with controls, exposes capability reasons without relying on color, and supports restoring the `Auto` presentation preset. Combo lists retain native Windows popup placement; MAG only requests enough dropped width for the option text and availability badge. Every compatible control change commits immediately. A failed candidate leaves the previous route visibly active and does not alter persisted settings.
 
 ### Display Adapter and Hardware Adapter settings
 
@@ -191,9 +228,9 @@ MAG exposes two independent adapter selectors because the adapter that owns the 
 
 Adapters and outputs are persisted by stable identity, not transient enumeration index: DXGI adapter LUID plus output/monitor identity and display-config target path. On startup, hot-plug, GPU reset, docking, or topology change, the resolver re-enumerates and either rebinds the same identity or reports the saved selection as disconnected; it does not silently bind ordinal `0` to a different GPU.
 
-`IDXGIFactory6::EnumAdapterByGpuPreference` supplies the Auto hardware preference, followed by actual API/feature/format/sharing/presentation capability checks. D3D11 and D3D12 use the selected DXGI adapter directly. D3D9/9Ex resolves the matching adapter/monitor. Vulkan matches the DXGI LUID through Vulkan device-ID properties and requires the selected physical device's presentation and external-memory capabilities. OpenGL uses a matching GPU-affinity/render-GPU extension only where the installed ICD exposes one; otherwise an explicit non-default hardware choice is unavailable with a reason. GDI binds the selected display/output DC but remains CPU-classified.
+`IDXGIFactory6::EnumAdapterByGpuPreference` supplies the Auto hardware preference, followed by actual API/feature/format/sharing/presentation capability checks. D3D11 and D3D12 use the selected DXGI adapter directly. D3D9/9Ex resolves the matching adapter/monitor. Vulkan matches the DXGI LUID through Vulkan device-ID properties and requires the selected physical device's presentation and external-memory capabilities. OpenGL uses a matching GPU-affinity/render-GPU extension only where the installed ICD exposes one; otherwise an explicit non-default hardware choice is unavailable with a reason. GDI and GDI+ remain CPU-classified; their Presentation Manager bridges create D3D11 upload devices on the selected hardware adapter.
 
-The capability solver tracks at least four identities for every candidate: capture adapter, hardware/render adapter, display/presentation adapter, and compositor owner. `Same as Capture Adapter` is preferred for direct sampling; `Same as Display Adapter` is preferred for direct scanout/presentation. Auto scores the whole route and favors true zero-copy first, then one same-GPU copy, and rejects implicit cross-adapter CPU staging. If the user's explicit Display Adapter and Hardware Adapter choices require a cross-adapter transfer, Status shows both LUIDs and the required transfer class. Strict zero-copy disables Apply unless a genuine cross-adapter shared-resource route exists and passes synchronization/capability validation.
+The capability solver tracks at least four identities for every candidate: capture adapter, hardware/render adapter, display/presentation adapter, and compositor owner. `Same as Capture Adapter` is preferred for direct sampling; `Same as Display Adapter` is preferred for direct scanout/presentation. Auto scores the whole route and favors true zero-copy first, then one same-GPU copy, and rejects implicit cross-adapter CPU staging. If the user's explicit Display Adapter and Hardware Adapter choices require a cross-adapter transfer, Status shows both LUIDs and the required transfer class. Strict zero-copy remains unavailable unless a genuine cross-adapter shared-resource route exists and passes synchronization/capability validation.
 
 ## Presentation target profiles
 
@@ -201,7 +238,7 @@ The target is a solver input, not a false promise. Each profile owns the control
 
 | Target | Candidate configuration | Successful observation |
 | --- | --- | --- |
-| Auto | Presentation Manager when supported; otherwise DirectComposition or flip-discard HWND; hardware adapter; waitable pacing; zero-copy or lowest GPU-copy route | Fastest stable observed mode available for the current geometry |
+| Auto | Presentation Manager when supported; otherwise DirectComposition or flip-discard HWND; hardware adapter; waitable pacing only while IF/MPO eligible; zero-copy or lowest GPU-copy route | Fastest stable observed mode available for the current geometry |
 | Hardware: Legacy Flip | D3D9/D3D9Ex or legacy exclusive-fullscreen-capable path with the required flip semantics | Exact PresentMon observation |
 | Hardware: Legacy Copy to front buffer | Explicit legacy diagnostic presenter only; never selected by Auto | Exact PresentMon observation |
 | Hardware: Independent Flip | HWND flip-discard/sequential profile, eligible client/display coverage, no incompatible alpha/composition features | Exact observation after a stability window, not one sample |
@@ -210,7 +247,7 @@ The target is a solver input, not a false promise. Each profile owns the control
 | Composed: Copy with GPU GDI | Explicit redirected BitBlt/GDI-compatible GPU path | Exact observation |
 | Composed: Copy with CPU GDI | Explicit CPU DIB/GDI diagnostic path | Exact observation |
 
-The table applies across GDI, OpenGL, D3D9/9Ex, D3D11, D3D12, and Vulkan renderers. The presenter, not the renderer enum, owns the target model. The resolver may reject a product only for a measured machine/API capability or an unavoidable copy-policy conflict, and the reason must identify that failed prerequisite rather than say the target is unimplemented for that renderer.
+The table applies across GDI, GDI+, OpenGL, D3D9/9Ex, D3D11, D3D12, and Vulkan renderers. The presenter, not the renderer enum, owns the target model. The resolver may reject a product only for a measured machine/API capability or an unavoidable copy-policy conflict, and the reason must identify that failed prerequisite rather than say the target is unimplemented for that renderer.
 
 `IDXGIOutput6::CheckHardwareCompositionSupport` is used as a capability hint, not as proof of the active mode. Classic paths get a minimal process-scoped PresentMon-compatible ETW observer. Presentation Manager paths also consume composition-swapchain presentation statistics and buffer-retirement information. Observation shuts down cleanly and never installs a machine-wide service.
 
@@ -313,7 +350,7 @@ Strict zero-copy installs instrumentation at every map/readback/upload boundary.
 - **Vulkan**: use Win32 external-memory and external-semaphore interop only when the D3D producer resource is shareable and adapter-compatible. Otherwise use a GPU-local shared bridge; strict zero-copy is unavailable for that pair.
 - **OpenGL**: use `WGL_NV_DX_interop2` for direct D3D texture access only when the driver and resource support it. Otherwise use the fastest explicit GPU bridge; CPU texture upload is an opt-in diagnostic route.
 - **D3D9Ex**: use compatible shared surfaces where supported. Otherwise use a GPU-local conversion/copy; traditional D3D9 upload is a diagnostic fallback.
-- **GDI capture or presentation**: classify it as CPU-owned or CPU round-trip. It can satisfy pixel and legacy-present parity but not strict zero-copy.
+- **GDI capture, GDI presentation, or GDI+ presentation**: classify it as CPU-owned or CPU round-trip. These routes can satisfy pixel and legacy-present parity but not strict zero-copy.
 
 Cross-adapter capture is never called zero-copy. The solver prefers a renderer/presenter on the capture adapter; if display ownership forces another adapter, it reports the cross-adapter transfer class and offers only routes that synchronize correctly.
 
@@ -325,6 +362,10 @@ Every graphics backend consumes the same frame planes, transform, point-sampling
 
 Retain the deterministic CPU oracle, redirected BitBlt/paint presentation, and both GPU-GDI and CPU-GDI diagnostic target profiles. GDI is never an Auto hardware fallback unless no hardware route can initialize and the user permits CPU fallback.
 
+### GDI+ flat C ABI
+
+Use only the flat `Gdiplus.dll` ABI from C; no GDI+ C++ wrappers, classes, or C++ translation units are permitted. Retain reservoir-sized source and target bitmaps, the target graphics object, and reusable brushes across ordinary resize epochs. The redirected HWND path renders into the retained off-screen DIB before one final BitBlt, while the Presentation Manager path uploads that same completed surface through the selected D3D11 adapter bridge. GDI+ is CPU-classified and never satisfies strict zero-copy.
+
 ### OpenGL/WGL
 
 Keep the WGL context on its own `CS_OWNDC` helper when the visible host cannot use that class style. Add direct DXGI texture interop when available, explicit swap-interval control, and a host capability table. Do not claim flip/independent-flip support unless ETW observes it.
@@ -335,11 +376,11 @@ Use Direct3D 9Ex where present, including `D3DSWAPEFFECT_FLIPEX` eligibility, an
 
 ### Direct3D 11
 
-Replace the legacy discard-only design with separately creatable BitBlt and flip-model presenters. Use BGRA support, hardware adapter selection, waitable-object frame latency, tearing where valid, occlusion handling, adapter migration, and complete device-removal diagnostics. D3D11 is the primary native interop hub for WGC, Desktop Duplication, Direct2D 1.1, DirectComposition, and displayable surfaces.
+Replace the legacy discard-only design with separately creatable BitBlt and flip-model presenters. Use BGRA support, hardware adapter selection, selectable waitable-object pacing, device-level latency control for non-waitable D3D11 chains, tearing where valid, occlusion handling, adapter migration, and complete device-removal diagnostics. D3D11 is the primary native interop hub for WGC, Desktop Duplication, Direct2D 1.1, DirectComposition, and displayable surfaces.
 
 ### Direct3D 12
 
-Use flip-model composition/HWND presenters only, per-buffer allocators and fences, a bounded frame pool, waitable pacing, tearing where valid, and complete device-removed diagnostics. Captured native resources remain GPU-resident; upload heaps are reserved for CPU-owned sources and UI data. Use D3D11On12 for Direct2D/DirectWrite rendering into D3D12-owned presentable resources.
+Use flip-model composition/HWND presenters only, per-buffer allocators and fences, a bounded frame pool, selectable waitable pacing, tearing where valid, and complete device-removed diagnostics. With waitability disabled, D3D12 leaves maximum queue latency driver-managed and reports the slider value as a request rather than an active DXGI limit. Captured native resources remain GPU-resident; upload heaps are reserved for CPU-owned sources and UI data. Use D3D11On12 for Direct2D/DirectWrite rendering into D3D12-owned presentable resources.
 
 ### Vulkan
 
@@ -353,7 +394,7 @@ WARP remains an explicit adapter/fallback choice inside D3D11/D3D12, visibly rep
 
 Direct2D is a UI renderer, DirectWrite is a text layout/rasterization API, and neither is mislabeled as a display presentation model.
 
-For D3D11, DirectComposition, and Presentation Manager, Direct2D 1.1 targets the same DXGI image or an independent GPU overlay visual. For D3D12 it targets D3D12-owned resources through D3D11On12. For Vulkan/OpenGL, the backend renders the shared neutral draw list natively or consumes a GPU overlay through supported interop; it does not force a CPU overlay in strict zero-copy mode. GDI and traditional layered paths use the documented WIC/GDI route.
+For D3D11, DirectComposition, and Presentation Manager, Direct2D 1.1 targets the same DXGI image or an independent GPU overlay visual. For D3D12 it targets D3D12-owned resources through D3D11On12. For Vulkan/OpenGL, the backend renders the shared neutral draw list natively or consumes a GPU overlay through supported interop; it does not force a CPU overlay in strict zero-copy mode. GDI, GDI+, and traditional layered paths use their documented CPU/WIC/GDI-compatible routes.
 
 Text settings retain full visible parity:
 
@@ -365,7 +406,7 @@ All paths share the Unicode string, locale, font family, weight/style/stretch, e
 
 ## Transactional configuration and recovery
 
-Applying settings performs these phases:
+Each immediate compatible setting change performs these phases:
 
 1. Resolve the complete candidate against capture API, adapters, format/alpha, renderer, UI/text, host, surface ownership, presentation target, and copy requirement.
 2. Produce a capability report before mutating live state.
@@ -441,7 +482,7 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 - Complete Vulkan external-memory/semaphore and sampled presentation.
 - Complete OpenGL DX interop and helper-host presentation.
 - Complete D3D9Ex shared/FLIPEX paths and reset semantics.
-- Complete GDI and legacy target profiles.
+- Complete GDI, flat-C GDI+, and legacy target profiles.
 - Verify every target profile's candidate and observation behavior for every meaningful backend/host pair; unsupported pairs have exact reasons.
 
 ### Stage 6: traditional layered parity
@@ -476,7 +517,7 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 - Every automated HWND/render test runs on a private non-input Win32 desktop created specifically for that test process. Failure to create or bind the private desktop fails closed before any test HWND is created. Automated tests never call `SwitchDesktop` and never create, move, capture, or present a test window on the user's input desktop.
 - No Windows SDK header is generated, edited, deleted, or vendored. Any missing two-macro message cracker belongs in the project's own extension header.
 - Every enum appears exactly once in an authoritative registry; UI and persistence are registry-driven.
-- WGL, D3D9, D3D11, D3D12, Vulkan, Direct2D, DirectWrite, DirectComposition, and Presentation API debug/validation output has no live-object or synchronization errors at shutdown.
+- WGL, GDI+, D3D9, D3D11, D3D12, Vulkan, Direct2D, DirectWrite, DirectComposition, and Presentation API debug/validation output has no live-object or synchronization errors at shutdown.
 - `git diff --check` passes and generated help/source artifacts are updated only by their repository generator.
 - Normal startup creates the host hidden, creates only resources required by the resolved route, submits a complete first frame, and reveals it in one transaction. Timing traces fail startup that exposes the class/background brush, a white application frame, a busy cursor, or performs redundant renderer/presenter construction before first visibility.
 
@@ -503,8 +544,13 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 
 - Each of the seven target settings can be selected when its prerequisite route exists and produces an exact observed result or a precise failure reason.
 - Requested and observed modes are always visible separately.
+- Requested target, configured swap effect/presenter, current display-plane eligibility, and observed result are independently inspectable; a capability query never populates the observed field.
+- Every connected VidPN source reports DirectFlip, panel fitter, IF/secondary IF, MPO/decode/secondary/HUD/stretch/MPO3/kernel support, current total/RGB/YUV plane counts, overlay feature bits, MPO/post-composition scaling limits, display/cursor restrictions, raw scanout caps, WDDM 3 displayable/hardware-flip-queue state, and cross-adapter resource tier when its driver exposes them.
+- Display/topology/HDR/bit-depth/scaling changes invalidate and re-query the selected output's plane snapshot before eligibility is recomputed.
+- If Presentation Manager statistics or ETW observation is unavailable, the UI reports source-specific status/error and makes no exact-active-plane claim. Partial DxgKrnl-only observation is labeled partial rather than full fidelity.
 - Auto selects the highest-performing stable route demonstrated on that machine and never a legacy/CPU route when a valid hardware-native route exists.
 - Frame latency, tearing, target time, queue depth, dropped frames, and present statistics match the active API's contract.
+- Flip-model compatibility tests cover buffer count, single-sample buffers, D3D11 post-present rebinding where applicable, one flip chain per target, fullscreen/window transition resize, sRGB/linear format handling, and explicit BitBlt isolation for mixed HWND-level GDI interop.
 
 ### Layering and composition proof
 
@@ -516,7 +562,7 @@ Every present stamp records epoch, HWND generation, actual client/window rectang
 
 Run the real `mag.exe` and record/capture slow and rapid drags from all four edges and all four corners for every presentation-host family. Include grow, shrink, reversal mid-drag, off-screen edges, mixed-DPI monitor crossing, active video, and external-monitor-only.
 
-The test matrix covers the Cartesian product of every combination the capability solver leaves selectable: graphics, capture, UI, text, target, surface ownership, composition host, copy requirement, alpha mode, Display Adapter, and Hardware Adapter. Unsupported products must be rejected before Apply. A single flickering supported product fails the release; there is no exempt legacy, diagnostic, layered, or software route.
+The test matrix covers the Cartesian product of every combination the capability solver leaves selectable: graphics, capture, UI, text, target, surface ownership, composition host, copy requirement, alpha mode, waitable-chain policy, Display Adapter, and Hardware Adapter. Unsupported products must be rejected before any live-route mutation. A single flickering supported product fails the release; there is no exempt legacy, diagnostic, layered, or software route.
 
 This is a deliberate human-visible acceptance session, not an automated test. All automated resize and presentation tests remain on their private non-input desktop; no automation is allowed to take control of or place test windows on the desktop the user is using.
 

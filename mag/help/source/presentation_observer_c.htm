@@ -1,0 +1,1629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>presentation_observer.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; presentation_observer.c</p>
+<h1>presentation_observer.c</h1>
+<p>Process-scoped DxgKrnl/Win32k ETW presentation observation, exact mode classification, and provider diagnostics.</p>
+<div class="source-meta"><strong>1612 lines</strong> &middot; 42021 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='presentation_h.htm'>&larr; presentation.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_observer_h.htm'>presentation_observer.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;presentation_observer.h&quot;</span>
+
+<span class='pp'>#include &lt;evntrace.h&gt;</span>
+<span class='pp'>#include &lt;evntcons.h&gt;</span>
+<span class='pp'>#include &lt;tdh.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;advapi32&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;tdh&quot;)</span>
+
+<span class='pp'>#define MAG_OBSERVER_PRESENT_CAPACITY 64</span>
+<span class='pp'>#define MAG_OBSERVER_MAPPING_CAPACITY 128</span>
+<span class='pp'>#define MAG_OBSERVER_SESSION_NAME_COUNT 96</span>
+
+<span class='pp'>#define MAG_DXGK_EVENT_BLIT 0x00a6</span>
+<span class='pp'>#define MAG_DXGK_EVENT_FLIP 0x00a8</span>
+<span class='pp'>#define MAG_DXGK_EVENT_PRESENT_HISTORY_START 0x00ab</span>
+<span class='pp'>#define MAG_DXGK_EVENT_PRESENT_HISTORY_INFO 0x00ac</span>
+<span class='pp'>#define MAG_DXGK_EVENT_QUEUE_PACKET_START 0x00b2</span>
+<span class='pp'>#define MAG_DXGK_EVENT_QUEUE_PACKET_STOP 0x00b4</span>
+<span class='pp'>#define MAG_DXGK_EVENT_PRESENT_INFO 0x00b8</span>
+<span class='pp'>#define MAG_DXGK_EVENT_PRESENT_HISTORY_DETAILED_START 0x00d7</span>
+<span class='pp'>#define MAG_DXGK_EVENT_QUEUE_PACKET_START_2 0x00f4</span>
+<span class='pp'>#define MAG_DXGK_EVENT_FLIP_MPO 0x00fc</span>
+<span class='pp'>#define MAG_DXGK_EVENT_MMIO_FLIP_MPO 0x0103</span>
+<span class='pp'>#define MAG_DXGK_EVENT_INDEPENDENT_FLIP 0x010a</span>
+<span class='pp'>#define MAG_DXGK_EVENT_VSYNC_DPC_MPO 0x0111</span>
+<span class='pp'>#define MAG_DXGK_EVENT_HSYNC_DPC_MPO 0x017e</span>
+<span class='pp'>#define MAG_DXGK_EVENT_MMIO_FLIP_MPO3 0x0182</span>
+
+<span class='pp'>#define MAG_WIN32K_EVENT_TOKEN_COMPOSITION 0x00c9</span>
+<span class='pp'>#define MAG_WIN32K_EVENT_TOKEN_STATE 0x012d</span>
+
+<span class='pp'>#define MAG_D3DKMT_PM_UNINITIALIZED 0U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_GDI 1U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_FLIP 2U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_BLT 3U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_VISTABLT 4U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_GDI_SYSMEM 6U</span>
+<span class='pp'>#define MAG_D3DKMT_PM_REDIRECTED_COMPOSITION 7U</span>
+
+<span class='pp'>#define MAG_WIN32K_TOKEN_STATE_IN_FRAME 3U</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> GUID MAG_PROVIDER_DXGKRNL =
+  { <span class='num'>0x802ec45a</span>, <span class='num'>0x1e99</span>, <span class='num'>0x4b83</span>, { <span class='num'>0x99</span>, <span class='num'>0x20</span>, <span class='num'>0x87</span>, <span class='num'>0xc9</span>, <span class='num'>0x82</span>, <span class='num'>0x77</span>, <span class='num'>0xba</span>, <span class='num'>0x9d</span> } };
+<span class='kw'>static</span> <span class='kw'>const</span> GUID MAG_PROVIDER_WIN32K =
+  { <span class='num'>0x8c416c79</span>, <span class='num'>0xd49b</span>, <span class='num'>0x4f01</span>, { <span class='num'>0xa4</span>, <span class='num'>0x67</span>, <span class='num'>0xe5</span>, <span class='num'>0x6d</span>, <span class='num'>0x3a</span>, <span class='num'>0xa8</span>, <span class='num'>0x23</span>, <span class='num'>0x4c</span> } };
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGOBSERVEDPRESENT
+{
+  <span class='tp'>BOOL</span> used;
+  <span class='tp'>DWORD</span> threadId;
+  <span class='tp'>HWND</span> hWnd;
+  <span class='tp'>UINT64</span> generation;
+  <span class='tp'>UINT64</span> qpc;
+  <span class='tp'>UINT64</span> historyToken;
+  <span class='tp'>UINT64</span> compositionSurfaceLuid;
+  <span class='tp'>UINT64</span> compositionPresentCount;
+  <span class='tp'>UINT64</span> compositionBindId;
+  <span class='tp'>UINT</span> submitSequence;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target;
+} MAGOBSERVEDPRESENT;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGOBSERVERSUBMITMAPPING
+{
+  <span class='tp'>BOOL</span> used;
+  <span class='tp'>UINT</span> submitSequence;
+  <span class='tp'>UINT</span> presentIndex;
+  <span class='tp'>UINT64</span> presentGeneration;
+  <span class='tp'>UINT64</span> qpc;
+} MAGOBSERVERSUBMITMAPPING;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGOBSERVERTOKENMAPPING
+{
+  <span class='tp'>BOOL</span> used;
+  <span class='tp'>UINT64</span> first;
+  <span class='tp'>UINT64</span> second;
+  <span class='tp'>UINT64</span> third;
+  <span class='tp'>UINT</span> presentIndex;
+  <span class='tp'>UINT64</span> presentGeneration;
+  <span class='tp'>UINT64</span> qpc;
+} MAGOBSERVERTOKENMAPPING;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGPRESENTATIONOBSERVERCORE
+{
+  <span class='tp'>HWND</span> expectedWindow;
+  <span class='tp'>DWORD</span> processId;
+  <span class='tp'>UINT64</span> resetQpc;
+  <span class='tp'>UINT64</span> nextPresentGeneration;
+  <span class='tp'>UINT64</span> nextObservationSequence;
+  <span class='tp'>MAGPRESENTATIONTARGET</span> latestTarget;
+  <span class='tp'>UINT64</span> latestSequence;
+  <span class='tp'>UINT64</span> latestQpc;
+  <span class='tp'>BOOL</span> latestValid;
+  MAGOBSERVEDPRESENT presents[<span class='mc'>MAG_OBSERVER_PRESENT_CAPACITY</span>];
+  MAGOBSERVERSUBMITMAPPING submits[<span class='mc'>MAG_OBSERVER_MAPPING_CAPACITY</span>];
+  MAGOBSERVERTOKENMAPPING historyTokens[<span class='mc'>MAG_OBSERVER_MAPPING_CAPACITY</span>];
+  MAGOBSERVERTOKENMAPPING compositionTokens[<span class='mc'>MAG_OBSERVER_MAPPING_CAPACITY</span>];
+} MAGPRESENTATIONOBSERVERCORE;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGPRESENTATIONOBSERVER
+{
+  SRWLOCK lock;
+  MAGPRESENTATIONOBSERVERCORE core;
+  TRACEHANDLE session;
+  TRACEHANDLE trace;
+  <span class='tp'>HANDLE</span> thread;
+  EVENT_TRACE_PROPERTIES* properties;
+  <span class='tp'>WCHAR</span> sessionName[<span class='mc'>MAG_OBSERVER_SESSION_NAME_COUNT</span>];
+  <span class='tp'>DWORD</span> error;
+  <span class='tp'>DWORD</span> startTraceError;
+  <span class='tp'>DWORD</span> dxgKrnlError;
+  <span class='tp'>DWORD</span> win32kError;
+  <span class='tp'>DWORD</span> openTraceError;
+  <span class='tp'>BOOL</span> <span class='tp'>active</span>;
+  <span class='tp'>BOOL</span> dxgKrnlEnabled;
+  <span class='tp'>BOOL</span> win32kEnabled;
+} MAGPRESENTATIONOBSERVER;
+
+<span class='kw'>static</span> MAGPRESENTATIONOBSERVER g_observer =
+{
+  SRWLOCK_INIT
+};
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverGuidEqual</span>(<span class='kw'>const</span> GUID* <span class='tp'>left</span>, <span class='kw'>const</span> GUID* right)
+{
+    <span class='kw'>return</span> <span class='tp'>left</span> &amp;&amp; right &amp;&amp; <span class='num'>0</span> == <span class='fn'>memcmp</span>(<span class='tp'>left</span>, right, <span class='kw'>sizeof</span>(*<span class='tp'>left</span>));
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magObserverQpc</span>(<span class='kw'>void</span>)
+{
+    <span class='tp'>LARGE_INTEGER</span> value;
+
+    <span class='kw'>return</span> <span class='fn'>QueryPerformanceCounter</span>(&amp;value) ? (<span class='tp'>UINT64</span>)value.QuadPart : <span class='num'>0</span>;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverCoreReset</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>UINT64</span> qpc)
+{
+    <span class='kw'>if</span> (!core)
+    {
+      <span class='kw'>return</span>;
+    }
+    core-&gt;expectedWindow = hWnd;
+    core-&gt;processId = <span class='fn'>GetCurrentProcessId</span>();
+    core-&gt;resetQpc = qpc;
+    core-&gt;latestTarget = MAG_PRESENT_AUTO;
+    core-&gt;latestValid = FALSE;
+    core-&gt;latestQpc = <span class='num'>0</span>;
+    <span class='fn'>ZeroMemory</span>(core-&gt;presents, <span class='kw'>sizeof</span>(core-&gt;presents));
+    <span class='fn'>ZeroMemory</span>(core-&gt;submits, <span class='kw'>sizeof</span>(core-&gt;submits));
+    <span class='fn'>ZeroMemory</span>(core-&gt;historyTokens, <span class='kw'>sizeof</span>(core-&gt;historyTokens));
+    <span class='fn'>ZeroMemory</span>(core-&gt;compositionTokens, <span class='kw'>sizeof</span>(core-&gt;compositionTokens));
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT</span> <span class='fn'>magObserverPresentIndex</span>(
+  <span class='kw'>const</span> MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='kw'>const</span> MAGOBSERVEDPRESENT* present)
+{
+    <span class='kw'>return</span> (<span class='tp'>UINT</span>)(present - core-&gt;presents);
+}
+
+<span class='kw'>static</span> MAGOBSERVEDPRESENT* <span class='fn'>magObserverBeginPresent</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc)
+{
+    MAGOBSERVEDPRESENT* selected = NULL;
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!core || qpc &lt; core-&gt;resetQpc)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;presents); ++index)
+    {
+      MAGOBSERVEDPRESENT* candidate = &amp;core-&gt;presents[index];
+
+      <span class='kw'>if</span> (!candidate-&gt;used)
+      {
+        selected = candidate;
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>if</span> (!selected || candidate-&gt;qpc &lt; selected-&gt;qpc)
+      {
+        selected = candidate;
+      }
+    }
+    <span class='kw'>if</span> (!selected)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='fn'>ZeroMemory</span>(selected, <span class='kw'>sizeof</span>(*selected));
+    selected-&gt;used = TRUE;
+    selected-&gt;threadId = threadId;
+    selected-&gt;qpc = qpc;
+    selected-&gt;generation = ++core-&gt;nextPresentGeneration;
+    selected-&gt;target = MAG_PRESENT_AUTO;
+    <span class='kw'>return</span> selected;
+}
+
+<span class='kw'>static</span> MAGOBSERVEDPRESENT* <span class='fn'>magObserverFindThreadPresent</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> threadId)
+{
+    MAGOBSERVEDPRESENT* selected = NULL;
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!core)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;presents); ++index)
+    {
+      MAGOBSERVEDPRESENT* candidate = &amp;core-&gt;presents[index];
+
+      <span class='kw'>if</span> (candidate-&gt;used &amp;&amp; candidate-&gt;threadId == threadId &amp;&amp;
+          (!selected || candidate-&gt;qpc &gt; selected-&gt;qpc))
+      {
+        selected = candidate;
+      }
+    }
+    <span class='kw'>return</span> selected;
+}
+
+<span class='kw'>static</span> MAGOBSERVEDPRESENT* <span class='fn'>magObserverFindOrBeginPresent</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (!core || processId != core-&gt;processId || qpc &lt; core-&gt;resetQpc)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    present = <span class='fn'>magObserverFindThreadPresent</span>(core, threadId);
+    <span class='kw'>return</span> present ? present : <span class='fn'>magObserverBeginPresent</span>(core, threadId, qpc);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverPublish</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  MAGOBSERVEDPRESENT* present,
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target,
+  <span class='tp'>UINT64</span> qpc)
+{
+    <span class='kw'>if</span> (!core || !present || target &lt;= MAG_PRESENT_AUTO ||
+        target &gt;= MAG_PRESENT_COUNT || qpc &lt; core-&gt;resetQpc ||
+        (present-&gt;hWnd &amp;&amp; core-&gt;expectedWindow &amp;&amp;
+         present-&gt;hWnd != core-&gt;expectedWindow))
+    {
+      <span class='kw'>return</span>;
+    }
+    present-&gt;target = target;
+    present-&gt;qpc = <span class='fn'>max</span>(present-&gt;qpc, qpc);
+    core-&gt;latestTarget = target;
+    core-&gt;latestQpc = qpc;
+    core-&gt;latestSequence = ++core-&gt;nextObservationSequence;
+    core-&gt;latestValid = TRUE;
+}
+
+<span class='kw'>static</span> MAGOBSERVERSUBMITMAPPING* <span class='fn'>magObserverChooseSubmitMapping</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT</span> submitSequence)
+{
+    MAGOBSERVERSUBMITMAPPING* selected = NULL;
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;submits); ++index)
+    {
+      MAGOBSERVERSUBMITMAPPING* mapping = &amp;core-&gt;submits[index];
+
+      <span class='kw'>if</span> (mapping-&gt;used &amp;&amp; mapping-&gt;submitSequence == submitSequence)
+      {
+        <span class='kw'>return</span> mapping;
+      }
+      <span class='kw'>if</span> (!mapping-&gt;used)
+      {
+        <span class='kw'>return</span> mapping;
+      }
+      <span class='kw'>if</span> (!selected || mapping-&gt;qpc &lt; selected-&gt;qpc)
+      {
+        selected = mapping;
+      }
+    }
+    <span class='kw'>return</span> selected;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverMapSubmit</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  MAGOBSERVEDPRESENT* present,
+  <span class='tp'>UINT</span> submitSequence,
+  <span class='tp'>UINT64</span> qpc)
+{
+    MAGOBSERVERSUBMITMAPPING* mapping;
+
+    <span class='kw'>if</span> (!core || !present || !submitSequence)
+    {
+      <span class='kw'>return</span>;
+    }
+    mapping = <span class='fn'>magObserverChooseSubmitMapping</span>(core, submitSequence);
+    <span class='kw'>if</span> (!mapping)
+    {
+      <span class='kw'>return</span>;
+    }
+    mapping-&gt;used = TRUE;
+    mapping-&gt;submitSequence = submitSequence;
+    mapping-&gt;presentIndex = <span class='fn'>magObserverPresentIndex</span>(core, present);
+    mapping-&gt;presentGeneration = present-&gt;generation;
+    mapping-&gt;qpc = qpc;
+    present-&gt;submitSequence = submitSequence;
+}
+
+<span class='kw'>static</span> MAGOBSERVEDPRESENT* <span class='fn'>magObserverFindSubmit</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT</span> submitSequence)
+{
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!core || !submitSequence)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;submits); ++index)
+    {
+      <span class='kw'>const</span> MAGOBSERVERSUBMITMAPPING* mapping = &amp;core-&gt;submits[index];
+
+      <span class='kw'>if</span> (mapping-&gt;used &amp;&amp; mapping-&gt;submitSequence == submitSequence &amp;&amp;
+          mapping-&gt;presentIndex &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;presents))
+      {
+        MAGOBSERVEDPRESENT* present = &amp;core-&gt;presents[mapping-&gt;presentIndex];
+
+        <span class='kw'>if</span> (present-&gt;used &amp;&amp;
+            present-&gt;generation == mapping-&gt;presentGeneration)
+        {
+          <span class='kw'>return</span> present;
+        }
+      }
+    }
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> MAGOBSERVERTOKENMAPPING* <span class='fn'>magObserverChooseTokenMapping</span>(
+  MAGOBSERVERTOKENMAPPING* mappings,
+  <span class='tp'>UINT</span> <span class='tp'>count</span>,
+  <span class='tp'>UINT64</span> first,
+  <span class='tp'>UINT64</span> second,
+  <span class='tp'>UINT64</span> third)
+{
+    MAGOBSERVERTOKENMAPPING* selected = NULL;
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; <span class='tp'>count</span>; ++index)
+    {
+      MAGOBSERVERTOKENMAPPING* mapping = &amp;mappings[index];
+
+      <span class='kw'>if</span> (mapping-&gt;used &amp;&amp; mapping-&gt;first == first &amp;&amp;
+          mapping-&gt;second == second &amp;&amp; mapping-&gt;third == third)
+      {
+        <span class='kw'>return</span> mapping;
+      }
+      <span class='kw'>if</span> (!mapping-&gt;used)
+      {
+        <span class='kw'>return</span> mapping;
+      }
+      <span class='kw'>if</span> (!selected || mapping-&gt;qpc &lt; selected-&gt;qpc)
+      {
+        selected = mapping;
+      }
+    }
+    <span class='kw'>return</span> selected;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverMapToken</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  MAGOBSERVERTOKENMAPPING* mappings,
+  <span class='tp'>UINT</span> mappingCount,
+  MAGOBSERVEDPRESENT* present,
+  <span class='tp'>UINT64</span> first,
+  <span class='tp'>UINT64</span> second,
+  <span class='tp'>UINT64</span> third,
+  <span class='tp'>UINT64</span> qpc)
+{
+    MAGOBSERVERTOKENMAPPING* mapping;
+
+    <span class='kw'>if</span> (!core || !mappings || !present || !first)
+    {
+      <span class='kw'>return</span>;
+    }
+    mapping = <span class='fn'>magObserverChooseTokenMapping</span>(
+      mappings,
+      mappingCount,
+      first,
+      second,
+      third);
+    <span class='kw'>if</span> (!mapping)
+    {
+      <span class='kw'>return</span>;
+    }
+    mapping-&gt;used = TRUE;
+    mapping-&gt;first = first;
+    mapping-&gt;second = second;
+    mapping-&gt;third = third;
+    mapping-&gt;presentIndex = <span class='fn'>magObserverPresentIndex</span>(core, present);
+    mapping-&gt;presentGeneration = present-&gt;generation;
+    mapping-&gt;qpc = qpc;
+}
+
+<span class='kw'>static</span> MAGOBSERVEDPRESENT* <span class='fn'>magObserverFindToken</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='kw'>const</span> MAGOBSERVERTOKENMAPPING* mappings,
+  <span class='tp'>UINT</span> mappingCount,
+  <span class='tp'>UINT64</span> first,
+  <span class='tp'>UINT64</span> second,
+  <span class='tp'>UINT64</span> third)
+{
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!core || !mappings || !first)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; mappingCount; ++index)
+    {
+      <span class='kw'>const</span> MAGOBSERVERTOKENMAPPING* mapping = &amp;mappings[index];
+
+      <span class='kw'>if</span> (mapping-&gt;used &amp;&amp; mapping-&gt;first == first &amp;&amp;
+          mapping-&gt;second == second &amp;&amp; mapping-&gt;third == third &amp;&amp;
+          mapping-&gt;presentIndex &lt; <span class='fn'>ARRAYSIZE</span>(core-&gt;presents))
+      {
+        MAGOBSERVEDPRESENT* present = &amp;core-&gt;presents[mapping-&gt;presentIndex];
+
+        <span class='kw'>if</span> (present-&gt;used &amp;&amp;
+            present-&gt;generation == mapping-&gt;presentGeneration)
+        {
+          <span class='kw'>return</span> present;
+        }
+      }
+    }
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnFlip</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (!core || processId != core-&gt;processId)
+    {
+      <span class='kw'>return</span>;
+    }
+    present = <span class='fn'>magObserverBeginPresent</span>(core, threadId, qpc);
+    <span class='fn'>magObserverPublish</span>(core, present, MAG_PRESENT_HARDWARE_LEGACY_FLIP, qpc);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnBlit</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>BOOL</span> redirected)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (!core || processId != core-&gt;processId ||
+        (hWnd &amp;&amp; core-&gt;expectedWindow &amp;&amp; hWnd != core-&gt;expectedWindow))
+    {
+      <span class='kw'>return</span>;
+    }
+    present = <span class='fn'>magObserverBeginPresent</span>(core, threadId, qpc);
+    <span class='kw'>if</span> (present)
+    {
+      present-&gt;hWnd = hWnd;
+      present-&gt;target = redirected
+        ? MAG_PRESENT_COMPOSED_COPY_CPU_GDI
+        : MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER;
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnPresentHistory</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT64</span> token,
+  <span class='tp'>UINT</span> model)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindOrBeginPresent</span>(
+      core,
+      processId,
+      threadId,
+      qpc);
+
+    <span class='kw'>if</span> (!present)
+    {
+      <span class='kw'>return</span>;
+    }
+    present-&gt;qpc = qpc;
+    present-&gt;historyToken = token;
+    <span class='fn'>magObserverMapToken</span>(
+      core,
+      core-&gt;historyTokens,
+      <span class='fn'>ARRAYSIZE</span>(core-&gt;historyTokens),
+      present,
+      token,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      qpc);
+
+    <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == present-&gt;target &amp;&amp;
+        (<span class='mc'>MAG_D3DKMT_PM_UNINITIALIZED</span> == model ||
+         <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_BLT</span> == model))
+    {
+      present-&gt;target = MAG_PRESENT_COMPOSED_COPY_GPU_GDI;
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (MAG_PRESENT_AUTO == present-&gt;target)
+    {
+      <span class='kw'>switch</span> (model)
+      {
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_GDI</span>:
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_VISTABLT</span>:
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_GDI_SYSMEM</span>:
+        present-&gt;target = MAG_PRESENT_COMPOSED_COPY_CPU_GDI;
+        <span class='kw'>break</span>;
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_BLT</span>:
+        present-&gt;target = MAG_PRESENT_COMPOSED_COPY_GPU_GDI;
+        <span class='kw'>break</span>;
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_FLIP</span>:
+      <span class='kw'>case</span> <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_COMPOSITION</span>:
+      <span class='kw'>default</span>:
+        present-&gt;target = MAG_PRESENT_COMPOSED_FLIP;
+        <span class='kw'>break</span>;
+      }
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnPresentHistoryInfo</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT64</span> token,
+  <span class='tp'>BOOL</span> publishComposedFlip)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindToken</span>(
+      core,
+      core-&gt;historyTokens,
+      <span class='fn'>ARRAYSIZE</span>(core-&gt;historyTokens),
+      token,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>);
+
+    <span class='kw'>if</span> (present &amp;&amp; (MAG_PRESENT_COMPOSED_COPY_GPU_GDI == present-&gt;target ||
+                    MAG_PRESENT_COMPOSED_COPY_CPU_GDI == present-&gt;target))
+    {
+      <span class='fn'>magObserverPublish</span>(core, present, present-&gt;target, qpc);
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (present &amp;&amp; publishComposedFlip &amp;&amp;
+             MAG_PRESENT_COMPOSED_FLIP == present-&gt;target)
+    {
+      <span class='cm'>/* A DxgKrnl-only session cannot receive the Win32k token-state event
+         that distinguishes composed from independent flip.  Publish the
+         composed result here; a later DxgKrnl IndependentFlip/MPO event can
+         still promote the same present to the hardware path. */</span>
+      <span class='fn'>magObserverPublish</span>(core, present, present-&gt;target, qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnPresentInfo</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>HWND</span> hWnd)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (!core || processId != core-&gt;processId)
+    {
+      <span class='kw'>return</span>;
+    }
+    present = <span class='fn'>magObserverFindThreadPresent</span>(core, threadId);
+    <span class='kw'>if</span> (!present)
+    {
+      <span class='kw'>return</span>;
+    }
+    present-&gt;hWnd = hWnd;
+    <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == present-&gt;target ||
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI == present-&gt;target ||
+        MAG_PRESENT_COMPOSED_COPY_CPU_GDI == present-&gt;target)
+    {
+      <span class='fn'>magObserverPublish</span>(core, present, present-&gt;target, qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnQueueSubmit</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT</span> submitSequence)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindOrBeginPresent</span>(
+      core,
+      processId,
+      threadId,
+      qpc);
+
+    <span class='fn'>magObserverMapSubmit</span>(core, present, submitSequence, qpc);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnQueueComplete</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT</span> submitSequence)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindSubmit</span>(core, submitSequence);
+
+    <span class='kw'>if</span> (present &amp;&amp; (MAG_PRESENT_HARDWARE_LEGACY_FLIP == present-&gt;target ||
+                    MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == present-&gt;target))
+    {
+      <span class='fn'>magObserverPublish</span>(core, present, present-&gt;target, qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnIndependentFlip</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT</span> submitSequence)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindSubmit</span>(core, submitSequence);
+
+    <span class='kw'>if</span> (present)
+    {
+      <span class='fn'>magObserverPublish</span>(
+        core,
+        present,
+        MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP,
+        qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnMultiPlaneSync</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT</span> submitSequence,
+  <span class='tp'>UINT</span> activePlaneCount)
+{
+    MAGOBSERVEDPRESENT* present = <span class='fn'>magObserverFindSubmit</span>(core, submitSequence);
+
+    <span class='kw'>if</span> (!present)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (activePlaneCount &gt; <span class='num'>1</span> &amp;&amp;
+        (MAG_PRESENT_COMPOSED_FLIP == present-&gt;target ||
+         MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == present-&gt;target))
+    {
+      <span class='fn'>magObserverPublish</span>(
+        core,
+        present,
+        MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP,
+        qpc);
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (MAG_PRESENT_AUTO != present-&gt;target)
+    {
+      <span class='fn'>magObserverPublish</span>(core, present, present-&gt;target, qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnCompositionToken</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>DWORD</span> processId,
+  <span class='tp'>DWORD</span> threadId,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT64</span> surfaceLuid,
+  <span class='tp'>UINT64</span> presentCount,
+  <span class='tp'>UINT64</span> bindId)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (!core || processId != core-&gt;processId)
+    {
+      <span class='kw'>return</span>;
+    }
+    present = <span class='fn'>magObserverBeginPresent</span>(core, threadId, qpc);
+    <span class='kw'>if</span> (!present)
+    {
+      <span class='kw'>return</span>;
+    }
+    present-&gt;compositionSurfaceLuid = surfaceLuid;
+    present-&gt;compositionPresentCount = presentCount;
+    present-&gt;compositionBindId = bindId;
+    present-&gt;target = MAG_PRESENT_COMPOSED_FLIP;
+    <span class='fn'>magObserverMapToken</span>(
+      core,
+      core-&gt;compositionTokens,
+      <span class='fn'>ARRAYSIZE</span>(core-&gt;compositionTokens),
+      present,
+      surfaceLuid,
+      presentCount,
+      bindId,
+      qpc);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverOnTokenState</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>UINT64</span> qpc,
+  <span class='tp'>UINT64</span> surfaceLuid,
+  <span class='tp'>UINT64</span> presentCount,
+  <span class='tp'>UINT64</span> bindId,
+  <span class='tp'>UINT</span> newState,
+  <span class='tp'>BOOL</span> independentFlip)
+{
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (<span class='mc'>MAG_WIN32K_TOKEN_STATE_IN_FRAME</span> != newState)
+    {
+      <span class='kw'>return</span>;
+    }
+    present = <span class='fn'>magObserverFindToken</span>(
+      core,
+      core-&gt;compositionTokens,
+      <span class='fn'>ARRAYSIZE</span>(core-&gt;compositionTokens),
+      surfaceLuid,
+      presentCount,
+      bindId);
+    <span class='kw'>if</span> (present)
+    {
+      <span class='fn'>magObserverPublish</span>(
+        core,
+        present,
+        independentFlip
+          ? MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP
+          : MAG_PRESENT_COMPOSED_FLIP,
+        qpc);
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverReadProperty</span>(
+  <span class='kw'>const</span> EVENT_RECORD* record,
+  <span class='tp'>LPCWSTR</span> name,
+  <span class='tp'>ULONG</span> arrayIndex,
+  <span class='kw'>void</span>* value,
+  <span class='tp'>ULONG</span> valueCapacity,
+  <span class='tp'>ULONG</span>* valueSize)
+{
+    PROPERTY_DATA_DESCRIPTOR descriptor = { <span class='num'>0</span> };
+    <span class='tp'>ULONG</span> size = <span class='num'>0</span>;
+    <span class='tp'>ULONG</span> status;
+
+    <span class='kw'>if</span> (!record || !name || !value || !valueCapacity)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    descriptor.PropertyName = (ULONGLONG)(ULONG_PTR)name;
+    descriptor.ArrayIndex = arrayIndex;
+    status = <span class='fn'>TdhGetPropertySize</span>(
+      (PEVENT_RECORD)record,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>1</span>,
+      &amp;descriptor,
+      &amp;size);
+    <span class='kw'>if</span> (ERROR_SUCCESS != status || !size || size &gt; valueCapacity)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>ZeroMemory</span>(value, valueCapacity);
+    status = <span class='fn'>TdhGetProperty</span>(
+      (PEVENT_RECORD)record,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>1</span>,
+      &amp;descriptor,
+      size,
+      (PBYTE)value);
+    <span class='kw'>if</span> (ERROR_SUCCESS == status &amp;&amp; valueSize)
+    {
+      *valueSize = size;
+    }
+    <span class='kw'>return</span> ERROR_SUCCESS == status;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverReadU64Index</span>(
+  <span class='kw'>const</span> EVENT_RECORD* record,
+  <span class='tp'>LPCWSTR</span> name,
+  <span class='tp'>ULONG</span> arrayIndex,
+  <span class='tp'>UINT64</span>* value)
+{
+    <span class='tp'>BYTE</span> storage[<span class='num'>8</span>];
+    <span class='tp'>ULONG</span> size = <span class='num'>0</span>;
+
+    <span class='kw'>if</span> (!value || !<span class='fn'>magObserverReadProperty</span>(
+          record,
+          name,
+          arrayIndex,
+          storage,
+          <span class='kw'>sizeof</span>(storage),
+          &amp;size))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *value = <span class='num'>0</span>;
+    <span class='fn'>CopyMemory</span>(value, storage, <span class='fn'>min</span>(size, (<span class='tp'>ULONG</span>)<span class='kw'>sizeof</span>(*value)));
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverReadU64</span>(
+  <span class='kw'>const</span> EVENT_RECORD* record,
+  <span class='tp'>LPCWSTR</span> name,
+  <span class='tp'>UINT64</span>* value)
+{
+    <span class='kw'>return</span> <span class='fn'>magObserverReadU64Index</span>(record, name, ULONG_MAX, value);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverReadU32Index</span>(
+  <span class='kw'>const</span> EVENT_RECORD* record,
+  <span class='tp'>LPCWSTR</span> name,
+  <span class='tp'>ULONG</span> arrayIndex,
+  <span class='tp'>UINT</span>* value)
+{
+    <span class='tp'>UINT64</span> wide = <span class='num'>0</span>;
+
+    <span class='kw'>if</span> (!value || !<span class='fn'>magObserverReadU64Index</span>(record, name, arrayIndex, &amp;wide))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *value = (<span class='tp'>UINT</span>)wide;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverReadU32</span>(
+  <span class='kw'>const</span> EVENT_RECORD* record,
+  <span class='tp'>LPCWSTR</span> name,
+  <span class='tp'>UINT</span>* value)
+{
+    <span class='kw'>return</span> <span class='fn'>magObserverReadU32Index</span>(record, name, ULONG_MAX, value);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverHandleDxgKrnl</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='kw'>const</span> EVENT_RECORD* record)
+{
+    <span class='kw'>const</span> EVENT_HEADER* header = &amp;record-&gt;EventHeader;
+    <span class='kw'>const</span> <span class='tp'>UINT</span> eventId = header-&gt;EventDescriptor.Id;
+    <span class='kw'>const</span> <span class='tp'>UINT64</span> qpc = (<span class='tp'>UINT64</span>)header-&gt;TimeStamp.QuadPart;
+
+    <span class='kw'>switch</span> (eventId)
+    {
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_FLIP</span>:
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_FLIP_MPO</span>:
+      <span class='fn'>magObserverOnFlip</span>(
+        core,
+        header-&gt;ProcessId,
+        header-&gt;ThreadId,
+        qpc);
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_BLIT</span>:
+      {
+        <span class='tp'>UINT64</span> window = <span class='num'>0</span>;
+        <span class='tp'>UINT</span> redirected = <span class='num'>0</span>;
+
+        <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;hwnd&quot;</span>, &amp;window);
+        <span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;bRedirectedPresent&quot;</span>, &amp;redirected);
+        <span class='fn'>magObserverOnBlit</span>(
+          core,
+          header-&gt;ProcessId,
+          header-&gt;ThreadId,
+          qpc,
+          (<span class='tp'>HWND</span>)(ULONG_PTR)window,
+          <span class='num'>0</span> != redirected);
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_START</span>:
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_DETAILED_START</span>:
+      {
+        <span class='tp'>UINT64</span> token = <span class='num'>0</span>;
+        <span class='tp'>UINT</span> model = <span class='mc'>MAG_D3DKMT_PM_UNINITIALIZED</span>;
+
+        <span class='kw'>if</span> (<span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;Token&quot;</span>, &amp;token) &amp;&amp;
+            <span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;Model&quot;</span>, &amp;model))
+        {
+          <span class='fn'>magObserverOnPresentHistory</span>(
+            core,
+            header-&gt;ProcessId,
+            header-&gt;ThreadId,
+            qpc,
+            token,
+            model);
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_INFO</span>:
+      {
+        <span class='tp'>UINT64</span> token = <span class='num'>0</span>;
+
+        <span class='kw'>if</span> (<span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;Token&quot;</span>, &amp;token))
+        {
+          <span class='fn'>magObserverOnPresentHistoryInfo</span>(
+            core,
+            qpc,
+            token,
+            !g_observer.win32kEnabled);
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_PRESENT_INFO</span>:
+      {
+        <span class='tp'>UINT64</span> window = <span class='num'>0</span>;
+
+        <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;hWindow&quot;</span>, &amp;window);
+        <span class='fn'>magObserverOnPresentInfo</span>(
+          core,
+          header-&gt;ProcessId,
+          header-&gt;ThreadId,
+          qpc,
+          (<span class='tp'>HWND</span>)(ULONG_PTR)window);
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_START</span>:
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_START_2</span>:
+      {
+        <span class='tp'>UINT</span> submitSequence = <span class='num'>0</span>;
+
+        <span class='kw'>if</span> (<span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;SubmitSequence&quot;</span>, &amp;submitSequence))
+        {
+          <span class='fn'>magObserverOnQueueSubmit</span>(
+            core,
+            header-&gt;ProcessId,
+            header-&gt;ThreadId,
+            qpc,
+            submitSequence);
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_STOP</span>:
+      {
+        <span class='tp'>UINT</span> submitSequence = <span class='num'>0</span>;
+
+        <span class='kw'>if</span> (<span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;SubmitSequence&quot;</span>, &amp;submitSequence))
+        {
+          <span class='fn'>magObserverOnQueueComplete</span>(core, qpc, submitSequence);
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_INDEPENDENT_FLIP</span>:
+      {
+        <span class='tp'>UINT</span> submitSequence = <span class='num'>0</span>;
+
+        <span class='kw'>if</span> (<span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;SubmitSequence&quot;</span>, &amp;submitSequence))
+        {
+          <span class='fn'>magObserverOnIndependentFlip</span>(core, qpc, submitSequence);
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_VSYNC_DPC_MPO</span>:
+    <span class='kw'>case</span> <span class='mc'>MAG_DXGK_EVENT_HSYNC_DPC_MPO</span>:
+      {
+        <span class='tp'>UINT</span> planeCount = <span class='num'>0</span>;
+        <span class='tp'>UINT</span> flipEntryCount = <span class='num'>0</span>;
+        <span class='tp'>UINT</span> activePlaneCount = <span class='num'>0</span>;
+        <span class='tp'>UINT</span> index;
+
+        <span class='kw'>if</span> (!<span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;PlaneCount&quot;</span>, &amp;planeCount) ||
+            !<span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;FlipEntryCount&quot;</span>, &amp;flipEntryCount))
+        {
+          <span class='kw'>break</span>;
+        }
+        planeCount = <span class='fn'>min</span>(planeCount, <span class='num'>32U</span>);
+        flipEntryCount = <span class='fn'>min</span>(flipEntryCount, <span class='num'>32U</span>);
+        <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; planeCount; ++index)
+        {
+          <span class='tp'>UINT64</span> address = <span class='num'>0</span>;
+          <span class='tp'>LPCWSTR</span> addressName =
+            <span class='mc'>MAG_DXGK_EVENT_VSYNC_DPC_MPO</span> == eventId &amp;&amp;
+            header-&gt;EventDescriptor.Version &gt;= <span class='num'>1</span>
+              ? L<span class='str'>&quot;PresentIdOrPhysicalAddress&quot;</span>
+              : L<span class='str'>&quot;ScannedPhysicalAddress&quot;</span>;
+
+          <span class='kw'>if</span> (<span class='fn'>magObserverReadU64Index</span>(record, addressName, index, &amp;address) &amp;&amp;
+              address)
+          {
+            ++activePlaneCount;
+          }
+        }
+        <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; flipEntryCount; ++index)
+        {
+          <span class='tp'>UINT64</span> packedSequence = <span class='num'>0</span>;
+
+          <span class='kw'>if</span> (<span class='fn'>magObserverReadU64Index</span>(
+                record,
+                L<span class='str'>&quot;FlipSubmitSequence&quot;</span>,
+                index,
+                &amp;packedSequence) &amp;&amp;
+              packedSequence)
+          {
+            <span class='fn'>magObserverOnMultiPlaneSync</span>(
+              core,
+              qpc,
+              (<span class='tp'>UINT</span>)(packedSequence &gt;&gt; <span class='num'>32</span>),
+              activePlaneCount);
+          }
+        }
+      }
+      <span class='kw'>break</span>;
+
+    <span class='kw'>default</span>:
+      <span class='kw'>break</span>;
+    }
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverHandleWin32k</span>(
+  MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='kw'>const</span> EVENT_RECORD* record)
+{
+    <span class='kw'>const</span> EVENT_HEADER* header = &amp;record-&gt;EventHeader;
+    <span class='kw'>const</span> <span class='tp'>UINT64</span> qpc = (<span class='tp'>UINT64</span>)header-&gt;TimeStamp.QuadPart;
+
+    <span class='kw'>if</span> (<span class='mc'>MAG_WIN32K_EVENT_TOKEN_COMPOSITION</span> == header-&gt;EventDescriptor.Id)
+    {
+      <span class='tp'>UINT64</span> surfaceLuid = <span class='num'>0</span>;
+      <span class='tp'>UINT64</span> presentCount = <span class='num'>0</span>;
+      <span class='tp'>UINT64</span> bindId = <span class='num'>0</span>;
+
+      <span class='kw'>if</span> (<span class='fn'>magObserverReadU64</span>(
+            record,
+            L<span class='str'>&quot;CompositionSurfaceLuid&quot;</span>,
+            &amp;surfaceLuid) &amp;&amp;
+          <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;PresentCount&quot;</span>, &amp;presentCount) &amp;&amp;
+          <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;BindId&quot;</span>, &amp;bindId))
+      {
+        <span class='fn'>magObserverOnCompositionToken</span>(
+          core,
+          header-&gt;ProcessId,
+          header-&gt;ThreadId,
+          qpc,
+          surfaceLuid,
+          presentCount,
+          bindId);
+      }
+    }
+    <span class='kw'>else</span> <span class='kw'>if</span> (<span class='mc'>MAG_WIN32K_EVENT_TOKEN_STATE</span> == header-&gt;EventDescriptor.Id)
+    {
+      <span class='tp'>UINT64</span> surfaceLuid = <span class='num'>0</span>;
+      <span class='tp'>UINT64</span> presentCount = <span class='num'>0</span>;
+      <span class='tp'>UINT64</span> bindId = <span class='num'>0</span>;
+      <span class='tp'>UINT</span> newState = <span class='num'>0</span>;
+      <span class='tp'>UINT</span> independentFlip = <span class='num'>0</span>;
+
+      <span class='kw'>if</span> (<span class='fn'>magObserverReadU64</span>(
+            record,
+            L<span class='str'>&quot;CompositionSurfaceLuid&quot;</span>,
+            &amp;surfaceLuid) &amp;&amp;
+          <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;PresentCount&quot;</span>, &amp;presentCount) &amp;&amp;
+          <span class='fn'>magObserverReadU64</span>(record, L<span class='str'>&quot;BindId&quot;</span>, &amp;bindId) &amp;&amp;
+          <span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;NewState&quot;</span>, &amp;newState))
+      {
+        <span class='fn'>magObserverReadU32</span>(record, L<span class='str'>&quot;IndependentFlip&quot;</span>, &amp;independentFlip);
+        <span class='fn'>magObserverOnTokenState</span>(
+          core,
+          qpc,
+          surfaceLuid,
+          presentCount,
+          bindId,
+          newState,
+          <span class='num'>0</span> != independentFlip);
+      }
+    }
+}
+
+<span class='kw'>static</span> VOID <span class='kw'>WINAPI</span> <span class='fn'>magObserverEventRecord</span>(EVENT_RECORD* record)
+{
+    MAGPRESENTATIONOBSERVER* observer = record
+      ? (MAGPRESENTATIONOBSERVER*)record-&gt;UserContext
+      : NULL;
+
+    <span class='kw'>if</span> (!observer)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='fn'>AcquireSRWLockExclusive</span>(&amp;observer-&gt;lock);
+    <span class='kw'>if</span> (observer-&gt;<span class='tp'>active</span>)
+    {
+      <span class='kw'>if</span> (<span class='fn'>magObserverGuidEqual</span>(
+            &amp;record-&gt;EventHeader.ProviderId,
+            &amp;MAG_PROVIDER_DXGKRNL))
+      {
+        <span class='fn'>magObserverHandleDxgKrnl</span>(&amp;observer-&gt;core, record);
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (<span class='fn'>magObserverGuidEqual</span>(
+                 &amp;record-&gt;EventHeader.ProviderId,
+                 &amp;MAG_PROVIDER_WIN32K))
+      {
+        <span class='fn'>magObserverHandleWin32k</span>(&amp;observer-&gt;core, record);
+      }
+    }
+    <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;observer-&gt;lock);
+}
+
+<span class='kw'>static</span> <span class='tp'>DWORD</span> <span class='kw'>WINAPI</span> <span class='fn'>magObserverThread</span>(<span class='kw'>void</span>* context)
+{
+    MAGPRESENTATIONOBSERVER* observer =
+      (MAGPRESENTATIONOBSERVER*)context;
+    TRACEHANDLE trace;
+
+    <span class='kw'>if</span> (!observer)
+    {
+      <span class='kw'>return</span> ERROR_INVALID_PARAMETER;
+    }
+    <span class='fn'>AcquireSRWLockShared</span>(&amp;observer-&gt;lock);
+    trace = observer-&gt;trace;
+    <span class='fn'>ReleaseSRWLockShared</span>(&amp;observer-&gt;lock);
+    <span class='kw'>return</span> (<span class='tp'>DWORD</span>)<span class='fn'>ProcessTrace</span>(&amp;trace, <span class='num'>1</span>, NULL, NULL);
+}
+
+<span class='kw'>static</span> <span class='tp'>ULONG</span> <span class='fn'>magObserverEnableProvider</span>(
+  TRACEHANDLE session,
+  <span class='kw'>const</span> GUID* provider,
+  <span class='kw'>const</span> USHORT* eventIds,
+  <span class='tp'>UINT</span> eventIdCount)
+{
+    <span class='tp'>BYTE</span> filterStorage[
+      <span class='kw'>sizeof</span>(EVENT_FILTER_EVENT_ID) +
+      (MAX_EVENT_FILTER_EVENT_ID_COUNT - <span class='num'>1</span>) * <span class='kw'>sizeof</span>(USHORT)];
+    EVENT_FILTER_EVENT_ID* filter =
+      (EVENT_FILTER_EVENT_ID*)filterStorage;
+    EVENT_FILTER_DESCRIPTOR descriptor = { <span class='num'>0</span> };
+    ENABLE_TRACE_PARAMETERS parameters = { <span class='num'>0</span> };
+    <span class='tp'>UINT</span> index;
+
+    <span class='kw'>if</span> (!provider || !eventIds || !eventIdCount ||
+        eventIdCount &gt; MAX_EVENT_FILTER_EVENT_ID_COUNT)
+    {
+      <span class='kw'>return</span> ERROR_INVALID_PARAMETER;
+    }
+    <span class='fn'>ZeroMemory</span>(filterStorage, <span class='kw'>sizeof</span>(filterStorage));
+    filter-&gt;FilterIn = TRUE;
+    filter-&gt;Count = (USHORT)eventIdCount;
+    <span class='kw'>for</span> (index = <span class='num'>0</span>; index &lt; eventIdCount; ++index)
+    {
+      filter-&gt;Events[index] = eventIds[index];
+    }
+    descriptor.Ptr = (ULONGLONG)(ULONG_PTR)filter;
+    descriptor.Size = <span class='kw'>sizeof</span>(EVENT_FILTER_EVENT_ID) +
+      (eventIdCount - <span class='num'>1U</span>) * <span class='kw'>sizeof</span>(USHORT);
+    descriptor.Type = EVENT_FILTER_TYPE_EVENT_ID;
+    parameters.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
+    parameters.EnableProperty = EVENT_ENABLE_PROPERTY_IGNORE_KEYWORD_0;
+    parameters.EnableFilterDesc = &amp;descriptor;
+    parameters.FilterDescCount = <span class='num'>1</span>;
+    <span class='kw'>return</span> <span class='fn'>EnableTraceEx2</span>(
+      session,
+      provider,
+      EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+      TRACE_LEVEL_VERBOSE,
+      MAXUINT64,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      &amp;parameters);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magObserverStopSession</span>(
+  TRACEHANDLE session,
+  TRACEHANDLE trace,
+  EVENT_TRACE_PROPERTIES* properties,
+  <span class='tp'>HANDLE</span> thread)
+{
+    <span class='kw'>if</span> (session &amp;&amp; properties)
+    {
+      <span class='fn'>ControlTrace</span>(session, NULL, properties, EVENT_TRACE_CONTROL_STOP);
+    }
+    <span class='kw'>if</span> (trace &amp;&amp; INVALID_PROCESSTRACE_HANDLE != trace)
+    {
+      <span class='fn'>CloseTrace</span>(trace);
+    }
+    <span class='kw'>if</span> (thread)
+    {
+      <span class='fn'>WaitForSingleObject</span>(thread, <span class='num'>5000</span>);
+      <span class='fn'>CloseHandle</span>(thread);
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationObserverStart</span>(<span class='tp'>HWND</span> hWnd)
+{
+    <span class='kw'>static</span> <span class='kw'>const</span> USHORT dxgKrnlEvents[] =
+    {
+      <span class='mc'>MAG_DXGK_EVENT_BLIT</span>,
+      <span class='mc'>MAG_DXGK_EVENT_FLIP</span>,
+      <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_START</span>,
+      <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_INFO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_START</span>,
+      <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_STOP</span>,
+      <span class='mc'>MAG_DXGK_EVENT_PRESENT_INFO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_PRESENT_HISTORY_DETAILED_START</span>,
+      <span class='mc'>MAG_DXGK_EVENT_QUEUE_PACKET_START_2</span>,
+      <span class='mc'>MAG_DXGK_EVENT_FLIP_MPO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_MMIO_FLIP_MPO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_INDEPENDENT_FLIP</span>,
+      <span class='mc'>MAG_DXGK_EVENT_VSYNC_DPC_MPO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_HSYNC_DPC_MPO</span>,
+      <span class='mc'>MAG_DXGK_EVENT_MMIO_FLIP_MPO3</span>,
+    };
+    <span class='kw'>static</span> <span class='kw'>const</span> USHORT win32kEvents[] =
+    {
+      <span class='mc'>MAG_WIN32K_EVENT_TOKEN_COMPOSITION</span>,
+      <span class='mc'>MAG_WIN32K_EVENT_TOKEN_STATE</span>,
+    };
+    EVENT_TRACE_LOGFILE log = { <span class='num'>0</span> };
+    EVENT_TRACE_PROPERTIES* properties;
+    TRACEHANDLE session = <span class='num'>0</span>;
+    TRACEHANDLE trace = INVALID_PROCESSTRACE_HANDLE;
+    <span class='tp'>HANDLE</span> thread = NULL;
+    <span class='tp'>ULONG</span> result;
+    <span class='tp'>ULONG</span> startTraceResult;
+    <span class='tp'>ULONG</span> openTraceResult = ERROR_NOT_READY;
+    <span class='tp'>ULONG</span> dxgKrnlResult = ERROR_NOT_SUPPORTED;
+    <span class='tp'>ULONG</span> win32kResult = ERROR_NOT_SUPPORTED;
+    <span class='kw'>const</span> <span class='tp'>ULONG</span> propertySize = <span class='kw'>sizeof</span>(*properties) +
+      <span class='mc'>MAG_OBSERVER_SESSION_NAME_COUNT</span> * <span class='kw'>sizeof</span>(<span class='tp'>WCHAR</span>);
+
+    <span class='kw'>if</span> (!hWnd)
+    {
+      <span class='fn'>SetLastError</span>(ERROR_INVALID_WINDOW_HANDLE);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+    <span class='kw'>if</span> (g_observer.<span class='tp'>active</span>)
+    {
+      <span class='fn'>magObserverCoreReset</span>(&amp;g_observer.core, hWnd, <span class='fn'>magObserverQpc</span>());
+      <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+
+    properties = (EVENT_TRACE_PROPERTIES*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      propertySize);
+    <span class='kw'>if</span> (!properties)
+    {
+      <span class='fn'>SetLastError</span>(ERROR_NOT_ENOUGH_MEMORY);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>_snwprintf_s</span>(
+      g_observer.sessionName,
+      <span class='fn'>ARRAYSIZE</span>(g_observer.sessionName),
+      _TRUNCATE,
+      L<span class='str'>&quot;Mag-Presentation-%lu-%llu&quot;</span>,
+      <span class='fn'>GetCurrentProcessId</span>(),
+      <span class='fn'>GetTickCount64</span>());
+    properties-&gt;Wnode.BufferSize = propertySize;
+    properties-&gt;Wnode.ClientContext = <span class='num'>1</span>;
+    properties-&gt;Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+    properties-&gt;BufferSize = <span class='num'>64</span>;
+    properties-&gt;MinimumBuffers = <span class='num'>2</span>;
+    properties-&gt;MaximumBuffers = <span class='num'>8</span>;
+    properties-&gt;FlushTimer = <span class='num'>1</span>;
+    properties-&gt;LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+    properties-&gt;LoggerNameOffset = <span class='kw'>sizeof</span>(*properties);
+    <span class='fn'>lstrcpynW</span>(
+      (<span class='tp'>LPWSTR</span>)((<span class='tp'>BYTE</span>*)properties + properties-&gt;LoggerNameOffset),
+      g_observer.sessionName,
+      <span class='mc'>MAG_OBSERVER_SESSION_NAME_COUNT</span>);
+
+    startTraceResult = <span class='fn'>StartTrace</span>(&amp;session, g_observer.sessionName, properties);
+    result = startTraceResult;
+    <span class='kw'>if</span> (ERROR_SUCCESS == result)
+    {
+      dxgKrnlResult = <span class='fn'>magObserverEnableProvider</span>(
+        session,
+        &amp;MAG_PROVIDER_DXGKRNL,
+        dxgKrnlEvents,
+        <span class='fn'>ARRAYSIZE</span>(dxgKrnlEvents));
+      win32kResult = <span class='fn'>magObserverEnableProvider</span>(
+        session,
+        &amp;MAG_PROVIDER_WIN32K,
+        win32kEvents,
+        <span class='fn'>ARRAYSIZE</span>(win32kEvents));
+      result = ERROR_SUCCESS == dxgKrnlResult || ERROR_SUCCESS == win32kResult
+        ? ERROR_SUCCESS
+        : dxgKrnlResult;
+    }
+    <span class='kw'>if</span> (ERROR_SUCCESS == result)
+    {
+      log.LoggerName = g_observer.sessionName;
+      log.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME |
+        PROCESS_TRACE_MODE_EVENT_RECORD |
+        PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+      log.EventRecordCallback = magObserverEventRecord;
+      log.Context = &amp;g_observer;
+      trace = <span class='fn'>OpenTrace</span>(&amp;log);
+      <span class='kw'>if</span> (INVALID_PROCESSTRACE_HANDLE == trace)
+      {
+        openTraceResult = <span class='fn'>GetLastError</span>();
+        result = openTraceResult;
+      }
+      <span class='kw'>else</span>
+      {
+        openTraceResult = ERROR_SUCCESS;
+      }
+    }
+    <span class='kw'>if</span> (ERROR_SUCCESS == result)
+    {
+      <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+      g_observer.session = session;
+      g_observer.trace = trace;
+      g_observer.properties = properties;
+      g_observer.dxgKrnlEnabled = ERROR_SUCCESS == dxgKrnlResult;
+      g_observer.win32kEnabled = ERROR_SUCCESS == win32kResult;
+      g_observer.<span class='tp'>active</span> = TRUE;
+      g_observer.error = ERROR_SUCCESS != dxgKrnlResult
+        ? dxgKrnlResult
+        : win32kResult;
+      g_observer.startTraceError = startTraceResult;
+      g_observer.dxgKrnlError = dxgKrnlResult;
+      g_observer.win32kError = win32kResult;
+      g_observer.openTraceError = openTraceResult;
+      <span class='fn'>magObserverCoreReset</span>(&amp;g_observer.core, hWnd, <span class='fn'>magObserverQpc</span>());
+      <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+      thread = <span class='fn'>CreateThread</span>(NULL, <span class='num'>0</span>, magObserverThread, &amp;g_observer, <span class='num'>0</span>, NULL);
+      <span class='kw'>if</span> (!thread)
+      {
+        result = <span class='fn'>GetLastError</span>();
+      }
+    }
+    <span class='kw'>if</span> (ERROR_SUCCESS == result)
+    {
+      <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+      g_observer.thread = thread;
+      <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+    g_observer.<span class='tp'>active</span> = FALSE;
+    g_observer.dxgKrnlEnabled = FALSE;
+    g_observer.win32kEnabled = FALSE;
+    g_observer.error = result;
+    g_observer.startTraceError = startTraceResult;
+    g_observer.dxgKrnlError = dxgKrnlResult;
+    g_observer.win32kError = win32kResult;
+    g_observer.openTraceError = openTraceResult;
+    g_observer.session = <span class='num'>0</span>;
+    g_observer.trace = INVALID_PROCESSTRACE_HANDLE;
+    g_observer.thread = NULL;
+    g_observer.properties = NULL;
+    <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+    <span class='fn'>magObserverStopSession</span>(session, trace, properties, thread);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, properties);
+    <span class='fn'>SetLastError</span>(result);
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magPresentationObserverStop</span>(<span class='kw'>void</span>)
+{
+    TRACEHANDLE session;
+    TRACEHANDLE trace;
+    <span class='tp'>HANDLE</span> thread;
+    EVENT_TRACE_PROPERTIES* properties;
+
+    <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+    session = g_observer.session;
+    trace = g_observer.trace;
+    thread = g_observer.thread;
+    properties = g_observer.properties;
+    g_observer.<span class='tp'>active</span> = FALSE;
+    g_observer.session = <span class='num'>0</span>;
+    g_observer.trace = INVALID_PROCESSTRACE_HANDLE;
+    g_observer.thread = NULL;
+    g_observer.properties = NULL;
+    g_observer.dxgKrnlEnabled = FALSE;
+    g_observer.win32kEnabled = FALSE;
+    <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+
+    <span class='fn'>magObserverStopSession</span>(session, trace, properties, thread);
+    <span class='kw'>if</span> (properties)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, properties);
+    }
+}
+
+<span class='kw'>void</span> <span class='fn'>magPresentationObserverReset</span>(<span class='tp'>HWND</span> hWnd)
+{
+    <span class='fn'>AcquireSRWLockExclusive</span>(&amp;g_observer.lock);
+    <span class='fn'>magObserverCoreReset</span>(&amp;g_observer.core, hWnd, <span class='fn'>magObserverQpc</span>());
+    <span class='fn'>ReleaseSRWLockExclusive</span>(&amp;g_observer.lock);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationObserverGetLatest</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>MAGPRESENTATIONTARGET</span>* target,
+  <span class='tp'>UINT64</span>* sequence)
+{
+    <span class='tp'>BOOL</span> result = FALSE;
+
+    <span class='kw'>if</span> (!target)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>AcquireSRWLockShared</span>(&amp;g_observer.lock);
+    <span class='kw'>if</span> (g_observer.<span class='tp'>active</span> &amp;&amp; g_observer.core.latestValid &amp;&amp;
+        (!hWnd || !g_observer.core.expectedWindow ||
+         hWnd == g_observer.core.expectedWindow))
+    {
+      *target = g_observer.core.latestTarget;
+      <span class='kw'>if</span> (sequence)
+      {
+        *sequence = g_observer.core.latestSequence;
+      }
+      result = TRUE;
+    }
+    <span class='fn'>ReleaseSRWLockShared</span>(&amp;g_observer.lock);
+    <span class='kw'>return</span> result;
+}
+
+<span class='kw'>void</span> <span class='fn'>magPresentationObserverGetStatus</span>(
+  <span class='tp'>MAGPRESENTATIONOBSERVERSTATUS</span>* status)
+{
+    <span class='kw'>if</span> (!status)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='fn'>AcquireSRWLockShared</span>(&amp;g_observer.lock);
+    status-&gt;<span class='tp'>active</span> = g_observer.<span class='tp'>active</span>;
+    status-&gt;dxgKrnlEnabled = g_observer.dxgKrnlEnabled;
+    status-&gt;win32kEnabled = g_observer.win32kEnabled;
+    status-&gt;error = g_observer.error;
+    status-&gt;startTraceError = g_observer.startTraceError;
+    status-&gt;dxgKrnlError = g_observer.dxgKrnlError;
+    status-&gt;win32kError = g_observer.win32kError;
+    status-&gt;openTraceError = g_observer.openTraceError;
+    <span class='fn'>ReleaseSRWLockShared</span>(&amp;g_observer.lock);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magObserverExpectTarget</span>(
+  <span class='kw'>const</span> MAGPRESENTATIONOBSERVERCORE* core,
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target,
+  <span class='tp'>LPCTSTR</span> testName,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='kw'>if</span> (core &amp;&amp; core-&gt;latestValid &amp;&amp; core-&gt;latestTarget == target)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      <span class='fn'>_sntprintf_s</span>(
+        reason,
+        reasonCount,
+        _TRUNCATE,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation observer classifier failed %s: expected %u, observed %u, valid=%u.&quot;</span>),
+        testName,
+        (<span class='tp'>UINT</span>)target,
+        core ? (<span class='tp'>UINT</span>)core-&gt;latestTarget : <span class='num'>0</span>,
+        core ? core-&gt;latestValid : FALSE);
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationObserverRunClassifierTests</span>(
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount)
+{
+    MAGPRESENTATIONOBSERVERCORE core = { <span class='num'>0</span> };
+    <span class='kw'>const</span> <span class='tp'>DWORD</span> processId = <span class='fn'>GetCurrentProcessId</span>();
+    <span class='kw'>const</span> <span class='tp'>HWND</span> hWnd = (<span class='tp'>HWND</span>)(ULONG_PTR)<span class='num'>0x1234</span>;
+    MAGOBSERVEDPRESENT* present;
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    }
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>1</span>);
+    <span class='fn'>magObserverOnFlip</span>(&amp;core, processId, <span class='num'>10</span>, <span class='num'>2</span>);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_HARDWARE_LEGACY_FLIP,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;legacy flip&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>10</span>);
+    <span class='fn'>magObserverOnBlit</span>(&amp;core, processId, <span class='num'>11</span>, <span class='num'>11</span>, hWnd, FALSE);
+    <span class='fn'>magObserverOnPresentInfo</span>(&amp;core, processId, <span class='num'>11</span>, <span class='num'>12</span>, hWnd);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;legacy copy&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>20</span>);
+    <span class='fn'>magObserverOnBlit</span>(&amp;core, processId, <span class='num'>12</span>, <span class='num'>21</span>, hWnd, FALSE);
+    <span class='fn'>magObserverOnPresentHistory</span>(
+      &amp;core,
+      processId,
+      <span class='num'>12</span>,
+      <span class='num'>22</span>,
+      <span class='num'>0x100</span>,
+      <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_BLT</span>);
+    <span class='fn'>magObserverOnPresentHistoryInfo</span>(&amp;core, <span class='num'>23</span>, <span class='num'>0x100</span>, FALSE);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_COMPOSED_COPY_GPU_GDI,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;GPU GDI copy&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>30</span>);
+    <span class='fn'>magObserverOnBlit</span>(&amp;core, processId, <span class='num'>13</span>, <span class='num'>31</span>, hWnd, TRUE);
+    <span class='fn'>magObserverOnPresentHistory</span>(
+      &amp;core,
+      processId,
+      <span class='num'>13</span>,
+      <span class='num'>32</span>,
+      <span class='num'>0x101</span>,
+      <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_BLT</span>);
+    <span class='fn'>magObserverOnPresentHistoryInfo</span>(&amp;core, <span class='num'>33</span>, <span class='num'>0x101</span>, FALSE);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_COMPOSED_COPY_CPU_GDI,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;CPU GDI copy&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>35</span>);
+    <span class='fn'>magObserverOnPresentHistory</span>(
+      &amp;core,
+      processId,
+      <span class='num'>16</span>,
+      <span class='num'>36</span>,
+      <span class='num'>0x102</span>,
+      <span class='mc'>MAG_D3DKMT_PM_REDIRECTED_FLIP</span>);
+    <span class='fn'>magObserverOnPresentHistoryInfo</span>(&amp;core, <span class='num'>37</span>, <span class='num'>0x102</span>, TRUE);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_COMPOSED_FLIP,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;DxgKrnl-only composed flip&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>40</span>);
+    <span class='fn'>magObserverOnCompositionToken</span>(&amp;core, processId, <span class='num'>14</span>, <span class='num'>41</span>, <span class='num'>0x200</span>, <span class='num'>5</span>, <span class='num'>7</span>);
+    <span class='fn'>magObserverOnTokenState</span>(&amp;core, <span class='num'>42</span>, <span class='num'>0x200</span>, <span class='num'>5</span>, <span class='num'>7</span>, <span class='num'>3</span>, FALSE);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_COMPOSED_FLIP,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;composed flip&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>magObserverCoreReset</span>(&amp;core, hWnd, <span class='num'>50</span>);
+    <span class='fn'>magObserverOnCompositionToken</span>(&amp;core, processId, <span class='num'>15</span>, <span class='num'>51</span>, <span class='num'>0x201</span>, <span class='num'>6</span>, <span class='num'>8</span>);
+    <span class='fn'>magObserverOnTokenState</span>(&amp;core, <span class='num'>52</span>, <span class='num'>0x201</span>, <span class='num'>6</span>, <span class='num'>8</span>, <span class='num'>3</span>, TRUE);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;independent flip&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    present = <span class='fn'>magObserverFindThreadPresent</span>(&amp;core, <span class='num'>15</span>);
+    <span class='fn'>magObserverMapSubmit</span>(&amp;core, present, <span class='num'>99</span>, <span class='num'>53</span>);
+    <span class='fn'>magObserverOnMultiPlaneSync</span>(&amp;core, <span class='num'>54</span>, <span class='num'>99</span>, <span class='num'>2</span>);
+    <span class='kw'>if</span> (!<span class='fn'>magObserverExpectTarget</span>(
+          &amp;core,
+          MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;hardware-composed independent flip&quot;</span>),
+          reason,
+          reasonCount))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> TRUE;
+}
+</pre>
+<p class="source-nav"><a href='presentation_h.htm'>&larr; presentation.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='presentation_observer_h.htm'>presentation_observer.h &rarr;</a></p>
+</body>
+</html>

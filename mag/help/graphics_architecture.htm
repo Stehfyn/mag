@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Windows Graphics Architecture - MAG Screen Magnifier Help</title>
+  <link rel="stylesheet" type="text/css" href="help.css">
+</head>
+<body>
+
+<p class="breadcrumb"><a href="index.htm">MAG Screen Magnifier Help</a> &rsaquo; Windows Graphics Architecture</p>
+
+<h1>Windows Graphics Architecture and MAG</h1>
+
+<div class="hero">
+  <p class="lead">
+    MAG deliberately separates capture, pixel rendering, UI drawing, text, presentation,
+    composition host, surface ownership, copy policy, and adapter selection. These diagrams
+    show how each selectable API reaches the Windows compositor, display driver, GPU, and monitor.
+  </p>
+  <p>
+    Blue boxes are application/API layers, purple boxes are presentation or composition,
+    orange boxes are vendor drivers, red boxes are Windows kernel graphics, green boxes are
+    GPU work, and slate boxes are the final composition/display path.
+  </p>
+</div>
+
+<div class="help-figure figure-wide">
+  <img src="images/architecture-windows-overview.png" width="1200" alt="Overview of MAG, Windows graphics APIs, presentation and composition, WDDM drivers, GPU, DWM, and display output.">
+  <p class="caption">The complete Windows path. The selected graphics API renders a frame, a presentation host publishes it, WDDM schedules it, and DWM either composes it or Windows promotes an eligible surface to a hardware presentation path.</p>
+</div>
+
+<h2>The settings are independent layers</h2>
+<table>
+  <tr><th>MAG choice</th><th>Architectural responsibility</th></tr>
+  <tr><td class="key">Capture API</td><td>Obtains pixels or a compositor-owned visual from GDI, DXGI Desktop Duplication, Windows Graphics Capture, DWM Thumbnail, or DWM Private Visual.</td></tr>
+  <tr><td class="key">Graphics API</td><td>Produces the pixel-backed MAG frame through GDI, GDI+, Direct3D 9, Direct3D 11, Direct3D 12, OpenGL, or Vulkan.</td></tr>
+  <tr><td class="key">UI API and Text renderer</td><td>Draws the minimap/controls and lays out glyphs independently of the primary frame renderer.</td></tr>
+  <tr><td class="key">Target, Surface, and Host</td><td>Selects the requested Windows presentation model, redirection ownership, and HWND/DirectComposition/Presentation Manager attachment.</td></tr>
+  <tr><td class="key">Copy policy</td><td>Rejects routes that exceed the allowed compositor-visual, true-zero-copy, GPU-local-copy, or CPU-round-trip class.</td></tr>
+  <tr><td class="key">Display and Hardware adapters</td><td>Separates the output that owns presentation from the adapter that renders the frame. A mismatch may require a cross-adapter transfer.</td></tr>
+</table>
+
+<h2>DWM Private Visual: the MAG visual tree</h2>
+<p>
+  DWM Private Visual does not capture the desktop into a MAG-owned CPU bitmap. MAG asks DWM for a
+  shared desktop visual, retains supplemental source visuals for the desktop, taskbar, and visible
+  application windows, and places the resulting stack beneath its own overlay. The shared source stays
+  stable. Pan, zoom, move, and resize update the transform on <code>viewVisual</code> and the destination
+  clip on <code>captureVisual</code>.
+</p>
+
+<div class="help-figure figure-wide">
+  <img src="images/architecture-dwm-private-visual.png" width="1200" alt="MAG DWM Private Visual retained tree with shared desktop and per-window sources, app-owned view transform and clip, overlay reservoir, atomic DirectComposition commit, and DWM scan-out.">
+  <p class="caption">MAG's actual retained tree. Desktop wallpaper, the taskbar, ordinary windows, and child-composed application content are ordered in <code>viewVisual</code>. Transform, clip, source placement, overlay, and geometry publish in one DirectComposition commit.</p>
+</div>
+
+<h3>Why both shared and per-window visuals exist</h3>
+<p>
+  The shared desktop visual supplies the composed desktop fallback. MAG also maintains retained
+  DWM thumbnail visuals for visible top-level windows and shell surfaces, preserving their screen
+  positions and z-order. This supplemental layer is what keeps desktop, taskbar, Chrome, Edge,
+  Electron applications such as GitHub Desktop, and other child-composed content represented in the
+  magnified result. The MAG destination is excluded to prevent recursion.
+</p>
+
+<h3>Resize and move contract</h3>
+<ul>
+  <li>The shared source and existing source thumbnails are retained across ordinary geometry changes.</li>
+  <li>The overlay DirectComposition surface is a reservoir with spare capacity; it is replaced only when the requested size exceeds that capacity.</li>
+  <li>The previously unused reservoir area is initialized before Windows can expose it during an interactive resize.</li>
+  <li>Source-window placement, visual order, transform, clip, overlay pixels, and HWND geometry are committed as a coherent update.</li>
+  <li>MAG renders from the modal move/resize loop; it does not wait for the loop to end before updating visuals.</li>
+</ul>
+
+<div class="warning">
+  <strong>Private boundary:</strong> The shared-desktop/private-thumbnail entry points are undocumented
+  exports from <code>dwmapi.dll</code> and are resolved at runtime. Their availability is build-sensitive.
+  DirectComposition, Direct3D 11, DXGI, DWM thumbnail operations, WDDM, and the display-driver path
+  around them remain Windows components. MAG validates the complete route before an immediate live-route change.
+</div>
+
+<h2>Redirection, no-redirection, and layered surfaces</h2>
+<table>
+  <tr><th>Surface/host</th><th>Windows ownership and data flow</th><th>MAG consequence</th></tr>
+  <tr><td class="key">Redirected HWND</td><td>DWM allocates the top-level window's redirection surface. GDI drawing and windowed presents feed that surface before desktop composition.</td><td>Broad compatibility. Depending on API and presentation model, Windows may copy or redirect a submitted buffer.</td></tr>
+  <tr><td class="key">No-redirection + DirectComposition</td><td><code>WS_EX_NOREDIRECTIONBITMAP</code> suppresses the ordinary opaque client surface. App-provided composition content replaces it in the DWM tree.</td><td>Required for a direct composition surface path; leaving the visual tree empty makes the client area transparent.</td></tr>
+  <tr><td class="key">Traditional layered window</td><td>User32 consumes a CPU-addressable premultiplied BGRA bitmap through the layered-window update path.</td><td>Provides constant/per-pixel alpha and color-key semantics, but cannot satisfy strict zero-copy.</td></tr>
+  <tr><td class="key">Presentation Manager</td><td>A Windows 11 presentation surface is attached through the presentation API instead of the ordinary redirection bitmap.</td><td>MAG validates runtime availability, adapter compatibility, target, copy class, and pacing before activation.</td></tr>
+</table>
+
+<h2>DirectComposition and DWM</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-directcomposition.png" width="1100" alt="DirectComposition application library, win32k object database, DWM composition engine, shared Direct3D device, WDDM, and scan-out stack.">
+  <p class="caption">DirectComposition retains an application visual tree. <code>Commit</code> publishes a batch to the Windows composition engine, which combines all application trees with DWM's desktop tree.</p>
+</div>
+<p>
+  <code>dcomp.dll</code> is the application-facing COM library. Composition objects are marshaled through
+  the kernel-mode object database in <code>win32k.sys</code> to <code>dwmcore.dll</code> in <code>dwm.exe</code>.
+  DWM evaluates committed batches asynchronously and composes all session windows using a shared
+  Direct3D composition device. MAG uses the C COM ABI directly; C++ wrappers are not required.
+</p>
+
+<h2>WDDM and Windows graphics drivers</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-wddm-driver-stack.png" width="1100" alt="WDDM stack from MAG and DWM through graphics runtimes, user-mode display driver, graphics kernel, display miniport driver, GPU, and display engine.">
+  <p class="caption">The Windows Display Driver Model is shared infrastructure. API-specific user-mode drivers submit through the Windows graphics kernel and hardware display miniport driver to GPU engines and scan-out.</p>
+</div>
+<table>
+  <tr><th>Layer</th><th>Role</th></tr>
+  <tr><td class="key">User-mode runtime</td><td>Implements API validation/object behavior and connects the application to a vendor user-mode display driver or Windows software renderer.</td></tr>
+  <tr><td class="key">User-mode display driver (UMD)</td><td>Translates Direct3D/OpenGL/Vulkan operations into GPU command streams for a particular adapter.</td></tr>
+  <tr><td class="key">dxgkrnl, VidSch, and VidMm</td><td>Coordinate GPU contexts, scheduling, preemption, synchronization, residency, virtual memory, presents, and fault recovery.</td></tr>
+  <tr><td class="key">Display miniport/KMD</td><td>Implements hardware-specific DMA, memory, interrupts, power, display topology, present, overlay, and scan-out control.</td></tr>
+  <tr><td class="key">Display engine</td><td>Scans out the final DWM image or eligible hardware planes to the monitor. This is distinct from the GPU render engines.</td></tr>
+</table>
+
+<h2>DXGI and presentation</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-dxgi.png" width="1100" alt="DXGI factory, adapters, outputs, resources, swap chain, present scheduler, DWM, WDDM, and scan-out architecture.">
+  <p class="caption">DXGI supplies adapter/output discovery, shareable resources, swap chains, buffer rotation, pacing controls, and presentation. Direct3D 11 and 12 both use DXGI swap chains; Direct3D 9, OpenGL, and Vulkan expose different application APIs.</p>
+</div>
+<p>
+  A requested target is not a permanent property of the application alone. Windows decides whether a
+  submitted surface is composed, hardware-composed, or independently presented based on the selected
+  swap/present model, visibility, occlusion, scaling, format, output, driver, and current desktop state.
+  <strong>Require exact target</strong> tells MAG to treat an observed mismatch as a failed configuration.
+</p>
+
+<h2>Direct3D renderer stacks</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-d3d9.png" width="1100" alt="Direct3D 9 runtime, vendor driver, WDDM, GPU, DWM, and display stack.">
+  <p class="caption"><strong>Direct3D 9:</strong> MAG uses the D3D9/9Ex windowed path. The API predates DXGI and presents through its own device interfaces while still participating in WDDM and desktop composition.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-d3d11.png" width="1100" alt="Direct3D 11 device/context, DXGI swap chain, vendor driver, WDDM, DWM, and display stack.">
+  <p class="caption"><strong>Direct3D 11:</strong> the device/context owns rendering and resource operations; DXGI owns adapter identity, shared surfaces, swap-chain buffers, pacing, tearing flags, and Present.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-d3d12.png" width="1100" alt="Direct3D 12 resources, command lists, queue, fences, DXGI swap chain, vendor driver, WDDM, and display stack.">
+  <p class="caption"><strong>Direct3D 12:</strong> MAG explicitly records command lists, transitions resource states, submits a direct queue, tracks the current DXGI back buffer, and limits reuse with fences.</p>
+</div>
+
+<h2>Direct2D and DirectWrite stacks</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-direct2d.png" width="1100" alt="Direct2D factory/device/context, DirectWrite and WIC interoperation, Direct3D 11.1 and DXGI, driver, and DWM stack.">
+  <p class="caption"><strong>Direct2D:</strong> on modern Windows, Direct2D is layered over Direct3D 11.1 and can target a DXGI surface. Its software rasterizer remains available when hardware acceleration is not appropriate.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-directwrite.png" width="1100" alt="DirectWrite font system, text analysis and layout, Direct2D or bitmap glyph rendering, and presentation stack.">
+  <p class="caption"><strong>DirectWrite:</strong> font discovery, shaping, line layout, metrics, hit testing, and glyph analysis are separated from final drawing. MAG can send glyph runs to Direct2D or use another selected text route.</p>
+</div>
+
+<h2>OpenGL and Vulkan stacks</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-opengl.png" width="1100" alt="OpenGL WGL context, opengl32 runtime, vendor ICD, WDDM, GPU, SwapBuffers, DWM, and display stack.">
+  <p class="caption"><strong>OpenGL:</strong> WGL binds a rendering context to the HWND device context and its one-time pixel format. <code>opengl32.dll</code> dispatches to the adapter vendor's installable client driver; <code>SwapBuffers</code> publishes the window buffer.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-vulkan.png" width="1100" alt="Vulkan loader, optional layers, vendor ICD, Win32 WSI surface and swapchain, WDDM, GPU, DWM, and display stack.">
+  <p class="caption"><strong>Vulkan:</strong> <code>vulkan-1.dll</code> discovers ICDs and constructs dispatch chains. Optional layers can validate or trace calls. Win32 WSI creates the HWND-backed surface and swap chain used by <code>vkQueuePresentKHR</code>.</p>
+</div>
+
+<h2>GDI and GDI+ stacks</h2>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-gdi.png" width="1100" alt="MAG GDI DIB and HDC, gdi32, win32k, redirected or layered surface, DWM, WDDM, and monitor stack.">
+  <p class="caption"><strong>GDI:</strong> MAG's GDI backend owns a DIB section and HDC. Ordinary windows feed a DWM redirection surface; traditional layered windows use an explicit premultiplied bitmap update.</p>
+</div>
+<div class="help-figure figure-wide">
+  <img src="images/architecture-gdiplus.png" width="1100" alt="GDI+ flat C API, Gdiplus.dll objects, bitmap or HDC target, GDI/User32 surface, DWM, and display stack.">
+  <p class="caption"><strong>GDI+:</strong> MAG calls the native flat <code>Gdiplus.dll</code> ABI directly from C, without the SDK's C++ wrapper classes. The backend retains its reservoir-sized source bitmap, target DIB bitmap, graphics context, and brush across ordinary resizes. It presents the completed CPU surface through one redirected-HWND BitBlt or the selected-adapter Presentation Manager bridge.</p>
+</div>
+
+<h2>Primary architecture references</h2>
+<table class="api-links">
+  <tr><th>Subject</th><th>Reference</th></tr>
+  <tr><td class="key">Windows graphics APIs</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/learnwin32/overview-of-the-windows-graphics-architecture">Overview of the Windows Graphics Architecture</a></td></tr>
+  <tr><td class="key">DirectComposition</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/directcomp/architecture-and-components">DirectComposition architecture and components</a></td></tr>
+  <tr><td class="key">WDDM</td><td><a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/display/windows-vista-and-later-display-driver-model-architecture">Windows Display Driver Model architecture</a></td></tr>
+  <tr><td class="key">Direct3D 9</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/direct3d9/direct3d-architecture">Direct3D 9 architecture</a></td></tr>
+  <tr><td class="key">Direct3D 11/12</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/direct3d12/porting-from-direct3d-11-to-direct3d-12">D3D11-to-D3D12 architecture comparison</a> and <a href="https://learn.microsoft.com/en-us/windows/win32/direct3d12/swap-chains">D3D12 swap chains</a></td></tr>
+  <tr><td class="key">Direct2D/DirectWrite</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-overview">Direct2D overview</a> and <a href="https://learn.microsoft.com/en-us/windows/win32/direct2d/direct2d-and-directwrite">Direct2D and DirectWrite text rendering</a></td></tr>
+  <tr><td class="key">OpenGL on Windows</td><td><a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/display/loading-an-opengl-installable-client-driver">Loading an OpenGL ICD</a> and <a href="https://learn.microsoft.com/en-us/windows/win32/opengl/wgl-and-windows-reference">WGL/Windows reference</a></td></tr>
+  <tr><td class="key">Vulkan</td><td><a href="https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderInterfaceArchitecture.md">Khronos Vulkan Loader architecture</a> and <a href="https://docs.vulkan.org/guide/latest/wsi.html">Vulkan Window System Integration</a></td></tr>
+  <tr><td class="key">GDI+</td><td><a href="https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-flatapi-flat">GDI+ flat API</a></td></tr>
+</table>
+
+<h2>Layering and presentation reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/december/windows-with-c-layered-windows-with-direct2d">Layered Windows with Direct2D</a> explains premultiplied BGRA, <code>UpdateLayeredWindowIndirect</code>, CPU/GPU round trips, and Direct2D-to-GDI/WIC/DXGI alternatives.</li>
+  <li><a href="https://learn.microsoft.com/en-us/archive/msdn-magazine/2013/may/windows-with-c-introducing-direct2d-1-1">Introducing Direct2D 1.1</a> connects a Direct2D device context to a Direct3D 11 device and DXGI swap-chain surface and covers resize-time buffer rebinding.</li>
+  <li><a href="https://learn.microsoft.com/en-us/archive/msdn-magazine/2014/june/windows-with-c-high-performance-window-layering-using-the-windows-composition-engine">High-Performance Window Layering Using the Windows Composition Engine</a> contrasts redirection surfaces with <code>WS_EX_NOREDIRECTIONBITMAP</code> and a premultiplied composition swap chain attached to a DirectComposition visual.</li>
+  <li><a href="https://wiki.special-k.info/Presentation_Model">Presentation Model (Special K reference)</a> provides user-facing terminology for identifying Windows presentation behavior. MAG's Configuration status and exact-target validation remain authoritative for this application.</li>
+  <li><a href="https://wiki.special-k.info/en/SwapChain">SwapChain Science (Special K reference)</a> distinguishes the four application-selected DXGI swap effects from the DirectFlip, Independent Flip, and MPO outcomes Windows selects dynamically, and documents why waitable pacing is not a universal performance win.</li>
+</ul>
+
+</body>
+</html>

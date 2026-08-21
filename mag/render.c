@@ -1,5 +1,6 @@
 #include "render.h"
 #include "mag.h"
+#include "presentation_observer.h"
 
 #include <roapi.h>
 #include <strsafe.h>
@@ -1901,11 +1902,12 @@ BOOL render_setGraphicsPresentationEnabled(HWND hWnd, BOOL enabled)
         lpsd->fGraphicsPresentationEnabled = enabled;
       }
     }
-    else if (!enabled)
+    else if (lpsd->graphicsBackend && !lpsd->graphicsState)
     {
-      /* A compositor-owned capture route may intentionally defer creation of
-         the pixel presenter.  An absent presenter is already detached. */
-      lpsd->fGraphicsPresentationEnabled = FALSE;
+      /* A compositor-owned capture route intentionally defers the pixel
+         presenter.  Preserve both detach and reattach intent so a failed
+         compositor submission can recreate an enabled fallback presenter. */
+      lpsd->fGraphicsPresentationEnabled = enabled;
       result = TRUE;
     }
     ReleaseSRWLockExclusive(&lpsd->graphicsLock);
@@ -2636,7 +2638,7 @@ BOOL renderApplyPresentationSettings(
     return TRUE;
 }
 
-BOOL renderApplySettings(
+static BOOL renderApplyResolvedSettings(
   HWND hWnd,
   GRAPHICSAPI api,
   CAPTUREAPI captureApi,
@@ -2748,6 +2750,24 @@ static BOOL render_isModernFlipTarget(MAGPRESENTATIONTARGET target)
       MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == target;
 }
 
+static MAGPRESENTATIONTARGET render_resourceTargetClass(
+  GRAPHICSAPI api,
+  MAGPRESENTATIONTARGET target)
+{
+    if (render_isModernFlipTarget(target))
+    {
+      return MAG_PRESENT_COMPOSED_FLIP;
+    }
+    if (GRAPHICS_API_OPENGL == api)
+    {
+      return MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == target ||
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI == target
+          ? MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER
+          : MAG_PRESENT_HARDWARE_LEGACY_FLIP;
+    }
+    return target;
+}
+
 static BOOL render_presentationResourcesEqual(
   GRAPHICSAPI api,
   const MAGPRESENTATIONSETTINGS* oldSettings,
@@ -2767,18 +2787,70 @@ static BOOL render_presentationResourcesEqual(
     left.copyRequirement = right.copyRequirement;
     left.strictTarget = right.strictTarget;
 
-    /* All modern HWND flip outcomes use the same flip-discard chain.  Windows
-       chooses composed, DirectFlip, or MPO promotion at runtime; changing the
-       observation target must not tear down that chain. */
-    if ((GRAPHICS_API_D3D11 == api || GRAPHICS_API_D3D12 == api) &&
-        MAG_HOST_REDIRECTED_HWND == left.host &&
-        MAG_HOST_REDIRECTED_HWND == right.host &&
-        render_isModernFlipTarget(left.target) &&
-        render_isModernFlipTarget(right.target))
+    /* Auto and explicit selections that resolve to the same adapter are the
+       same graphics device.  Presentation Manager is the exception because
+       an explicit display adds an output restriction to its surface. */
+    if (MAG_HOST_PRESENTATION_MANAGER != left.host &&
+        MAG_HOST_PRESENTATION_MANAGER != right.host)
     {
-      left.target = right.target;
+      left.display.mode = right.display.mode;
     }
+    if ((MAG_HARDWARE_ADAPTER_WARP == left.hardware.mode) ==
+        (MAG_HARDWARE_ADAPTER_WARP == right.hardware.mode))
+    {
+      left.hardware.mode = right.hardware.mode;
+    }
+
+    /* The User32 layered presenter reads alpha and color-key values on every
+       submit; those value changes do not invalidate its persistent DIB. */
+    if (MAG_HOST_TRADITIONAL_LAYERED == left.host &&
+        MAG_HOST_TRADITIONAL_LAYERED == right.host)
+    {
+      left.alphaMode = right.alphaMode;
+      left.constantAlpha = right.constantAlpha;
+      left.colorKey = right.colorKey;
+    }
+
+    /* D3D9Ex, DXGI, Vulkan, Presentation Manager, and WGL exchange presenters
+       do not allocate a different chain for composed, DirectFlip, Independent
+       Flip, or MPO outcomes. Windows promotes/demotes the same presenter as
+       geometry and plane availability change. WGL copy/exchange are the only
+       two pixel-format resource classes in the OpenGL path. */
+    left.target = render_resourceTargetClass(api, left.target);
+    right.target = render_resourceTargetClass(api, right.target);
     return magPresentationSettingsEqual(&left, &right);
+}
+
+static void render_setPresentationObservationStatus(
+  const MAGPRESENTATIONSETTINGS* resolved,
+  MAGPRESENTATIONSTATUS* status)
+{
+    MAGPRESENTATIONOBSERVERSTATUS observer = { 0 };
+
+    if (!resolved || !status)
+    {
+      return;
+    }
+    if (MAG_HOST_PRESENTATION_MANAGER == resolved->host)
+    {
+      status->observationAvailable = TRUE;
+      status->observationFullFidelity = TRUE;
+      status->observationSource =
+        MAG_PRESENT_OBSERVATION_PRESENTATION_MANAGER;
+      return;
+    }
+    magPresentationObserverGetStatus(&observer);
+    status->observationAvailable = observer.active;
+    status->observationFullFidelity = observer.active &&
+      observer.dxgKrnlEnabled && observer.win32kEnabled;
+    status->observationDxgKrnl = observer.dxgKrnlEnabled;
+    status->observationWin32k = observer.win32kEnabled;
+    status->observationSource = observer.active
+      ? MAG_PRESENT_OBSERVATION_ETW
+      : MAG_PRESENT_OBSERVATION_NONE;
+    status->observationError = ERROR_SUCCESS != observer.startTraceError
+      ? observer.startTraceError
+      : observer.error;
 }
 
 BOOL renderApplyFullSettings(
@@ -2800,6 +2872,12 @@ BOOL renderApplyFullSettings(
     MAGLAYEREDPRESENTER* oldLayeredPresenter;
     UINT64 nextGeneration;
     BOOL oldForceGraphicsRecreate;
+    BOOL reuseLayeredPresenter;
+    BOOL serializeHwndSwapChainReplacement;
+    GRAPHICSAPI oldGraphicsApi;
+    CAPTUREAPI oldCaptureApi;
+    UIGRAPHICSAPI oldUiApi;
+    TEXTRENDERER oldTextRenderer;
 
     if (reason && reasonCount)
     {
@@ -2845,7 +2923,10 @@ BOOL renderApplyFullSettings(
       return FALSE;
     }
 
-    if (MAG_HOST_TRADITIONAL_LAYERED == resolved.host)
+    reuseLayeredPresenter = MAG_HOST_TRADITIONAL_LAYERED == resolved.host &&
+      NULL != lpsd->layeredPresenter;
+    if (MAG_HOST_TRADITIONAL_LAYERED == resolved.host &&
+        !reuseLayeredPresenter)
     {
       RECT clientRect;
       SIZE clientSize;
@@ -2873,11 +2954,37 @@ BOOL renderApplyFullSettings(
     nextGeneration = lpsd->presentationStatus.configurationGeneration + 1;
     oldResolved = lpsd->resolvedPresentation;
     oldForceGraphicsRecreate = lpsd->fForceGraphicsRecreate;
+    oldGraphicsApi = lpsd->graphicsApi;
+    oldCaptureApi = lpsd->captureApi;
+    oldUiApi = lpsd->uiGraphicsApi;
+    oldTextRenderer = lpsd->textRenderer;
     lpsd->resolvedPresentation = resolved;
     lpsd->fForceGraphicsRecreate = lpsd->graphicsState &&
       !render_presentationResourcesEqual(api, &oldResolved, &resolved);
+    serializeHwndSwapChainReplacement = lpsd->fForceGraphicsRecreate &&
+      lpsd->graphicsState && lpsd->graphicsApi == api &&
+      (GRAPHICS_API_D3D11 == api || GRAPHICS_API_D3D12 == api) &&
+      MAG_HOST_REDIRECTED_HWND == oldResolved.host &&
+      MAG_HOST_REDIRECTED_HWND == resolved.host;
+    if (serializeHwndSwapChainReplacement)
+    {
+      const MAGGRAPHICSBACKEND* retiringBackend;
+      void* retiringState;
+
+      AcquireSRWLockExclusive(&lpsd->graphicsLock);
+      retiringBackend = lpsd->graphicsBackend;
+      retiringState = lpsd->graphicsState;
+      lpsd->graphicsState = NULL;
+      lpsd->fGraphicsPresentationEnabled = FALSE;
+      ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+      if (retiringBackend && retiringState)
+      {
+        retiringBackend->SetPresentationEnabled(hWnd, retiringState, FALSE);
+        retiringBackend->Destroy(hWnd, retiringState);
+      }
+    }
     mag_UpdateViewWindowStyle(hWnd);
-    if (!renderApplySettings(
+    if (!renderApplyResolvedSettings(
           hWnd,
           api,
           captureApi,
@@ -2886,24 +2993,92 @@ BOOL renderApplyFullSettings(
           reason,
           reasonCount))
     {
+      if (serializeHwndSwapChainReplacement && lpsd->graphicsState)
+      {
+        const MAGGRAPHICSBACKEND* failedBackend;
+        void* failedState;
+
+        AcquireSRWLockExclusive(&lpsd->graphicsLock);
+        failedBackend = lpsd->graphicsBackend;
+        failedState = lpsd->graphicsState;
+        lpsd->graphicsState = NULL;
+        lpsd->fGraphicsPresentationEnabled = FALSE;
+        ReleaseSRWLockExclusive(&lpsd->graphicsLock);
+        if (failedBackend && failedState)
+        {
+          failedBackend->SetPresentationEnabled(hWnd, failedState, FALSE);
+          failedBackend->Destroy(hWnd, failedState);
+        }
+      }
       magLayeredPresenterDestroy(candidateLayeredPresenter);
       lpsd->resolvedPresentation = oldResolved;
-      lpsd->fForceGraphicsRecreate = oldForceGraphicsRecreate;
       mag_UpdateViewWindowStyle(hWnd);
+      if (serializeHwndSwapChainReplacement)
+      {
+        TCHAR rollbackReason[256];
+
+        lpsd->fForceGraphicsRecreate = TRUE;
+        renderApplyResolvedSettings(
+          hWnd,
+          oldGraphicsApi,
+          oldCaptureApi,
+          oldUiApi,
+          oldTextRenderer,
+          rollbackReason,
+          ARRAYSIZE(rollbackReason));
+      }
+      lpsd->fForceGraphicsRecreate = oldForceGraphicsRecreate;
       return FALSE;
     }
     lpsd->fForceGraphicsRecreate = oldForceGraphicsRecreate;
 
-    oldLayeredPresenter = lpsd->layeredPresenter;
-    lpsd->layeredPresenter = candidateLayeredPresenter;
-    magLayeredPresenterDestroy(oldLayeredPresenter);
+    if (!reuseLayeredPresenter)
+    {
+      oldLayeredPresenter = lpsd->layeredPresenter;
+      lpsd->layeredPresenter = candidateLayeredPresenter;
+      magLayeredPresenterDestroy(oldLayeredPresenter);
+    }
 
     status.configurationGeneration = nextGeneration;
     status.geometryEpoch = lpsd->geometryEpoch;
+    render_setPresentationObservationStatus(&resolved, &status);
     lpsd->presentationSettings = *presentation;
     lpsd->resolvedPresentation = resolved;
     lpsd->presentationStatus = status;
+    lpsd->lastObservedTarget = MAG_PRESENT_AUTO;
+    lpsd->observedTargetConsecutiveFrames = 0;
+    magPresentationObserverReset(hWnd);
     return TRUE;
+}
+
+BOOL renderApplySettings(
+  HWND hWnd,
+  GRAPHICSAPI api,
+  CAPTUREAPI captureApi,
+  UIGRAPHICSAPI uiApi,
+  TEXTRENDERER textRenderer,
+  LPTSTR reason,
+  UINT reasonCount)
+{
+    LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+    if (!lpsd)
+    {
+      if (reason && reasonCount)
+      {
+        lstrcpyn(reason, TEXT("The window has no rendering state."), reasonCount);
+      }
+      return FALSE;
+    }
+    return renderApplyFullSettings(
+      hWnd,
+      api,
+      captureApi,
+      uiApi,
+      textRenderer,
+      &lpsd->presentationSettings,
+      reason,
+      reasonCount);
 }
 
 BOOL renderSetGraphicsApi(HWND hWnd, GRAPHICSAPI api, LPTSTR reason, UINT reasonCount)
@@ -2946,6 +3121,7 @@ void renderInit(HWND hWnd)
     MAGPRESENTATIONSETTINGS fallbackPresentation;
 
     InitializeSRWLock(&lpsd->graphicsLock);
+    magPresentationObserverStart(hWnd);
     if (render_captureUsesCompositor(lpsd->captureApi))
     {
       render_updateSurfaceInfo(hWnd);
@@ -3280,6 +3456,9 @@ BOOL render_stampPresentedContent(HWND hWnd)
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
     RECT rcClient;
     UINT observedTarget;
+    MAGPRESENTATIONTARGET etwTarget;
+    BOOL haveObservedTarget = FALSE;
+    BOOL notifyPresentationStatus = FALSE;
 
     if (!lpsd || !GetClientRect(hWnd, &rcClient) ||
         RECTWIDTH(rcClient) < 1 || RECTHEIGHT(rcClient) < 1)
@@ -3302,26 +3481,82 @@ BOOL render_stampPresentedContent(HWND hWnd)
     }
     if (lpsd->fGraphicsPresentationEnabled &&
         lpsd->graphicsBackend && lpsd->graphicsState &&
-        lpsd->graphicsBackend->GetObservedPresentationTarget &&
+        lpsd->graphicsBackend->GetObservedPresentationTarget)
+    {
+      haveObservedTarget =
         lpsd->graphicsBackend->GetObservedPresentationTarget(
           lpsd->graphicsState,
           &observedTarget) &&
-        observedTarget < MAG_PRESENT_COUNT)
+        observedTarget < MAG_PRESENT_COUNT;
+    }
+    if (!haveObservedTarget && lpsd->fGraphicsPresentationEnabled &&
+        magPresentationObserverGetLatest(hWnd, &etwTarget, NULL))
     {
+      observedTarget = (UINT)etwTarget;
+      haveObservedTarget = TRUE;
+    }
+    if (haveObservedTarget)
+    {
+      lpsd->presentationStatus.observationAvailable = TRUE;
+      lpsd->presentationStatus.observationSource =
+        MAG_HOST_PRESENTATION_MANAGER == lpsd->resolvedPresentation.host
+          ? MAG_PRESENT_OBSERVATION_PRESENTATION_MANAGER
+          : MAG_PRESENT_OBSERVATION_ETW;
+      notifyPresentationStatus =
+        !lpsd->presentationStatus.observedTargetValid ||
+        lpsd->lastObservedTarget != (MAGPRESENTATIONTARGET)observedTarget;
+      if (lpsd->lastObservedTarget == (MAGPRESENTATIONTARGET)observedTarget)
+      {
+        if (lpsd->observedTargetConsecutiveFrames < UINT_MAX)
+        {
+          ++lpsd->observedTargetConsecutiveFrames;
+        }
+      }
+      else
+      {
+        lpsd->lastObservedTarget = (MAGPRESENTATIONTARGET)observedTarget;
+        lpsd->observedTargetConsecutiveFrames = 1;
+      }
+      if (8 == lpsd->observedTargetConsecutiveFrames)
+      {
+        notifyPresentationStatus = TRUE;
+      }
       lpsd->presentationStatus.observedTarget =
         (MAGPRESENTATIONTARGET)observedTarget;
+      lpsd->presentationStatus.observedTargetValid = TRUE;
+      lpsd->presentationStatus.strictTargetSatisfied =
+        !lpsd->presentationSettings.strictTarget ||
+        MAG_PRESENT_AUTO == lpsd->presentationSettings.target ||
+        lpsd->presentationSettings.target == observedTarget;
       if (lpsd->presentationSettings.strictTarget &&
           MAG_PRESENT_AUTO != lpsd->presentationSettings.target &&
+          lpsd->observedTargetConsecutiveFrames >= 8 &&
           lpsd->presentationSettings.target != observedTarget)
       {
-        lpsd->presentationStatus.configurationSupported = FALSE;
         _sntprintf_s(
           lpsd->presentationStatus.reason,
           ARRAYSIZE(lpsd->presentationStatus.reason),
           _TRUNCATE,
-          TEXT("The configured flip presenter is active, but Windows observed presentation target %u instead of strict target %u."),
-          observedTarget,
-          (UINT)lpsd->presentationSettings.target);
+          TEXT("The eligible presenter remains active, but Windows stably observed %s instead of the requested %s; move/resize/occlusion and available display planes can change this outcome."),
+          magPresentationTargetName((MAGPRESENTATIONTARGET)observedTarget),
+          magPresentationTargetName(lpsd->presentationSettings.target));
+      }
+      else if (lpsd->presentationStatus.strictTargetSatisfied)
+      {
+        _sntprintf_s(
+          lpsd->presentationStatus.reason,
+          ARRAYSIZE(lpsd->presentationStatus.reason),
+          _TRUNCATE,
+          TEXT("Windows observed %s for the active presenter."),
+          magPresentationTargetName((MAGPRESENTATIONTARGET)observedTarget));
+      }
+    }
+    if (notifyPresentationStatus)
+    {
+      HWND popup = GetWindow(hWnd, GW_ENABLEDPOPUP);
+      if (popup && popup != hWnd)
+      {
+        PostMessage(popup, WM_MAG_PRESENTATION_STATUS, 0, 0);
       }
     }
     lpsd->fPresentedContentValid = TRUE;
@@ -3817,6 +4052,251 @@ static BOOL render_testViewGeometryMath(void)
     return TRUE;
 }
 
+typedef struct MAGPRESENTATIONRESOLVERTEST
+{
+  GRAPHICSAPI graphicsApi;
+  CAPTUREAPI captureApi;
+  MAGPRESENTATIONTARGET target;
+  MAGCOMPOSITIONHOST host;
+  MAGSURFACEOWNERSHIP surface;
+  BOOL expected;
+} MAGPRESENTATIONRESOLVERTEST;
+
+static BOOL render_testPresentationResolver(
+  HWND hWnd,
+  LPTSTR reason,
+  UINT reasonCount)
+{
+    static const MAGPRESENTATIONRESOLVERTEST tests[] =
+    {
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_LEGACY_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D9, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_GPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_LEGACY_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_OPENGL, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_GPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_VULKAN, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_VULKAN, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_VULKAN, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_GPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_DIRECTCOMPOSITION, MAG_SURFACE_NO_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_DIRECTCOMPOSITION, MAG_SURFACE_NO_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_DIRECTCOMPOSITION, MAG_SURFACE_NO_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP, MAG_HOST_DIRECTCOMPOSITION, MAG_SURFACE_NO_REDIRECTION, TRUE },
+      { GRAPHICS_API_GDI, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_CPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_GDIPLUS, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_CPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_DWM_PRIVATE_VISUAL, MAG_PRESENT_COMPOSED_FLIP, MAG_HOST_DIRECTCOMPOSITION, MAG_SURFACE_NO_REDIRECTION, TRUE },
+      { GRAPHICS_API_D3D12, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_LEGACY_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, FALSE },
+      { GRAPHICS_API_VULKAN, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_COMPOSED_COPY_GPU_GDI, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, FALSE },
+      { GRAPHICS_API_GDI, CAPTURE_API_GDI_BITBLT, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, FALSE },
+      { GRAPHICS_API_D3D11, CAPTURE_API_DWM_PRIVATE_VISUAL, MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP, MAG_HOST_REDIRECTED_HWND, MAG_SURFACE_REDIRECTION, FALSE },
+    };
+    MAGADAPTERCATALOG catalog;
+    UINT testIndex;
+
+    if (!magAdapterCatalogEnumerate(&catalog, reason, reasonCount))
+    {
+      return FALSE;
+    }
+    for (testIndex = 0; testIndex < ARRAYSIZE(tests); ++testIndex)
+    {
+      const MAGPRESENTATIONRESOLVERTEST* test = &tests[testIndex];
+      MAGPRESENTATIONSETTINGS requested;
+      MAGPRESENTATIONSETTINGS resolved;
+      MAGPRESENTATIONSTATUS status;
+      BOOL result;
+
+      magPresentationSettingsSetDefaults(&requested);
+      requested.target = test->target;
+      requested.host = test->host;
+      requested.surfaceOwnership = test->surface;
+      requested.copyRequirement = MAG_COPY_ALLOW_CPU_ROUND_TRIP;
+      ZeroMemory(&resolved, sizeof(resolved));
+      ZeroMemory(&status, sizeof(status));
+      result = magPresentationResolve(
+        hWnd,
+        test->graphicsApi,
+        test->captureApi,
+        UI_GRAPHICS_API_NATIVE,
+        TEXT_RENDERER_DIRECTWRITE,
+        &requested,
+        &catalog,
+        &resolved,
+        &status);
+      if (result != test->expected ||
+          (result && (!status.configurationSupported ||
+            resolved.target != test->target ||
+            resolved.host != test->host ||
+            resolved.surfaceOwnership != test->surface ||
+            MAG_WAITABLE_SWAP_CHAIN_AUTO ==
+              resolved.waitableSwapChainMode)))
+      {
+        if (reason && reasonCount)
+        {
+          _sntprintf_s(
+            reason,
+            reasonCount,
+            _TRUNCATE,
+            TEXT("Presentation resolver case %u failed: api=%u capture=%u target=%u host=%u surface=%u expected=%u result=%u; %s"),
+            testIndex,
+            (UINT)test->graphicsApi,
+            (UINT)test->captureApi,
+            (UINT)test->target,
+            (UINT)test->host,
+            (UINT)test->surface,
+            test->expected,
+            result,
+            status.reason);
+        }
+        return FALSE;
+      }
+    }
+    for (testIndex = 0; testIndex < GRAPHICS_API_COUNT; ++testIndex)
+    {
+      MAGPRESENTATIONSETTINGS requested;
+      MAGPRESENTATIONSETTINGS resolved;
+      MAGPRESENTATIONSTATUS status;
+
+      magPresentationSettingsSetDefaults(&requested);
+      requested.target = MAG_PRESENT_COMPOSED_COPY_CPU_GDI;
+      requested.host = MAG_HOST_TRADITIONAL_LAYERED;
+      requested.surfaceOwnership = MAG_SURFACE_REDIRECTION;
+      requested.copyRequirement = MAG_COPY_ALLOW_CPU_ROUND_TRIP;
+      ZeroMemory(&resolved, sizeof(resolved));
+      ZeroMemory(&status, sizeof(status));
+      if (!magPresentationResolve(
+            hWnd,
+            (GRAPHICSAPI)testIndex,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_NATIVE,
+            TEXT_RENDERER_DIRECTWRITE,
+            &requested,
+            &catalog,
+            &resolved,
+            &status) ||
+          !status.configurationSupported ||
+          MAG_PRESENT_COMPOSED_COPY_CPU_GDI != resolved.target ||
+          MAG_HOST_TRADITIONAL_LAYERED != resolved.host)
+      {
+        if (reason && reasonCount)
+        {
+          _sntprintf_s(
+            reason,
+            reasonCount,
+            _TRUNCATE,
+            TEXT("Traditional layered resolver parity failed for graphics API %u: %s"),
+            testIndex,
+            status.reason);
+        }
+        return FALSE;
+      }
+    }
+    {
+      MAGPRESENTATIONSETTINGS requested;
+      MAGPRESENTATIONSETTINGS resolved;
+      MAGPRESENTATIONSTATUS status;
+
+      magPresentationSettingsSetDefaults(&requested);
+      requested.target = MAG_PRESENT_COMPOSED_FLIP;
+      requested.host = MAG_HOST_REDIRECTED_HWND;
+      requested.surfaceOwnership = MAG_SURFACE_REDIRECTION;
+      requested.copyRequirement = MAG_COPY_ALLOW_CPU_ROUND_TRIP;
+      requested.waitableSwapChainMode = MAG_WAITABLE_SWAP_CHAIN_ENABLED;
+      ZeroMemory(&resolved, sizeof(resolved));
+      ZeroMemory(&status, sizeof(status));
+      if (!magPresentationResolve(
+            hWnd,
+            GRAPHICS_API_D3D11,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_NATIVE,
+            TEXT_RENDERER_DIRECTWRITE,
+            &requested,
+            &catalog,
+            &resolved,
+            &status) ||
+          MAG_WAITABLE_SWAP_CHAIN_ENABLED !=
+            resolved.waitableSwapChainMode)
+      {
+        if (reason && reasonCount)
+        {
+          _sntprintf_s(
+            reason,
+            reasonCount,
+            _TRUNCATE,
+            TEXT("Explicit D3D11 waitable-chain resolution failed: %s"),
+            status.reason);
+        }
+        return FALSE;
+      }
+
+      requested.waitableSwapChainMode = MAG_WAITABLE_SWAP_CHAIN_DISABLED;
+      ZeroMemory(&resolved, sizeof(resolved));
+      ZeroMemory(&status, sizeof(status));
+      if (!magPresentationResolve(
+            hWnd,
+            GRAPHICS_API_D3D11,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_NATIVE,
+            TEXT_RENDERER_DIRECTWRITE,
+            &requested,
+            &catalog,
+            &resolved,
+            &status) ||
+          MAG_WAITABLE_SWAP_CHAIN_DISABLED !=
+            resolved.waitableSwapChainMode)
+      {
+        if (reason && reasonCount)
+        {
+          _sntprintf_s(
+            reason,
+            reasonCount,
+            _TRUNCATE,
+            TEXT("Explicit non-waitable D3D11 resolution failed: %s"),
+            status.reason);
+        }
+        return FALSE;
+      }
+
+      requested.target = MAG_PRESENT_COMPOSED_COPY_CPU_GDI;
+      requested.waitableSwapChainMode = MAG_WAITABLE_SWAP_CHAIN_ENABLED;
+      ZeroMemory(&resolved, sizeof(resolved));
+      ZeroMemory(&status, sizeof(status));
+      if (magPresentationResolve(
+            hWnd,
+            GRAPHICS_API_GDI,
+            CAPTURE_API_GDI_BITBLT,
+            UI_GRAPHICS_API_NATIVE,
+            TEXT_RENDERER_DIRECTWRITE,
+            &requested,
+            &catalog,
+            &resolved,
+            &status))
+      {
+        if (reason && reasonCount)
+        {
+          lstrcpyn(
+            reason,
+            TEXT("The resolver accepted a waitable swap chain for the GDI presenter."),
+            reasonCount);
+        }
+        return FALSE;
+      }
+    }
+    return TRUE;
+}
+
 static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE desiredClientSize)
 {
     LPMAGSTATE lpsd = (LPMAGSTATE)GetWindowLongPtr(hWnd, GWLP_USERDATA);
@@ -3834,6 +4314,7 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
     ULONGLONG resizeStart;
     ULONGLONG resizeElapsed;
     ULONGLONG epochLatencyLimit;
+    BOOL expectsBitBltBufferResize;
 
     if (!lpsd)
     {
@@ -3846,10 +4327,15 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
     uiGeneration = magUiRendererGetSurfaceGeneration(lpsd->uiRenderer);
     layeredGeneration = magLayeredPresenterGetResourceGeneration(lpsd->layeredPresenter);
     dwmPrivateGeneration = DwmPrivateCaptureGetResourceGeneration(lpsd->dwmPrivate.state);
+    expectsBitBltBufferResize = !render_captureUsesCompositor(lpsd->captureApi) &&
+      GRAPHICS_API_D3D11 == expectedApi &&
+      MAG_PRESENT_COMPOSED_COPY_GPU_GDI == lpsd->resolvedPresentation.target;
     /* DWM intentionally paces a non-input WinStation desktop near 4 Hz.  The
        private-visual smoke therefore permits one such flush interval while
-       still requiring the matching geometry/frame epoch synchronously and
-       proving below that no capture/presentation resource was recreated. */
+       still requiring the matching geometry/frame epoch synchronously.  The
+       modern reservoir routes must not recreate presentation resources;
+       DXGI BitBlt is the explicit exception because that model cannot use
+       IDXGISwapChain2::SetSourceSize and must resize its back buffer. */
     epochLatencyLimit = CAPTURE_API_WINDOWS_GRAPHICS_CAPTURE == lpsd->captureApi
       ? 500U
       : (CAPTURE_API_DXGI_DESKTOP_DUPLICATION == lpsd->captureApi
@@ -4078,7 +4564,12 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
         lpsd->graphicsApi != expectedApi ||
         lpsd->frame.width != (UINT)desiredClientSize.cx ||
         lpsd->frame.height != (UINT)desiredClientSize.cy ||
-        lpsd->graphicsBackend->GetResourceGeneration(lpsd->graphicsState) != graphicsGeneration ||
+        ((!expectsBitBltBufferResize &&
+          lpsd->graphicsBackend->GetResourceGeneration(lpsd->graphicsState) !=
+            graphicsGeneration) ||
+         (expectsBitBltBufferResize &&
+          lpsd->graphicsBackend->GetResourceGeneration(lpsd->graphicsState) <=
+            graphicsGeneration)) ||
         lpsd->captureSurfaceGeneration != captureGeneration ||
         magUiRendererGetSurfaceGeneration(lpsd->uiRenderer) != uiGeneration ||
         magLayeredPresenterGetResourceGeneration(lpsd->layeredPresenter) != layeredGeneration ||
@@ -4094,7 +4585,7 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
         detail,
         ARRAYSIZE(detail),
         _TRUNCATE,
-        TEXT("Resize contract: requested=%ldx%ld actual=%ldx%ld frame=%ux%u api=%u/%u generation=%llu/%llu capture=%llu/%llu ui=%llu/%llu layered=%llu/%llu dwm-private=%llu/%llu violation=%u elapsed=%llums precommit=%u/%u commit=%u/%u"),
+        TEXT("Resize contract: requested=%ldx%ld actual=%ldx%ld frame=%ux%u api=%u/%u capture-api=%u target=%u host=%u bitblt-resize=%u generation=%llu/%llu capture=%llu/%llu ui=%llu/%llu layered=%llu/%llu dwm-private=%llu/%llu violation=%u elapsed=%llums precommit=%u/%u commit=%u/%u"),
         desiredClientSize.cx,
         desiredClientSize.cy,
         RECTWIDTH(rcClient),
@@ -4103,6 +4594,10 @@ static BOOL render_smokeResizeWindow(HWND hWnd, GRAPHICSAPI expectedApi, SIZE de
         lpsd->frame.height,
         (UINT)lpsd->graphicsApi,
         (UINT)expectedApi,
+        (UINT)lpsd->captureApi,
+        (UINT)lpsd->resolvedPresentation.target,
+        (UINT)lpsd->resolvedPresentation.host,
+        expectsBitBltBufferResize,
         lpsd->graphicsBackend->GetResourceGeneration(lpsd->graphicsState),
         graphicsGeneration,
         lpsd->captureSurfaceGeneration,
@@ -4283,6 +4778,7 @@ static BOOL render_smokeWindowTransitions(HWND hWnd, GRAPHICSAPI expectedApi)
 static int render_smokeFailure(int code, LPCTSTR reason)
 {
     TCHAR message[768];
+    TCHAR logPath[MAX_PATH];
     DWORD written;
     HANDLE errorHandle = GetStdHandle(STD_ERROR_HANDLE);
 
@@ -4302,6 +4798,29 @@ static int render_smokeFailure(int code, LPCTSTR reason)
         (DWORD)(lstrlen(message) * sizeof(TCHAR)),
         &written,
         NULL);
+    }
+    if (GetEnvironmentVariable(
+          TEXT("MAG_SMOKE_LOG"), logPath, ARRAYSIZE(logPath)) > 0)
+    {
+      HANDLE logHandle = CreateFile(
+        logPath,
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+
+      if (INVALID_HANDLE_VALUE != logHandle)
+      {
+        WriteFile(
+          logHandle,
+          message,
+          (DWORD)(lstrlen(message) * sizeof(TCHAR)),
+          &written,
+          NULL);
+        CloseHandle(logHandle);
+      }
     }
     return code;
 }
@@ -4613,6 +5132,56 @@ int renderRunGraphicsSmoke(
     {
       return 1;
     }
+    {
+      TCHAR settingsReason[MAG_PRESENTATION_REASON_LENGTH] = TEXT("");
+
+      if (!mag_RunSettingsDialogSmoke(
+            hWnd,
+            settingsReason,
+            ARRAYSIZE(settingsReason)))
+      {
+        return render_smokeFailure(5, settingsReason);
+      }
+    }
+    {
+      TCHAR resolverReason[MAG_PRESENTATION_REASON_LENGTH] = TEXT("");
+      MAGPRESENTATIONOBSERVERSTATUS observerStatus;
+
+      if (!render_testPresentationResolver(
+            hWnd,
+            resolverReason,
+            ARRAYSIZE(resolverReason)))
+      {
+        return render_smokeFailure(2, resolverReason);
+      }
+      if (!magPresentationObserverRunClassifierTests(
+            resolverReason,
+            ARRAYSIZE(resolverReason)))
+      {
+        return render_smokeFailure(3, resolverReason);
+      }
+      ZeroMemory(&observerStatus, sizeof(observerStatus));
+      magPresentationObserverGetStatus(&observerStatus);
+      if (GetEnvironmentVariable(
+            TEXT("MAG_REQUIRE_PRESENTATION_OBSERVER"),
+            resolverReason,
+            ARRAYSIZE(resolverReason)) > 0 &&
+          !observerStatus.active)
+      {
+        _sntprintf_s(
+          resolverReason,
+          ARRAYSIZE(resolverReason),
+          _TRUNCATE,
+          TEXT("The process-scoped presentation observer is unavailable "
+               "(result %lu; StartTrace %lu; DxgKrnl %lu; Win32k %lu; OpenTrace %lu)."),
+          observerStatus.error,
+          observerStatus.startTraceError,
+          observerStatus.dxgKrnlError,
+          observerStatus.win32kError,
+          observerStatus.openTraceError);
+        return render_smokeFailure(4, resolverReason);
+      }
+    }
     initialClientSize.cx = RECTWIDTH(initialClientRect);
     initialClientSize.cy = RECTHEIGHT(initialClientRect);
     initialGraphicsApi = lpsd->graphicsApi;
@@ -4725,19 +5294,22 @@ int renderRunGraphicsSmoke(
 
     for (backendIndex = 0; backendIndex < availableBackendCount; ++backendIndex)
     {
-      static const MAGPRESENTATIONTARGET flipTargets[] =
+      static const MAGPRESENTATIONTARGET d3d11Targets[] =
       {
         MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP,
         MAG_PRESENT_COMPOSED_FLIP,
         MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP,
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI,
       };
       UINT targetIndex;
+      void* modernPresenterIdentity = NULL;
+      UINT64 modernPresenterGeneration = 0;
 
       if (GRAPHICS_API_D3D11 != availableBackends[backendIndex]->api)
       {
         continue;
       }
-      for (targetIndex = 0; targetIndex < ARRAYSIZE(flipTargets); ++targetIndex)
+      for (targetIndex = 0; targetIndex < ARRAYSIZE(d3d11Targets); ++targetIndex)
       {
         const SIZE resizeSizes[] = { { 337, 251 }, { 509, 347 } };
         MAGPRESENTATIONSETTINGS flipPresentation;
@@ -4745,7 +5317,7 @@ int renderRunGraphicsSmoke(
         UINT resizeIndex;
 
         magPresentationSettingsSetDefaults(&flipPresentation);
-        flipPresentation.target = flipTargets[targetIndex];
+        flipPresentation.target = d3d11Targets[targetIndex];
         flipPresentation.host = MAG_HOST_REDIRECTED_HWND;
         flipPresentation.surfaceOwnership = MAG_SURFACE_REDIRECTION;
         flipPresentation.copyRequirement = MAG_COPY_ALLOW_CPU_ROUND_TRIP;
@@ -4760,6 +5332,24 @@ int renderRunGraphicsSmoke(
               ARRAYSIZE(reason)))
         {
           return render_smokeFailure(560 + (int)targetIndex, reason);
+        }
+        if (targetIndex < 3)
+        {
+          UINT64 generation = lpsd->graphicsBackend->GetResourceGeneration(
+            lpsd->graphicsState);
+
+          if (!modernPresenterIdentity)
+          {
+            modernPresenterIdentity = lpsd->graphicsState;
+            modernPresenterGeneration = generation;
+          }
+          else if (modernPresenterIdentity != lpsd->graphicsState ||
+                   modernPresenterGeneration != generation)
+          {
+            return render_smokeFailure(
+              568,
+              TEXT("Changing only the requested modern presentation outcome recreated the D3D11 presenter."));
+          }
         }
         render_fillSmokeFrame(lpsd);
         if (!render_tryPresentPixelFrame(hWnd) || !render_stampPresentedContent(hWnd))
@@ -4777,19 +5367,86 @@ int renderRunGraphicsSmoke(
           }
         }
       }
+      {
+        const MAGWAITABLESWAPCHAINMODE waitableModes[] =
+        {
+          MAG_WAITABLE_SWAP_CHAIN_ENABLED,
+          MAG_WAITABLE_SWAP_CHAIN_DISABLED,
+        };
+        UINT modeIndex;
+
+        for (modeIndex = 0;
+             modeIndex < ARRAYSIZE(waitableModes);
+             ++modeIndex)
+        {
+          MAGPRESENTATIONSETTINGS pacingPresentation;
+          HANDLE frameWaitHandle;
+          TCHAR reason[256];
+
+          magPresentationSettingsSetDefaults(&pacingPresentation);
+          pacingPresentation.target = MAG_PRESENT_COMPOSED_FLIP;
+          pacingPresentation.host = MAG_HOST_REDIRECTED_HWND;
+          pacingPresentation.surfaceOwnership = MAG_SURFACE_REDIRECTION;
+          pacingPresentation.copyRequirement = MAG_COPY_ALLOW_CPU_ROUND_TRIP;
+          pacingPresentation.waitableSwapChainMode = waitableModes[modeIndex];
+          if (!renderApplyFullSettings(
+                hWnd,
+                GRAPHICS_API_D3D11,
+                CAPTURE_API_GDI_BITBLT,
+                UI_GRAPHICS_API_NATIVE,
+                TEXT_RENDERER_DIRECTWRITE,
+                &pacingPresentation,
+                reason,
+                ARRAYSIZE(reason)))
+          {
+            return render_smokeFailure(590 + (int)modeIndex, reason);
+          }
+          frameWaitHandle = renderDuplicateFrameWaitHandle(hWnd);
+          if ((MAG_WAITABLE_SWAP_CHAIN_ENABLED == waitableModes[modeIndex]) !=
+                (NULL != frameWaitHandle))
+          {
+            if (frameWaitHandle)
+            {
+              CloseHandle(frameWaitHandle);
+            }
+            return render_smokeFailure(
+              592 + (int)modeIndex,
+              TEXT("The D3D11 frame-latency handle did not match the resolved waitable-chain mode."));
+          }
+          if (frameWaitHandle)
+          {
+            CloseHandle(frameWaitHandle);
+          }
+          render_fillSmokeFrame(lpsd);
+          if (!render_tryPresentPixelFrame(hWnd) ||
+              !render_stampPresentedContent(hWnd) ||
+              !render_smokeResizeWindow(
+                hWnd,
+                GRAPHICS_API_D3D11,
+                modeIndex
+                  ? (SIZE){ 433, 311 }
+                  : (SIZE){ 401, 289 }))
+          {
+            return 594 + (int)modeIndex;
+          }
+        }
+      }
     }
 
     for (backendIndex = 0; backendIndex < availableBackendCount; ++backendIndex)
     {
+      MAGPRESENTATIONSETTINGS capturePresentation;
       TCHAR reason[256];
       UINT captureApi;
 
-      if (!renderApplySettings(
+      magPresentationSettingsSetDefaults(&capturePresentation);
+      if (!renderApplyFullSettings(
             hWnd,
             availableBackends[backendIndex]->api,
             CAPTURE_API_GDI_BITBLT,
             UI_GRAPHICS_API_DIRECT2D,
             TEXT_RENDERER_DIRECTWRITE,
+            &capturePresentation,
             reason,
             ARRAYSIZE(reason)))
       {
@@ -4800,16 +5457,19 @@ int renderRunGraphicsSmoke(
       {
         UINT frameIndex;
 
-        if (!renderApplySettings(
+        if (!renderApplyFullSettings(
               hWnd,
               availableBackends[backendIndex]->api,
               (CAPTUREAPI)captureApi,
               UI_GRAPHICS_API_DIRECT2D,
               TEXT_RENDERER_DIRECTWRITE,
+              &capturePresentation,
               reason,
               ARRAYSIZE(reason)))
         {
-          return 510 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi;
+          return render_smokeFailure(
+            510 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi,
+            reason);
         }
         render_fillSmokeFrame(lpsd);
         render_minimapNotifyActivity(hWnd);
@@ -4817,7 +5477,20 @@ int renderRunGraphicsSmoke(
         {
           if (!renderSubmit(hWnd))
           {
-            return 520 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi;
+            _sntprintf_s(
+              reason,
+              ARRAYSIZE(reason),
+              _TRUNCATE,
+              TEXT("Frame submission failed for graphics API %u and capture API %u (backend=%p state=%p pixel=%p activeCapture=%u)."),
+              (UINT)availableBackends[backendIndex]->api,
+              captureApi,
+              (void*)lpsd->graphicsBackend,
+              lpsd->graphicsState,
+              lpsd->frame.pixels,
+              (UINT)lpsd->activeCaptureApi);
+            return render_smokeFailure(
+              520 + (int)backendIndex * CAPTURE_API_COUNT + (int)captureApi,
+              reason);
           }
         }
         if (CAPTURE_API_DWM_PRIVATE_VISUAL == captureApi)
@@ -4859,6 +5532,7 @@ int renderRunGraphicsSmoke(
     {
       const SIZE resizeSizes[] = { { 337, 251 }, { 509, 347 } };
       UINT alphaMode;
+      MAGLAYEREDPRESENTER* layeredPresenterIdentity = NULL;
 
       for (alphaMode = 0; alphaMode < MAG_LAYER_ALPHA_COUNT; ++alphaMode)
       {
@@ -4895,6 +5569,16 @@ int renderRunGraphicsSmoke(
               return render_smokeFailure(
                 600 + (int)alphaMode * 20 + (int)uiApi * 3 + (int)textRenderer,
                 reason);
+            }
+            if (!layeredPresenterIdentity)
+            {
+              layeredPresenterIdentity = lpsd->layeredPresenter;
+            }
+            else if (layeredPresenterIdentity != lpsd->layeredPresenter)
+            {
+              return render_smokeFailure(
+                698,
+                TEXT("A value-only layered-window setting change recreated the persistent DIB presenter."));
             }
             render_fillSmokeFrame(lpsd);
             if (!render_tryPresentPixelFrame(hWnd) || !render_stampPresentedContent(hWnd))
@@ -4947,6 +5631,7 @@ BOOL render_transitionCaptureApi(HWND hWnd, CAPTUREAPI captureApi)
       return NULL != lpsd;
     }
 
+    magPresentationObserverStop();
     render_dwmPrivateDeleteResources(hWnd);
     render_dwmThumbnailDeleteResources(hWnd);
     render_wgcDeleteResources(hWnd);

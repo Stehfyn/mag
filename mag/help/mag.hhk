@@ -1,113 +1,161 @@
 <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
-<HTML>
-<HEAD>
-<meta name="GENERATOR" content="Microsoft&reg; HTML Help Workshop 4.1">
+<HTML><HEAD>
+<meta name="GENERATOR" content="MAG Help source generator">
 <!-- Sitemap 1.0 -->
 </HEAD><BODY>
 <UL>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Capture API">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Close">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Context Menu">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Controls">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="DWM Private Visual">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="DWM Thumbnail">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="DXGI Desktop Duplication">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Escape key">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Exit">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Follow Mouse">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="GDI BitBlt">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Graphics API">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Keyboard Shortcuts">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Lens">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Minimap">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Mouse Controls">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Mouse-relative zoom">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Mouse Wheel">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Overview">
-    <param name="Local" value="index.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Resize">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Settings">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Space key">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Tracking">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Windows Graphics Capture">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Window mode">
-    <param name="Local" value="context_menu.htm">
-  </OBJECT>
-  <LI><OBJECT type="text/sitemap">
-    <param name="Name" value="Zoom">
-    <param name="Local" value="controls.htm">
-  </OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Active pipeline DAG'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Adapters'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Allow tearing'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Alpha mode'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Auto settings'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Blank window'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Buffers'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Capture API'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Chrome capture'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Color key'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Composed Copy with CPU GDI'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Composed Copy with GPU GDI'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Composed Flip'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Composition host'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Configuration status'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Constant alpha'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Context menu'><param name='Local' value='context_menu.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Copy class'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Copy policy'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='CPU round trip'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='d2dwriteabi.h'><param name='Local' value='source/d2dwriteabi_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='d3dkmtx.c'><param name='Local' value='source/d3dkmtx_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='d3dkmtx.h'><param name='Local' value='source/d3dkmtx_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='dcompabi.h'><param name='Local' value='source/dcompabi_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Desktop Window Manager'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Direct2D'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Direct3D 11'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Direct3D 12'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Direct3D 9'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DirectComposition'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DirectWrite'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Display adapter'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Display driver'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DWM Private Visual'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DWM redirection surface'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DWM shared desktop visual'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DWM Thumbnail'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='dwmapix.c'><param name='Local' value='source/dwmapix_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='dwmapix.h'><param name='Local' value='source/dwmapix_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='dwmprivate.c'><param name='Local' value='source/dwmprivate_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='dwmprivate.h'><param name='Local' value='source/dwmprivate_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DXGI'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='DXGI Desktop Duplication'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Electron capture'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Escape key'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Exact presentation target'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Exit'><param name='Local' value='context_menu.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Flicker'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Follow Mouse'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='framework.h'><param name='Local' value='source/framework_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GDI'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GDI BitBlt'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GDI+'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GDI+ flat C API'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='gdiplusabi.h'><param name='Local' value='source/gdiplusabi_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GitHub Desktop capture'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Glyph atlas'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='GPU-local copy'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Graphics API'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Graphics architecture'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics.c'><param name='Local' value='source/graphics_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics.h'><param name='Local' value='source/graphics_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_d3d11.c'><param name='Local' value='source/graphics_d3d11_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_d3d12.c'><param name='Local' value='source/graphics_d3d12_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_d3d9.c'><param name='Local' value='source/graphics_d3d9_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_dcomp.c'><param name='Local' value='source/graphics_dcomp_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_dcomp.h'><param name='Local' value='source/graphics_dcomp_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_gdi.c'><param name='Local' value='source/graphics_gdi_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_gdiplus.c'><param name='Local' value='source/graphics_gdiplus_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_layered.c'><param name='Local' value='source/graphics_layered_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_layered.h'><param name='Local' value='source/graphics_layered_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_opengl.c'><param name='Local' value='source/graphics_opengl_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_presentation_manager.c'><param name='Local' value='source/graphics_presentation_manager_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_presentation_manager.h'><param name='Local' value='source/graphics_presentation_manager_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='graphics_vulkan.c'><param name='Local' value='source/graphics_vulkan_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Hardware adapter'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Hardware Composed Independent Flip'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Help Contents'><param name='Local' value='context_menu.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Help Index'><param name='Local' value='context_menu.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Help Search'><param name='Local' value='context_menu.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='help.c'><param name='Local' value='source/help_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='help.h'><param name='Local' value='source/help_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Immediate settings'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Independent Flip'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Installable Client Driver (ICD)'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Interactive settings nodes'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Kernel-mode display driver'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Keyboard shortcuts'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Latency'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Layered window'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Legacy Copy to front buffer'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Legacy Flip'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Lens'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='mag.c'><param name='Local' value='source/mag_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='mag.h'><param name='Local' value='source/mag_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='main.c'><param name='Local' value='source/main_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Minimap'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Missing application window'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Mouse-relative zoom'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='No redirection surface'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='OpenGL'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Per-pixel alpha'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Presentation Manager'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Presentation model'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Presentation target'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='presentation.c'><param name='Local' value='source/presentation_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='presentation.h'><param name='Local' value='source/presentation_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='presentation_observer.c'><param name='Local' value='source/presentation_observer_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='presentation_observer.h'><param name='Local' value='source/presentation_observer_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Private DWM API'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Redirection surface'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='render.c'><param name='Local' value='source/render_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='render.h'><param name='Local' value='source/render_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Reset settings'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Resize'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Resize flicker'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='resource.h'><param name='Local' value='source/resource_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Resource.rc'><param name='Local' value='source/Resource_rc.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Scan-out'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Settings'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Source code'><param name='Local' value='source.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Space key'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Stale frames'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Startup delay'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Strict zero-copy'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Surface ownership'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Sync interval'><param name='Local' value='settings.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='targetver.h'><param name='Local' value='source/targetver_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Taskbar in Private Visual'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Text renderer'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Traditional layered window'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Troubleshooting'><param name='Local' value='troubleshooting.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='UI API'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='ui_renderer.c'><param name='Local' value='source/ui_renderer_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='ui_renderer.h'><param name='Local' value='source/ui_renderer_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='User-mode display driver'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='View transform and clip'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Vulkan'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Vulkan layers'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Vulkan loader'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Vulkan WSI'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='WARP'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='WDDM'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='WGL'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Window mode'><param name='Local' value='controls.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Windows Graphics Capture'><param name='Local' value='capture_rendering.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Windows graphics kernel'><param name='Local' value='graphics_architecture.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='wingdix.c'><param name='Local' value='source/wingdix_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='wingdix.h'><param name='Local' value='source/wingdix_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='winuserx.c'><param name='Local' value='source/winuserx_c.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='winuserx.h'><param name='Local' value='source/winuserx_h.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Zero-copy'><param name='Local' value='presentation.htm'></OBJECT>
+  <LI><OBJECT type='text/sitemap'><param name='Name' value='Zoom'><param name='Local' value='controls.htm'></OBJECT>
 </UL>
 </BODY></HTML>

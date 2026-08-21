@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_presentation_manager.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_presentation_manager.c</p>
+<h1>graphics_presentation_manager.c</h1>
+<p>Windows 11 Presentation Manager host and surface lifecycle.</p>
+<div class="source-meta"><strong>787 lines</strong> &middot; 23291 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_opengl_c.htm'>&larr; graphics_opengl.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_presentation_manager_h.htm'>graphics_presentation_manager.h &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#define COBJMACROS</span>
+
+<span class='pp'>#include &quot;graphics_presentation_manager.h&quot;</span>
+<span class='pp'>#include &quot;graphics_dcomp.h&quot;</span>
+<span class='pp'>#include &quot;dcompabi.h&quot;</span>
+
+<span class='pp'>#include &lt;Presentation.h&gt;</span>
+<span class='pp'>#include &lt;dwmapi.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;dwmapi&quot;)</span>
+
+<span class='pp'>#define MAG_PRESENTATION_MAX_BUFFERS 16</span>
+
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_IPresentationFactory =
+  { <span class='num'>0x8fb37b58</span>, <span class='num'>0x1d74</span>, <span class='num'>0x4f64</span>, { <span class='num'>0xa4</span>, <span class='num'>0x9c</span>, <span class='num'>0x1f</span>, <span class='num'>0x97</span>, <span class='num'>0xa8</span>, <span class='num'>0x0a</span>, <span class='num'>0x2e</span>, <span class='num'>0xc0</span> } };
+<span class='kw'>static</span> <span class='kw'>const</span> IID IID_MAG_ICompositionFramePresentStatistics =
+  { <span class='num'>0xab41d127</span>, <span class='num'>0xc101</span>, <span class='num'>0x4c0a</span>, { <span class='num'>0x91</span>, <span class='num'>0x1d</span>, <span class='num'>0xf9</span>, <span class='num'>0xf2</span>, <span class='num'>0xe9</span>, <span class='num'>0xd0</span>, <span class='num'>0x8e</span>, <span class='num'>0x64</span> } };
+
+<span class='kw'>typedef</span> <span class='tp'>HRESULT</span> (<span class='kw'>WINAPI</span> *MAGCREATEPRESENTATIONFACTORY)(
+  IUnknown* <span class='tp'>d3dDevice</span>,
+  <span class='tp'>REFIID</span> riid,
+  <span class='kw'>void</span>** presentationFactory);
+<span class='kw'>typedef</span> <span class='fn'>VOID</span> (<span class='kw'>WINAPI</span> *MAGQUERYINTERRUPTTIME)(PULONGLONG interruptTime);
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGPRESENTATIONBUFFERENTRY
+{
+  ID3D11Texture2D*   texture;
+  IPresentationBuffer* presentationBuffer;
+  <span class='tp'>HANDLE</span>             availableEvent;
+} MAGPRESENTATIONBUFFERENTRY;
+
+<span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>
+{
+  <span class='tp'>HMODULE</span>                    dcompModule;
+  IPresentationFactory*      factory;
+  IPresentationManager*      manager;
+  IPresentationSurface*      surface;
+  MAGPRESENTATIONBUFFERENTRY buffers[<span class='mc'>MAG_PRESENTATION_MAX_BUFFERS</span>];
+  <span class='tp'>UINT</span>                       bufferCount;
+  <span class='tp'>MAGDCOMPPRESENTER</span>*         composition;
+  <span class='tp'>HANDLE</span>                     compositionSurfaceHandle;
+  <span class='tp'>HANDLE</span>                     lostEvent;
+  <span class='tp'>HANDLE</span>                     statisticsEvent;
+  <span class='tp'>SIZE</span>                       reservoirSize;
+  <span class='tp'>SIZE</span>                       clientSize;
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span>    settings;
+  <span class='tp'>UINT</span>                       nextBuffer;
+  <span class='tp'>UINT64</span>                     resourceGeneration;
+  <span class='tp'>UINT64</span>                     lastSubmittedPresentId;
+  <span class='tp'>UINT64</span>                     preferredDuration;
+  <span class='tp'>UINT64</span>                     nextTargetTime;
+  MAGQUERYINTERRUPTTIME      queryInterruptTime;
+  <span class='tp'>MAGPRESENTATIONTARGET</span>      observedTarget;
+  <span class='tp'>BOOL</span>                       haveObservedTarget;
+};
+
+<span class='kw'>static</span> MAGQUERYINTERRUPTTIME <span class='fn'>magPresentationManagerGetInterruptTimeQuery</span>(<span class='kw'>void</span>)
+{
+  <span class='tp'>HMODULE</span> kernel32 = <span class='fn'>GetModuleHandle</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;kernel32.dll&quot;</span>));
+  MAGQUERYINTERRUPTTIME query = NULL;
+
+  <span class='kw'>if</span> (kernel32)
+  {
+    query = (MAGQUERYINTERRUPTTIME)<span class='fn'>GetProcAddress</span>(
+      kernel32,
+      <span class='str'>&quot;QueryInterruptTimePrecise&quot;</span>);
+    <span class='kw'>if</span> (!query)
+    {
+      query = (MAGQUERYINTERRUPTTIME)<span class='fn'>GetProcAddress</span>(
+        kernel32,
+        <span class='str'>&quot;QueryInterruptTime&quot;</span>);
+    }
+  }
+  <span class='kw'>return</span> query;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magPresentationManagerPreferredDuration</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings)
+{
+  DWM_TIMING_INFO timing = { <span class='kw'>sizeof</span>(timing) };
+
+  <span class='kw'>if</span> (!settings || !settings-&gt;syncInterval)
+  {
+    <span class='kw'>return</span> <span class='num'>0</span>;
+  }
+  <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>DwmGetCompositionTimingInfo</span>(hWnd, &amp;timing)) &amp;&amp;
+      timing.rateRefresh.uiNumerator &amp;&amp;
+      timing.rateRefresh.uiDenominator)
+  {
+    <span class='kw'>return</span> (<span class='num'>10000000ULL</span> * timing.rateRefresh.uiDenominator *
+      settings-&gt;syncInterval) / timing.rateRefresh.uiNumerator;
+  }
+  <span class='kw'>return</span> (<span class='num'>10000000ULL</span> * settings-&gt;syncInterval) / <span class='num'>60ULL</span>;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magPresentationManagerSetReason</span>(
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount,
+  <span class='tp'>LPCTSTR</span> value)
+{
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      <span class='fn'>lstrcpyn</span>(reason, value, reasonCount);
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerRequiresIndependentFlip</span>(
+  <span class='tp'>MAGPRESENTATIONTARGET</span> target)
+{
+    <span class='kw'>return</span> MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP == target ||
+      MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP == target;
+}
+
+<span class='kw'>static</span> DXGI_ALPHA_MODE <span class='fn'>magPresentationManagerAlphaMode</span>(
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings)
+{
+    <span class='kw'>return</span> MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == settings-&gt;alphaMode
+      ? DXGI_ALPHA_MODE_PREMULTIPLIED
+      : DXGI_ALPHA_MODE_IGNORE;
+}
+
+<span class='kw'>static</span> <span class='tp'>HRESULT</span> <span class='fn'>magPresentationManagerRestrictToSelectedOutput</span>(
+  IPresentationSurface* surface,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings)
+{
+    IDXGIAdapter1* adapter = NULL;
+    IDXGIOutput* selectedOutput = NULL;
+    <span class='tp'>UINT</span> outputIndex;
+    <span class='tp'>HRESULT</span> hr = DXGI_ERROR_NOT_FOUND;
+
+    <span class='kw'>if</span> (!surface || !settings ||
+        MAG_DISPLAY_ADAPTER_EXPLICIT != settings-&gt;display.<span class='tp'>mode</span>)
+    {
+      <span class='kw'>return</span> S_OK;
+    }
+    <span class='kw'>if</span> (!<span class='fn'>magAdapterOpenDxgi</span>(settings-&gt;display.adapterLuid, &amp;adapter))
+    {
+      <span class='kw'>return</span> DXGI_ERROR_NOT_FOUND;
+    }
+    <span class='kw'>for</span> (outputIndex = <span class='num'>0</span>; ; ++outputIndex)
+    {
+      IDXGIOutput* output = NULL;
+      DXGI_OUTPUT_DESC desc;
+
+      hr = <span class='fn'>IDXGIAdapter1_EnumOutputs</span>(adapter, outputIndex, &amp;output);
+      <span class='kw'>if</span> (DXGI_ERROR_NOT_FOUND == hr)
+      {
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr) &amp;&amp; output &amp;&amp;
+          <span class='fn'>SUCCEEDED</span>(<span class='fn'>IDXGIOutput_GetDesc</span>(output, &amp;desc)) &amp;&amp;
+          <span class='num'>0</span> == <span class='fn'>lstrcmpi</span>(desc.DeviceName, settings-&gt;display.deviceName))
+      {
+        selectedOutput = output;
+        <span class='kw'>break</span>;
+      }
+      <span class='kw'>if</span> (output)
+      {
+        <span class='fn'>IDXGIOutput_Release</span>(output);
+      }
+    }
+    <span class='kw'>if</span> (selectedOutput)
+    {
+      hr = <span class='fn'>IPresentationSurface_RestrictToOutput</span>(
+        surface,
+        (IUnknown*)selectedOutput);
+      <span class='fn'>IDXGIOutput_Release</span>(selectedOutput);
+    }
+    <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+    <span class='kw'>return</span> hr;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magPresentationManagerDrainStatistics</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter)
+{
+    <span class='kw'>if</span> (!presenter || !presenter-&gt;manager || !presenter-&gt;statisticsEvent ||
+        WAIT_OBJECT_0 != <span class='fn'>WaitForSingleObject</span>(presenter-&gt;statisticsEvent, <span class='num'>0</span>))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>for</span> (;;)
+    {
+      IPresentStatistics* statistics = NULL;
+      <span class='tp'>HRESULT</span> hr = <span class='fn'>IPresentationManager_GetNextPresentStatistics</span>(
+        presenter-&gt;manager,
+        &amp;statistics);
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !statistics)
+      {
+        <span class='kw'>break</span>;
+      }
+
+      <span class='kw'>if</span> (PresentStatisticsKind_IndependentFlipFrame ==
+          <span class='fn'>IPresentStatistics_GetKind</span>(statistics))
+      {
+        presenter-&gt;observedTarget = MAG_PRESENT_HARDWARE_INDEPENDENT_FLIP;
+        presenter-&gt;haveObservedTarget = TRUE;
+      }
+      <span class='kw'>else</span> <span class='kw'>if</span> (PresentStatisticsKind_CompositionFrame ==
+               <span class='fn'>IPresentStatistics_GetKind</span>(statistics))
+      {
+        ICompositionFramePresentStatistics* compositionStatistics = NULL;
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IPresentStatistics_QueryInterface</span>(
+              statistics,
+              &amp;IID_MAG_ICompositionFramePresentStatistics,
+              (<span class='kw'>void</span>**)&amp;compositionStatistics)))
+        {
+          <span class='tp'>UINT</span> instanceCount = <span class='num'>0</span>;
+          <span class='kw'>const</span> CompositionFrameDisplayInstance* instances = NULL;
+          <span class='tp'>UINT</span> i;
+
+          <span class='fn'>ICompositionFramePresentStatistics_GetDisplayInstanceArray</span>(
+            compositionStatistics,
+            &amp;instanceCount,
+            &amp;instances);
+          presenter-&gt;observedTarget = MAG_PRESENT_COMPOSED_FLIP;
+          <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; instanceCount; ++i)
+          {
+            <span class='kw'>if</span> (CompositionFrameInstanceKind_ScanoutOnScreen ==
+                instances[i].instanceKind)
+            {
+              presenter-&gt;observedTarget =
+                MAG_PRESENT_HARDWARE_COMPOSED_INDEPENDENT_FLIP;
+              <span class='kw'>break</span>;
+            }
+          }
+          presenter-&gt;haveObservedTarget = TRUE;
+          <span class='fn'>ICompositionFramePresentStatistics_Release</span>(compositionStatistics);
+        }
+      }
+      <span class='fn'>IPresentStatistics_Release</span>(statistics);
+    }
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  ID3D11Device* device,
+  <span class='tp'>SIZE</span> reservoirSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* settings,
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>** presenterOut,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter;
+    MAGCREATEPRESENTATIONFACTORY createFactory;
+    <span class='tp'>HRESULT</span> hr;
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    }
+    <span class='kw'>if</span> (!hWnd || !device || !settings || !presenterOut ||
+        reservoirSize.cx &lt; <span class='num'>1</span> || reservoirSize.cy &lt; <span class='num'>1</span> ||
+        settings-&gt;bufferCount &lt; <span class='num'>2</span> ||
+        settings-&gt;bufferCount &gt; <span class='mc'>MAG_PRESENTATION_MAX_BUFFERS</span>)
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Invalid Presentation Manager parameters.&quot;</span>));
+      <span class='kw'>return</span> FALSE;
+    }
+    *presenterOut = NULL;
+
+    presenter = (<span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      <span class='kw'>sizeof</span>(*presenter));
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation Manager state allocation failed.&quot;</span>));
+      <span class='kw'>return</span> FALSE;
+    }
+    presenter-&gt;reservoirSize = reservoirSize;
+    presenter-&gt;clientSize = reservoirSize;
+    presenter-&gt;settings = *settings;
+    presenter-&gt;bufferCount = settings-&gt;bufferCount;
+    presenter-&gt;observedTarget = MAG_PRESENT_AUTO;
+
+    presenter-&gt;dcompModule = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;dcomp.dll&quot;</span>));
+    createFactory = presenter-&gt;dcompModule
+      ? (MAGCREATEPRESENTATIONFACTORY)<span class='fn'>GetProcAddress</span>(
+          presenter-&gt;dcompModule,
+          <span class='str'>&quot;CreatePresentationFactory&quot;</span>)
+      : NULL;
+    <span class='kw'>if</span> (!createFactory)
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;CreatePresentationFactory is unavailable.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>createFactory</span>(
+      (IUnknown*)device,
+      &amp;IID_MAG_IPresentationFactory,
+      (<span class='kw'>void</span>**)&amp;presenter-&gt;factory);
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr) || !presenter-&gt;factory)
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected Direct3D device cannot create a presentation factory.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='fn'>magPresentationManagerRequiresIndependentFlip</span>(settings-&gt;target)
+          ? !<span class='fn'>IPresentationFactory_IsPresentationSupportedWithIndependentFlip</span>(
+              presenter-&gt;factory)
+          : !<span class='fn'>IPresentationFactory_IsPresentationSupported</span>(presenter-&gt;factory))
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>magPresentationManagerRequiresIndependentFlip</span>(settings-&gt;target)
+          ? <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected adapter cannot allocate displayable Presentation Manager surfaces for Independent Flip.&quot;</span>)
+          : <span class='fn'>TEXT</span>(<span class='str'>&quot;The selected adapter does not support Presentation Manager surfaces.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>IPresentationFactory_CreatePresentationManager</span>(
+      presenter-&gt;factory,
+      &amp;presenter-&gt;manager);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>DCompositionCreateSurfaceHandle</span>(
+        <span class='mc'>MAG_COMPOSITIONOBJECT_ALL_ACCESS</span>,
+        NULL,
+        &amp;presenter-&gt;compositionSurfaceHandle);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_CreatePresentationSurface</span>(
+        presenter-&gt;manager,
+        presenter-&gt;compositionSurfaceHandle,
+        &amp;presenter-&gt;surface);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationSurface_SetAlphaMode</span>(
+        presenter-&gt;surface,
+        <span class='fn'>magPresentationManagerAlphaMode</span>(settings));
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationSurface_SetColorSpace</span>(
+        presenter-&gt;surface,
+        DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>magPresentationManagerRestrictToSelectedOutput</span>(
+        presenter-&gt;surface,
+        settings);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='fn'>IPresentationSurface_SetTag</span>(presenter-&gt;surface, (UINT_PTR)presenter);
+      presenter-&gt;preferredDuration =
+        <span class='fn'>magPresentationManagerPreferredDuration</span>(hWnd, settings);
+      presenter-&gt;queryInterruptTime =
+        <span class='fn'>magPresentationManagerGetInterruptTimeQuery</span>();
+      <span class='kw'>if</span> (presenter-&gt;preferredDuration)
+      {
+        SystemInterruptTime preferredDuration =
+          { presenter-&gt;preferredDuration };
+        SystemInterruptTime tolerance =
+          { <span class='fn'>max</span>(<span class='num'>1ULL</span>, presenter-&gt;preferredDuration / <span class='num'>20ULL</span>) };
+        <span class='tp'>HRESULT</span> durationResult;
+
+        durationResult = <span class='fn'>IPresentationManager_SetPreferredPresentDuration</span>(
+          presenter-&gt;manager,
+          preferredDuration,
+          tolerance);
+        <span class='kw'>if</span> (<span class='fn'>FAILED</span>(durationResult))
+        {
+          <span class='cm'>/* Custom cadence is an optimization, not an ownership prerequisite.
+             Keep the displayable-buffer path alive when the driver declines
+             this duration and let Present() use the system cadence. */</span>
+          presenter-&gt;preferredDuration = <span class='num'>0</span>;
+        }
+      }
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_EnablePresentStatisticsKind</span>(
+        presenter-&gt;manager,
+        PresentStatisticsKind_PresentStatus,
+        (boolean)TRUE);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_EnablePresentStatisticsKind</span>(
+        presenter-&gt;manager,
+        PresentStatisticsKind_CompositionFrame,
+        (boolean)TRUE);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_EnablePresentStatisticsKind</span>(
+        presenter-&gt;manager,
+        PresentStatisticsKind_IndependentFlipFrame,
+        (boolean)TRUE);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_GetLostEvent</span>(
+        presenter-&gt;manager,
+        &amp;presenter-&gt;lostEvent);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_GetPresentStatisticsAvailableEvent</span>(
+        presenter-&gt;manager,
+        &amp;presenter-&gt;statisticsEvent);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;Presentation Manager queue/statistics initialization failed.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; presenter-&gt;bufferCount; ++i)
+    {
+      D3D11_TEXTURE2D_DESC textureDesc;
+      MAGPRESENTATIONBUFFERENTRY* entry = &amp;presenter-&gt;buffers[i];
+
+      <span class='fn'>ZeroMemory</span>(&amp;textureDesc, <span class='kw'>sizeof</span>(textureDesc));
+      textureDesc.Width = (<span class='tp'>UINT</span>)reservoirSize.cx;
+      textureDesc.Height = (<span class='tp'>UINT</span>)reservoirSize.cy;
+      textureDesc.MipLevels = <span class='num'>1</span>;
+      textureDesc.ArraySize = <span class='num'>1</span>;
+      textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      textureDesc.SampleDesc.Count = <span class='num'>1</span>;
+      textureDesc.Usage = D3D11_USAGE_DEFAULT;
+      textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
+        D3D11_BIND_RENDER_TARGET;
+      textureDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED |
+        D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+        D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
+      hr = <span class='fn'>ID3D11Device_CreateTexture2D</span>(
+        device,
+        &amp;textureDesc,
+        NULL,
+        &amp;entry-&gt;texture);
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        hr = <span class='fn'>IPresentationManager_AddBufferFromResource</span>(
+          presenter-&gt;manager,
+          (IUnknown*)entry-&gt;texture,
+          &amp;entry-&gt;presentationBuffer);
+      }
+      <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+      {
+        hr = <span class='fn'>IPresentationBuffer_GetAvailableEvent</span>(
+          entry-&gt;presentationBuffer,
+          &amp;entry-&gt;availableEvent);
+      }
+      <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+      {
+        <span class='fn'>magPresentationManagerSetReason</span>(
+          reason,
+          reasonCount,
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;A displayable Presentation Manager buffer could not be allocated or registered.&quot;</span>));
+        <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    <span class='kw'>if</span> (!<span class='fn'>magDCompPresenterCreateFromSurfaceHandle</span>(
+          hWnd,
+          presenter-&gt;compositionSurfaceHandle,
+          &amp;presenter-&gt;composition))
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;The Presentation Manager surface could not be attached to the DirectComposition tree.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (MAG_LAYER_ALPHA_CONSTANT == settings-&gt;alphaMode &amp;&amp;
+        !<span class='fn'>magDCompPresenterSetOpacity</span>(
+          presenter-&gt;composition,
+          (<span class='tp'>FLOAT</span>)settings-&gt;constantAlpha / <span class='num'>255.0f</span>))
+    {
+      <span class='fn'>magPresentationManagerSetReason</span>(
+        reason,
+        reasonCount,
+        <span class='fn'>TEXT</span>(<span class='str'>&quot;DirectComposition rejected the requested constant opacity.&quot;</span>));
+      <span class='fn'>magPresentationManagerPresenterDestroy</span>(presenter);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    presenter-&gt;resourceGeneration = <span class='num'>1</span>;
+    *presenterOut = presenter;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>void</span> <span class='fn'>magPresentationManagerPresenterDestroy</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!presenter)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (presenter-&gt;manager &amp;&amp;
+        <span class='fn'>IPresentationManager_GetNextPresentId</span>(presenter-&gt;manager) &gt; <span class='num'>1</span>)
+    {
+      <span class='fn'>IPresentationManager_CancelPresentsFrom</span>(presenter-&gt;manager, <span class='num'>1</span>);
+    }
+    <span class='kw'>if</span> (presenter-&gt;surface)
+    {
+      <span class='fn'>IPresentationSurface_SetBuffer</span>(presenter-&gt;surface, NULL);
+      <span class='kw'>if</span> (presenter-&gt;manager)
+      {
+        <span class='fn'>IPresentationManager_Present</span>(presenter-&gt;manager);
+      }
+    }
+    <span class='fn'>magDCompPresenterDestroy</span>(presenter-&gt;composition);
+    presenter-&gt;composition = NULL;
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; presenter-&gt;bufferCount; ++i)
+    {
+      MAGPRESENTATIONBUFFERENTRY* entry = &amp;presenter-&gt;buffers[i];
+      <span class='kw'>if</span> (entry-&gt;availableEvent)
+      {
+        <span class='fn'>CloseHandle</span>(entry-&gt;availableEvent);
+      }
+      <span class='kw'>if</span> (entry-&gt;presentationBuffer)
+      {
+        <span class='fn'>IPresentationBuffer_Release</span>(entry-&gt;presentationBuffer);
+      }
+      <span class='kw'>if</span> (entry-&gt;texture)
+      {
+        <span class='fn'>ID3D11Texture2D_Release</span>(entry-&gt;texture);
+      }
+    }
+    <span class='kw'>if</span> (presenter-&gt;surface)
+    {
+      <span class='fn'>IPresentationSurface_Release</span>(presenter-&gt;surface);
+    }
+    <span class='kw'>if</span> (presenter-&gt;manager)
+    {
+      <span class='fn'>IPresentationManager_Release</span>(presenter-&gt;manager);
+    }
+    <span class='kw'>if</span> (presenter-&gt;factory)
+    {
+      <span class='fn'>IPresentationFactory_Release</span>(presenter-&gt;factory);
+    }
+    <span class='kw'>if</span> (presenter-&gt;statisticsEvent)
+    {
+      <span class='fn'>CloseHandle</span>(presenter-&gt;statisticsEvent);
+    }
+    <span class='kw'>if</span> (presenter-&gt;lostEvent)
+    {
+      <span class='fn'>CloseHandle</span>(presenter-&gt;lostEvent);
+    }
+    <span class='kw'>if</span> (presenter-&gt;compositionSurfaceHandle)
+    {
+      <span class='fn'>CloseHandle</span>(presenter-&gt;compositionSurfaceHandle);
+    }
+    <span class='kw'>if</span> (presenter-&gt;dcompModule)
+    {
+      <span class='fn'>FreeLibrary</span>(presenter-&gt;dcompModule);
+    }
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, presenter);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterSetEnabled</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>BOOL</span> enabled)
+{
+    <span class='kw'>return</span> presenter &amp;&amp; <span class='fn'>magDCompPresenterSetEnabled</span>(
+      presenter-&gt;composition,
+      enabled);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterResize</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>SIZE</span> clientSize)
+{
+    <span class='kw'>if</span> (!presenter || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span> ||
+        clientSize.cx &gt; presenter-&gt;reservoirSize.cx ||
+        clientSize.cy &gt; presenter-&gt;reservoirSize.cy)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    presenter-&gt;clientSize = clientSize;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterAcquire</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>BOOL</span> allowWait,
+  ID3D11Texture2D** textureOut,
+  <span class='tp'>UINT</span>* bufferIndexOut)
+{
+    <span class='tp'>UINT</span> attempt;
+
+    <span class='kw'>if</span> (!presenter || !textureOut || !bufferIndexOut || !presenter-&gt;bufferCount)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *textureOut = NULL;
+    *bufferIndexOut = <span class='num'>0</span>;
+    <span class='fn'>magPresentationManagerDrainStatistics</span>(presenter);
+    <span class='kw'>if</span> (presenter-&gt;lostEvent &amp;&amp;
+        WAIT_OBJECT_0 == <span class='fn'>WaitForSingleObject</span>(presenter-&gt;lostEvent, <span class='num'>0</span>))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (attempt = <span class='num'>0</span>; attempt &lt; (allowWait ? <span class='num'>2U</span> : <span class='num'>1U</span>); ++attempt)
+    {
+      <span class='tp'>UINT</span> offset;
+      <span class='kw'>for</span> (offset = <span class='num'>0</span>; offset &lt; presenter-&gt;bufferCount; ++offset)
+      {
+        <span class='tp'>UINT</span> index = (presenter-&gt;nextBuffer + offset) % presenter-&gt;bufferCount;
+        boolean available = (boolean)FALSE;
+        <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(<span class='fn'>IPresentationBuffer_IsAvailable</span>(
+              presenter-&gt;buffers[index].presentationBuffer,
+              &amp;available)) &amp;&amp; available)
+        {
+          *textureOut = presenter-&gt;buffers[index].texture;
+          <span class='fn'>ID3D11Texture2D_AddRef</span>(*textureOut);
+          *bufferIndexOut = index;
+          presenter-&gt;nextBuffer = (index + <span class='num'>1U</span>) % presenter-&gt;bufferCount;
+          <span class='kw'>return</span> TRUE;
+        }
+      }
+      <span class='kw'>if</span> (allowWait)
+      {
+        <span class='tp'>HANDLE</span> events[<span class='mc'>MAG_PRESENTATION_MAX_BUFFERS</span> + <span class='num'>1</span>];
+        <span class='tp'>DWORD</span> eventCount = <span class='num'>0</span>;
+        <span class='tp'>DWORD</span> wait;
+        <span class='tp'>UINT</span> i;
+
+        <span class='kw'>if</span> (presenter-&gt;lostEvent)
+        {
+          events[eventCount++] = presenter-&gt;lostEvent;
+        }
+        <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; presenter-&gt;bufferCount; ++i)
+        {
+          events[eventCount++] = presenter-&gt;buffers[i].availableEvent;
+        }
+        wait = <span class='fn'>WaitForMultipleObjects</span>(eventCount, events, FALSE, <span class='num'>1000</span>);
+        <span class='kw'>if</span> (WAIT_FAILED == wait || WAIT_TIMEOUT == wait ||
+            (presenter-&gt;lostEvent &amp;&amp; WAIT_OBJECT_0 == wait))
+        {
+          <span class='kw'>return</span> FALSE;
+        }
+      }
+    }
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterPresent</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>UINT</span> bufferIndex,
+  <span class='tp'>SIZE</span> contentSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    <span class='tp'>RECT</span> sourceRect;
+    SystemInterruptTime targetTime;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!presenter || bufferIndex &gt;= presenter-&gt;bufferCount ||
+        contentSize.cx &lt; <span class='num'>1</span> || contentSize.cy &lt; <span class='num'>1</span> ||
+        contentSize.cx &gt; presenter-&gt;reservoirSize.cx ||
+        contentSize.cy &gt; presenter-&gt;reservoirSize.cy)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (intent &amp;&amp; intent-&gt;<span class='tp'>restartSequence</span>)
+    {
+      <span class='fn'>IPresentationManager_CancelPresentsFrom</span>(presenter-&gt;manager, <span class='num'>1</span>);
+      presenter-&gt;nextTargetTime = <span class='num'>0</span>;
+    }
+
+    <span class='fn'>SetRect</span>(&amp;sourceRect, <span class='num'>0</span>, <span class='num'>0</span>, contentSize.cx, contentSize.cy);
+    presenter-&gt;lastSubmittedPresentId =
+      <span class='fn'>IPresentationManager_GetNextPresentId</span>(presenter-&gt;manager);
+    hr = <span class='fn'>IPresentationSurface_SetSourceRect</span>(presenter-&gt;surface, &amp;sourceRect);
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationSurface_SetBuffer</span>(
+        presenter-&gt;surface,
+        presenter-&gt;buffers[bufferIndex].presentationBuffer);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='kw'>const</span> <span class='tp'>BOOL</span> forceVSyncInterrupt =
+        (intent &amp;&amp; intent-&gt;synchronize) ||
+        (<span class='num'>0</span> == (presenter-&gt;lastSubmittedPresentId % presenter-&gt;bufferCount));
+      hr = <span class='fn'>IPresentationManager_ForceVSyncInterrupt</span>(
+        presenter-&gt;manager,
+        (boolean)forceVSyncInterrupt);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      <span class='fn'>ZeroMemory</span>(&amp;targetTime, <span class='kw'>sizeof</span>(targetTime));
+      <span class='kw'>if</span> (presenter-&gt;preferredDuration)
+      {
+        <span class='tp'>UINT64</span> now = <span class='num'>0</span>;
+
+        <span class='kw'>if</span> (presenter-&gt;queryInterruptTime)
+        {
+          presenter-&gt;<span class='fn'>queryInterruptTime</span>(&amp;now);
+        }
+        <span class='kw'>else</span>
+        {
+          now = <span class='fn'>GetTickCount64</span>() * <span class='num'>10000ULL</span>;
+        }
+        <span class='kw'>if</span> (!presenter-&gt;nextTargetTime ||
+            presenter-&gt;nextTargetTime + presenter-&gt;preferredDuration &lt; now)
+        {
+          presenter-&gt;nextTargetTime = now;
+        }
+        targetTime.value = presenter-&gt;nextTargetTime;
+        presenter-&gt;nextTargetTime += presenter-&gt;preferredDuration;
+      }
+      hr = <span class='fn'>IPresentationManager_SetTargetTime</span>(presenter-&gt;manager, targetTime);
+    }
+    <span class='kw'>if</span> (<span class='fn'>SUCCEEDED</span>(hr))
+    {
+      hr = <span class='fn'>IPresentationManager_Present</span>(presenter-&gt;manager);
+    }
+    <span class='fn'>magPresentationManagerDrainStatistics</span>(presenter);
+    <span class='kw'>return</span> <span class='fn'>SUCCEEDED</span>(hr);
+}
+
+<span class='tp'>HANDLE</span> <span class='fn'>magPresentationManagerPresenterGetFrameWaitHandle</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter)
+{
+    <span class='kw'>if</span> (!presenter || !presenter-&gt;bufferCount)
+    {
+      <span class='kw'>return</span> NULL;
+    }
+    <span class='kw'>return</span> presenter-&gt;buffers[presenter-&gt;nextBuffer].availableEvent;
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterGetNextEstimatedFrameTime</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  LONGLONG* frameTime)
+{
+    <span class='kw'>return</span> presenter &amp;&amp; <span class='fn'>magDCompPresenterGetNextEstimatedFrameTime</span>(
+      presenter-&gt;composition,
+      frameTime);
+}
+
+<span class='tp'>BOOL</span> <span class='fn'>magPresentationManagerPresenterGetObservedTarget</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter,
+  <span class='tp'>UINT</span>* target)
+{
+    <span class='kw'>if</span> (!presenter || !target)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>magPresentationManagerDrainStatistics</span>(presenter);
+    <span class='kw'>if</span> (!presenter-&gt;haveObservedTarget)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *target = (<span class='tp'>UINT</span>)presenter-&gt;observedTarget;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='tp'>UINT64</span> <span class='fn'>magPresentationManagerPresenterGetResourceGeneration</span>(
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presenter)
+{
+    <span class='kw'>return</span> presenter ? presenter-&gt;resourceGeneration : <span class='num'>0</span>;
+}
+</pre>
+<p class="source-nav"><a href='graphics_opengl_c.htm'>&larr; graphics_opengl.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_presentation_manager_h.htm'>graphics_presentation_manager.h &rarr;</a></p>
+</body>
+</html>

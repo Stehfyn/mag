@@ -61,6 +61,14 @@ typedef enum MAGLAYEREDALPHAMODE
   MAG_LAYER_ALPHA_COUNT
 } MAGLAYEREDALPHAMODE;
 
+typedef enum MAGWAITABLESWAPCHAINMODE
+{
+  MAG_WAITABLE_SWAP_CHAIN_AUTO = 0,
+  MAG_WAITABLE_SWAP_CHAIN_ENABLED,
+  MAG_WAITABLE_SWAP_CHAIN_DISABLED,
+  MAG_WAITABLE_SWAP_CHAIN_MODE_COUNT
+} MAGWAITABLESWAPCHAINMODE;
+
 typedef enum MAGDISPLAYADAPTERMODE
 {
   MAG_DISPLAY_ADAPTER_AUTO = 0,
@@ -120,6 +128,7 @@ typedef struct MAGPRESENTATIONSETTINGS
   COLORREF colorKey;
   BOOL strictTarget;
   BOOL allowTearing;
+  MAGWAITABLESWAPCHAINMODE waitableSwapChainMode;
   UINT bufferCount;
   UINT maximumFrameLatency;
   UINT syncInterval;
@@ -146,6 +155,57 @@ typedef struct MAGOUTPUTINFO
   UINT refreshDenominator;
   BOOL attachedToDesktop;
   BOOL hdr;
+  BOOL hardwareCompositionSupportKnown;
+  UINT hardwareCompositionSupport;
+  BOOL displayPlaneCapsKnown;
+  BOOL directFlipCapable;
+  BOOL independentFlipCapable;
+  BOOL multiPlaneOverlayCapable;
+  BOOL multiPlaneOverlayDecodeCapable;
+  BOOL panelFitterCapable;
+  BOOL mpo3DdiCapable;
+  BOOL mpoKernelCapsCapable;
+  BOOL mpoHudKernelCapable;
+  BOOL mpoHudCapable;
+  BOOL mpoSecondaryCapable;
+  BOOL independentFlipSecondaryCapable;
+  BOOL mpoStretchCapable;
+  BOOL overlayCapsKnown;
+  BOOL postCompositionCapsKnown;
+  BOOL overlayRotationCapable;
+  BOOL overlayRotationWithoutIndependentFlip;
+  BOOL overlayVerticalFlipCapable;
+  BOOL overlayHorizontalFlipCapable;
+  BOOL overlayStretchRgbCapable;
+  BOOL overlayStretchYuvCapable;
+  BOOL overlayBilinearFilterCapable;
+  BOOL overlayHighFilterCapable;
+  BOOL overlaySharedAcrossOutputs;
+  BOOL overlayImmediateCapable;
+  BOOL overlayPlane0ForVirtualModeOnly;
+  BOOL overlayVersion3DdiCapable;
+  BOOL displayCapsKnown;
+  BOOL displayPreferPhysicallyContiguous;
+  BOOL displayCursorScaledWithMpoPlane0;
+  BOOL displayCursorNoXorWithMpo;
+  BOOL scanoutCapsKnown;
+  BOOL crossAdapterSupportKnown;
+  BOOL wddm3CapsKnown;
+  BOOL hardwareFlipQueueSupported;
+  BOOL hardwareFlipQueueEnabled;
+  BOOL displayableSupported;
+  UINT hardwareFlipQueueSupportState;
+  UINT vidPnSourceId;
+  UINT maxPlanes;
+  UINT maxRgbPlanes;
+  UINT maxYuvPlanes;
+  UINT overlayCaps;
+  UINT scanoutCaps;
+  UINT crossAdapterSupportTier;
+  FLOAT maxStretchFactor;
+  FLOAT maxShrinkFactor;
+  FLOAT postCompositionMaxStretchFactor;
+  FLOAT postCompositionMaxShrinkFactor;
 } MAGOUTPUTINFO;
 
 typedef struct MAGADAPTERCATALOG
@@ -156,6 +216,14 @@ typedef struct MAGADAPTERCATALOG
   UINT outputCount;
 } MAGADAPTERCATALOG;
 
+typedef enum MAGPRESENTATIONOBSERVATIONSOURCE
+{
+  MAG_PRESENT_OBSERVATION_NONE = 0,
+  MAG_PRESENT_OBSERVATION_PRESENTATION_MANAGER,
+  MAG_PRESENT_OBSERVATION_ETW,
+  MAG_PRESENT_OBSERVATION_COUNT,
+} MAGPRESENTATIONOBSERVATIONSOURCE;
+
 typedef struct MAGPRESENTATIONSTATUS
 {
   BOOL configurationSupported;
@@ -164,9 +232,73 @@ typedef struct MAGPRESENTATIONSTATUS
   BOOL directCompositionAvailable;
   BOOL hardwareAdapterResolved;
   BOOL displayAdapterResolved;
+  BOOL hardwareCompositionSupportKnown;
+  BOOL displayPlaneCapsKnown;
+  BOOL fullscreenHardwareCompositionCapable;
+  BOOL windowedHardwareCompositionCapable;
+  BOOL hardwareCompositionCursorStretchRisk;
+  BOOL directFlipCapable;
+  BOOL directFlipGeometryEligible;
+  BOOL independentFlipCapable;
+  BOOL multiPlaneOverlayCapable;
+  BOOL multiPlaneOverlayDecodeCapable;
+  BOOL panelFitterCapable;
+  BOOL mpo3DdiCapable;
+  BOOL mpoKernelCapsCapable;
+  BOOL mpoHudKernelCapable;
+  BOOL mpoHudCapable;
+  BOOL mpoSecondaryCapable;
+  BOOL independentFlipSecondaryCapable;
+  BOOL mpoStretchCapable;
+  BOOL overlayCapsKnown;
+  BOOL postCompositionCapsKnown;
+  BOOL overlayRotationCapable;
+  BOOL overlayRotationWithoutIndependentFlip;
+  BOOL overlayVerticalFlipCapable;
+  BOOL overlayHorizontalFlipCapable;
+  BOOL overlayStretchRgbCapable;
+  BOOL overlayStretchYuvCapable;
+  BOOL overlayBilinearFilterCapable;
+  BOOL overlayHighFilterCapable;
+  BOOL overlaySharedAcrossOutputs;
+  BOOL overlayImmediateCapable;
+  BOOL overlayPlane0ForVirtualModeOnly;
+  BOOL overlayVersion3DdiCapable;
+  BOOL displayCapsKnown;
+  BOOL displayPreferPhysicallyContiguous;
+  BOOL displayCursorScaledWithMpoPlane0;
+  BOOL displayCursorNoXorWithMpo;
+  BOOL scanoutCapsKnown;
+  BOOL crossAdapterSupportKnown;
+  BOOL wddm3CapsKnown;
+  BOOL hardwareFlipQueueSupported;
+  BOOL hardwareFlipQueueEnabled;
+  BOOL displayableSupported;
+  UINT hardwareFlipQueueSupportState;
+  BOOL independentFlipEligible;
+  BOOL observationAvailable;
+  BOOL observationFullFidelity;
+  BOOL observationDxgKrnl;
+  BOOL observationWin32k;
+  BOOL observedTargetValid;
+  BOOL strictTargetSatisfied;
   LUID hardwareAdapterLuid;
   LUID displayAdapterLuid;
+  UINT hardwareCompositionSupport;
+  UINT vidPnSourceId;
+  UINT maxPlanes;
+  UINT maxRgbPlanes;
+  UINT maxYuvPlanes;
+  UINT overlayCaps;
+  UINT scanoutCaps;
+  UINT crossAdapterSupportTier;
+  FLOAT maxStretchFactor;
+  FLOAT maxShrinkFactor;
+  FLOAT postCompositionMaxStretchFactor;
+  FLOAT postCompositionMaxShrinkFactor;
+  DWORD observationError;
   MAGCOPYCLASS copyClass;
+  MAGPRESENTATIONOBSERVATIONSOURCE observationSource;
   MAGPRESENTATIONTARGET observedTarget;
   UINT64 configurationGeneration;
   UINT64 geometryEpoch;
@@ -180,6 +312,10 @@ BOOL magPresentationSettingsEqual(
 
 UINT magPresentationTargetCount(void);
 const MAGNAMEDOPTION* magPresentationTargetAt(UINT index);
+LPCTSTR magPresentationTargetName(MAGPRESENTATIONTARGET target);
+LPCTSTR magPresentationObservationSourceName(
+  MAGPRESENTATIONOBSERVATIONSOURCE source);
+LPCTSTR magCrossAdapterSupportTierName(UINT tier);
 UINT magSurfaceOwnershipCount(void);
 const MAGNAMEDOPTION* magSurfaceOwnershipAt(UINT index);
 UINT magCompositionHostCount(void);
@@ -188,6 +324,8 @@ UINT magCopyRequirementCount(void);
 const MAGNAMEDOPTION* magCopyRequirementAt(UINT index);
 UINT magLayeredAlphaModeCount(void);
 const MAGNAMEDOPTION* magLayeredAlphaModeAt(UINT index);
+UINT magWaitableSwapChainModeCount(void);
+const MAGNAMEDOPTION* magWaitableSwapChainModeAt(UINT index);
 
 BOOL magAdapterLuidEqual(LUID left, LUID right);
 BOOL magAdapterCatalogEnumerate(MAGADAPTERCATALOG* catalog, LPTSTR reason, UINT reasonCount);

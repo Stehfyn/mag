@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_gdi.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_gdi.c</p>
+<h1>graphics_gdi.c</h1>
+<p>GDI DIB/HDC renderer and CPU frame path.</p>
+<div class="source-meta"><strong>482 lines</strong> &middot; 12507 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_dcomp_h.htm'>&larr; graphics_dcomp.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_gdiplus_c.htm'>graphics_gdiplus.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;graphics_presentation_manager.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#include &lt;d3d11.h&gt;</span>
+
+<span class='pp'>#pragma comment(lib, &quot;Msimg32&quot;)</span>
+<span class='pp'>#pragma comment(lib, &quot;d3d11&quot;)</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGGDISTATE
+{
+  <span class='tp'>HDC</span>      hColorDC;
+  <span class='tp'>HBITMAP</span>  hColorBitmap;
+  <span class='tp'>HBITMAP</span>  hColorBitmapOld;
+  <span class='tp'>DWORD</span>*   colorPixel;
+  ID3D11Device* <span class='tp'>d3dDevice</span>;
+  ID3D11DeviceContext* d3dContext;
+  <span class='tp'>MAGPRESENTATIONMANAGERPRESENTER</span>* presentationManager;
+  <span class='tp'>MAGCPUCOMPOSITOR</span> compositor;
+  <span class='tp'>UINT</span>     width;
+  <span class='tp'>UINT</span>     height;
+  <span class='tp'>UINT</span>     capacityWidth;
+  <span class='tp'>UINT</span>     capacityHeight;
+  <span class='tp'>BOOL</span>     presentationManagerHost;
+  <span class='tp'>BOOL</span>     presentationEnabled;
+  <span class='tp'>UINT64</span>   resourceGeneration;
+} MAGGDISTATE;
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsGdiReleaseState</span>(MAGGDISTATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hColorDC &amp;&amp; <span class='tp'>state</span>-&gt;hColorBitmapOld)
+    {
+      <span class='fn'>SelectBitmap</span>(<span class='tp'>state</span>-&gt;hColorDC, <span class='tp'>state</span>-&gt;hColorBitmapOld);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hColorBitmap)
+    {
+      <span class='fn'>DeleteBitmap</span>(<span class='tp'>state</span>-&gt;hColorBitmap);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hColorDC)
+    {
+      <span class='fn'>DeleteDC</span>(<span class='tp'>state</span>-&gt;hColorDC);
+    }
+    <span class='fn'>magPresentationManagerPresenterDestroy</span>(<span class='tp'>state</span>-&gt;presentationManager);
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;d3dContext)
+    {
+      <span class='fn'>ID3D11DeviceContext_Release</span>(<span class='tp'>state</span>-&gt;d3dContext);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>)
+    {
+      <span class='fn'>ID3D11Device_Release</span>(<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>);
+    }
+    <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;<span class='tp'>state</span>-&gt;compositor);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiCreatePresentationManager</span>(
+  <span class='tp'>HWND</span> hWnd,
+  MAGGDISTATE* <span class='tp'>state</span>,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation)
+{
+    IDXGIAdapter1* adapter = NULL;
+    D3D_FEATURE_LEVEL featureLevel;
+    D3D_DRIVER_TYPE driverType;
+    <span class='tp'>SIZE</span> reservoirSize;
+    <span class='tp'>UINT</span> deviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+      D3D11_CREATE_DEVICE_SINGLETHREADED |
+      D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+    <span class='tp'>HRESULT</span> hr;
+
+    <span class='kw'>if</span> (!presentation || MAG_HOST_PRESENTATION_MANAGER != presentation-&gt;host)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+    driverType = MAG_HARDWARE_ADAPTER_WARP == presentation-&gt;hardware.<span class='tp'>mode</span>
+      ? D3D_DRIVER_TYPE_WARP
+      : D3D_DRIVER_TYPE_UNKNOWN;
+    <span class='kw'>if</span> (D3D_DRIVER_TYPE_WARP != driverType &amp;&amp;
+        !<span class='fn'>magAdapterOpenDxgi</span>(presentation-&gt;hardware.adapterLuid, &amp;adapter))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    hr = <span class='fn'>D3D11CreateDevice</span>(
+      (IDXGIAdapter*)adapter,
+      driverType,
+      NULL,
+      deviceFlags,
+      NULL,
+      <span class='num'>0</span>,
+      D3D11_SDK_VERSION,
+      &amp;<span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>,
+      &amp;featureLevel,
+      &amp;<span class='tp'>state</span>-&gt;d3dContext);
+    <span class='kw'>if</span> (adapter)
+    {
+      <span class='fn'>IDXGIAdapter1_Release</span>(adapter);
+    }
+    <span class='kw'>if</span> (<span class='fn'>FAILED</span>(hr))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+    <span class='kw'>if</span> (!<span class='fn'>magPresentationManagerPresenterCreate</span>(
+          hWnd,
+          <span class='tp'>state</span>-&gt;<span class='tp'>d3dDevice</span>,
+          reservoirSize,
+          presentation,
+          &amp;<span class='tp'>state</span>-&gt;presentationManager,
+          NULL,
+          <span class='num'>0</span>) ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(
+          &amp;<span class='tp'>state</span>-&gt;compositor,
+          (<span class='tp'>UINT</span>)reservoirSize.cx,
+          (<span class='tp'>UINT</span>)reservoirSize.cy))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='tp'>state</span>-&gt;capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    <span class='tp'>state</span>-&gt;capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    <span class='tp'>state</span>-&gt;presentationManagerHost = TRUE;
+    <span class='tp'>state</span>-&gt;presentationEnabled = TRUE;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiIsAvailable</span>(LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  <span class='kw'>void</span>** stateOut)
+{
+    MAGGDISTATE* <span class='tp'>state</span>;
+    BITMAPINFO bmi = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (!stateOut || !presentation || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *stateOut = NULL;
+
+    <span class='tp'>state</span> = (MAGGDISTATE*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;hColorDC = <span class='fn'>CreateCompatibleDC</span>(NULL);
+    bmi.bmiHeader.biSize = <span class='kw'>sizeof</span>(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = <span class='num'>1</span>;
+    bmi.bmiHeader.biHeight = -<span class='num'>1</span>;
+    bmi.bmiHeader.biPlanes = <span class='num'>1</span>;
+    bmi.bmiHeader.biBitCount = <span class='num'>32</span>;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    <span class='tp'>state</span>-&gt;hColorBitmap = <span class='fn'>CreateDIBSection</span>(
+      <span class='tp'>state</span>-&gt;hColorDC,
+      &amp;bmi,
+      DIB_RGB_COLORS,
+      (<span class='kw'>void</span>**)&amp;<span class='tp'>state</span>-&gt;colorPixel,
+      NULL,
+      <span class='num'>0</span>);
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;hColorDC || !<span class='tp'>state</span>-&gt;hColorBitmap || !<span class='tp'>state</span>-&gt;colorPixel ||
+        !<span class='fn'>magGraphicsGdiCreatePresentationManager</span>(
+          hWnd,
+          <span class='tp'>state</span>,
+          clientSize,
+          presentation))
+    {
+      <span class='fn'>magGraphicsGdiReleaseState</span>(<span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;hColorBitmapOld = <span class='fn'>SelectBitmap</span>(<span class='tp'>state</span>-&gt;hColorDC, <span class='tp'>state</span>-&gt;hColorBitmap);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;hColorBitmapOld)
+    {
+      <span class='fn'>magGraphicsGdiReleaseState</span>(<span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;resourceGeneration = <span class='num'>1</span>;
+    *stateOut = <span class='tp'>state</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsGdiDestroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>magGraphicsGdiReleaseState</span>(<span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiResize</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>SIZE</span> clientSize)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>if</span> ((<span class='tp'>UINT</span>)clientSize.cx &gt; <span class='tp'>state</span>-&gt;capacityWidth ||
+        (<span class='tp'>UINT</span>)clientSize.cy &gt; <span class='tp'>state</span>-&gt;capacityHeight ||
+        !<span class='fn'>magPresentationManagerPresenterResize</span>(
+          <span class='tp'>state</span>-&gt;presentationManager,
+          clientSize))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiSetPresentationEnabled</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='tp'>BOOL</span> enabled)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost &amp;&amp;
+        !<span class='fn'>magPresentationManagerPresenterSetEnabled</span>(
+          <span class='tp'>state</span>-&gt;presentationManager,
+          enabled))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;presentationEnabled = enabled;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BYTE</span> <span class='fn'>magGraphicsGdiColorByte</span>(<span class='tp'>FLOAT</span> value)
+{
+    value = <span class='mc'>CLAMP</span>(value, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>);
+    <span class='kw'>return</span> (<span class='tp'>BYTE</span>)(value * <span class='num'>255.0f</span> + <span class='num'>0.5f</span>);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsGdiAlphaFill</span>(MAGGDISTATE* <span class='tp'>state</span>, <span class='tp'>HDC</span> hDC, <span class='kw'>const</span> <span class='tp'>RECT</span>* <span class='tp'>rect</span>, <span class='tp'>MAGCOLORF</span> color)
+{
+    BLENDFUNCTION blend = { AC_SRC_OVER, <span class='num'>0</span>, <span class='num'>255</span>, AC_SRC_ALPHA };
+    <span class='kw'>const</span> <span class='tp'>BYTE</span> a = <span class='fn'>magGraphicsGdiColorByte</span>(color.a);
+    <span class='kw'>const</span> <span class='tp'>BYTE</span> <span class='tp'>r</span> = (<span class='tp'>BYTE</span>)((<span class='fn'>magGraphicsGdiColorByte</span>(color.<span class='tp'>r</span>) * a + <span class='num'>127</span>) / <span class='num'>255</span>);
+    <span class='kw'>const</span> <span class='tp'>BYTE</span> g = (<span class='tp'>BYTE</span>)((<span class='fn'>magGraphicsGdiColorByte</span>(color.g) * a + <span class='num'>127</span>) / <span class='num'>255</span>);
+    <span class='kw'>const</span> <span class='tp'>BYTE</span> b = (<span class='tp'>BYTE</span>)((<span class='fn'>magGraphicsGdiColorByte</span>(color.b) * a + <span class='num'>127</span>) / <span class='num'>255</span>);
+    <span class='kw'>const</span> <span class='kw'>int</span> width = <span class='tp'>rect</span>-&gt;right - <span class='tp'>rect</span>-&gt;<span class='tp'>left</span>;
+    <span class='kw'>const</span> <span class='kw'>int</span> height = <span class='tp'>rect</span>-&gt;bottom - <span class='tp'>rect</span>-&gt;top;
+
+    <span class='kw'>if</span> (width &lt;= <span class='num'>0</span> || height &lt;= <span class='num'>0</span> || !a)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    *<span class='tp'>state</span>-&gt;colorPixel = ((<span class='tp'>DWORD</span>)a &lt;&lt; <span class='num'>24</span>) | ((<span class='tp'>DWORD</span>)<span class='tp'>r</span> &lt;&lt; <span class='num'>16</span>) | ((<span class='tp'>DWORD</span>)g &lt;&lt; <span class='num'>8</span>) | b;
+    <span class='fn'>AlphaBlend</span>(
+      hDC,
+      <span class='tp'>rect</span>-&gt;<span class='tp'>left</span>,
+      <span class='tp'>rect</span>-&gt;top,
+      width,
+      height,
+      <span class='tp'>state</span>-&gt;hColorDC,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>1</span>,
+      <span class='num'>1</span>,
+      blend);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsGdiStroke</span>(MAGGDISTATE* <span class='tp'>state</span>, <span class='tp'>HDC</span> hDC, <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='kw'>const</span> <span class='tp'>LONG</span> thickness = <span class='fn'>max</span>(<span class='num'>1</span>, (<span class='tp'>LONG</span>)(command-&gt;thickness + <span class='num'>0.5f</span>));
+    <span class='tp'>RECT</span> edges[<span class='num'>4</span>] =
+    {
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.top, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.top + thickness },
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.bottom - thickness, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.bottom },
+      { command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, command-&gt;<span class='tp'>rect</span>.top + thickness, command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> + thickness, command-&gt;<span class='tp'>rect</span>.bottom - thickness },
+      { command-&gt;<span class='tp'>rect</span>.right - thickness, command-&gt;<span class='tp'>rect</span>.top + thickness, command-&gt;<span class='tp'>rect</span>.right, command-&gt;<span class='tp'>rect</span>.bottom - thickness },
+    };
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='fn'>ARRAYSIZE</span>(edges); ++i)
+    {
+      <span class='fn'>magGraphicsGdiAlphaFill</span>(<span class='tp'>state</span>, hDC, &amp;edges[i], command-&gt;color);
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiRender</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+    <span class='tp'>MAGPIXELBUFFER</span> composed;
+    BITMAPINFO bmi = { <span class='num'>0</span> };
+    <span class='tp'>HDC</span> hDC;
+    <span class='tp'>UINT</span> i;
+    <span class='kw'>int</span> copied;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !frame || !frame-&gt;<span class='tp'>pixels</span> || !frame-&gt;width || !frame-&gt;height)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;presentationManagerHost)
+    {
+      ID3D11Texture2D* texture = NULL;
+      <span class='tp'>UINT</span> bufferIndex;
+      D3D11_BOX box;
+
+      <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;presentationEnabled || frame-&gt;width != <span class='tp'>state</span>-&gt;width ||
+          frame-&gt;height != <span class='tp'>state</span>-&gt;height ||
+          !<span class='fn'>magGraphicsComposeFrame</span>(&amp;<span class='tp'>state</span>-&gt;compositor, frame, ui, &amp;composed) ||
+          !<span class='fn'>magPresentationManagerPresenterAcquire</span>(
+            <span class='tp'>state</span>-&gt;presentationManager,
+            !intent || intent-&gt;synchronize,
+            &amp;texture,
+            &amp;bufferIndex) ||
+          !texture)
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+      box.<span class='tp'>left</span> = <span class='num'>0</span>;
+      box.top = <span class='num'>0</span>;
+      box.front = <span class='num'>0</span>;
+      box.right = frame-&gt;width;
+      box.bottom = frame-&gt;height;
+      box.back = <span class='num'>1</span>;
+      <span class='fn'>ID3D11DeviceContext_UpdateSubresource</span>(
+        <span class='tp'>state</span>-&gt;d3dContext,
+        (ID3D11Resource*)texture,
+        <span class='num'>0</span>,
+        &amp;box,
+        composed.<span class='tp'>pixels</span>,
+        composed.stride,
+        <span class='num'>0</span>);
+      <span class='fn'>ID3D11Texture2D_Release</span>(texture);
+      <span class='kw'>return</span> <span class='fn'>magPresentationManagerPresenterPresent</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        bufferIndex,
+        (<span class='tp'>SIZE</span>){ (<span class='tp'>LONG</span>)frame-&gt;width, (<span class='tp'>LONG</span>)frame-&gt;height },
+        intent);
+    }
+
+    hDC = <span class='fn'>GetDC</span>(hWnd);
+    <span class='kw'>if</span> (!hDC)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    bmi.bmiHeader.biSize = <span class='kw'>sizeof</span>(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = (<span class='tp'>LONG</span>)(frame-&gt;stride / <span class='num'>4U</span>);
+    bmi.bmiHeader.biHeight = MAG_ROW_ORDER_TOP_DOWN == frame-&gt;rowOrder ? -(<span class='tp'>LONG</span>)frame-&gt;height : (<span class='tp'>LONG</span>)frame-&gt;height;
+    bmi.bmiHeader.biPlanes = <span class='num'>1</span>;
+    bmi.bmiHeader.biBitCount = <span class='num'>32</span>;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    copied = <span class='fn'>SetDIBitsToDevice</span>(
+      hDC,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      frame-&gt;width,
+      frame-&gt;height,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      frame-&gt;height,
+      frame-&gt;<span class='tp'>pixels</span>,
+      &amp;bmi,
+      DIB_RGB_COLORS);
+
+    <span class='kw'>if</span> (ui)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (MAG_UI_DRAW_FILL_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsGdiAlphaFill</span>(<span class='tp'>state</span>, hDC, &amp;ui-&gt;commands[i].<span class='tp'>rect</span>, ui-&gt;commands[i].color);
+        }
+        <span class='kw'>else</span> <span class='kw'>if</span> (MAG_UI_DRAW_STROKE_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsGdiStroke</span>(<span class='tp'>state</span>, hDC, &amp;ui-&gt;commands[i]);
+        }
+      }
+    }
+
+    <span class='fn'>GdiFlush</span>();
+    <span class='fn'>ReleaseDC</span>(hWnd, hDC);
+    <span class='kw'>return</span> <span class='num'>0</span> != copied;
+}
+
+<span class='kw'>static</span> <span class='tp'>HANDLE</span> <span class='fn'>magGraphicsGdiGetFrameWaitHandle</span>(<span class='kw'>void</span>* <span class='tp'>state</span>)
+{
+    MAGGDISTATE* gdiState = (MAGGDISTATE*)<span class='tp'>state</span>;
+    <span class='kw'>return</span> gdiState &amp;&amp; gdiState-&gt;presentationManagerHost
+      ? <span class='fn'>magPresentationManagerPresenterGetFrameWaitHandle</span>(
+          gdiState-&gt;presentationManager)
+      : NULL;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magGraphicsGdiGetResourceGeneration</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span>
+      ? <span class='tp'>state</span>-&gt;resourceGeneration + <span class='tp'>state</span>-&gt;compositor.generation +
+        <span class='fn'>magPresentationManagerPresenterGetResourceGeneration</span>(
+          <span class='tp'>state</span>-&gt;presentationManager)
+      : <span class='num'>0</span>;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiGetNextEstimatedFrameTime</span>(
+  <span class='kw'>void</span>* opaqueState,
+  LONGLONG* frameTime)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span> &amp;&amp; <span class='tp'>state</span>-&gt;presentationManagerHost &amp;&amp;
+      <span class='fn'>magPresentationManagerPresenterGetNextEstimatedFrameTime</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        frameTime);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsGdiGetObservedPresentationTarget</span>(
+  <span class='kw'>void</span>* opaqueState,
+  <span class='tp'>UINT</span>* target)
+{
+    MAGGDISTATE* <span class='tp'>state</span> = (MAGGDISTATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span> &amp;&amp; <span class='tp'>state</span>-&gt;presentationManagerHost &amp;&amp;
+      <span class='fn'>magPresentationManagerPresenterGetObservedTarget</span>(
+        <span class='tp'>state</span>-&gt;presentationManager,
+        target);
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsGdiBackend =
+{
+  GRAPHICS_API_GDI,
+  <span class='fn'>TEXT</span>(<span class='str'>&quot;GDI&quot;</span>),
+  TRUE,
+  magGraphicsGdiIsAvailable,
+  magGraphicsGdiCreate,
+  magGraphicsGdiDestroy,
+  magGraphicsGdiResize,
+  magGraphicsGdiSetPresentationEnabled,
+  magGraphicsGdiRender,
+  magGraphicsGdiGetFrameWaitHandle,
+  magGraphicsGdiGetResourceGeneration,
+  magGraphicsGdiGetNextEstimatedFrameTime,
+  magGraphicsGdiGetObservedPresentationTarget,
+};
+</pre>
+<p class="source-nav"><a href='graphics_dcomp_h.htm'>&larr; graphics_dcomp.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_gdiplus_c.htm'>graphics_gdiplus.c &rarr;</a></p>
+</body>
+</html>

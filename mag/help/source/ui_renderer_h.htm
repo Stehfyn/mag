@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>ui_renderer.h - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; ui_renderer.h</p>
+<h1>ui_renderer.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>36 lines</strong> &middot; 881 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='ui_renderer_c.htm'>&larr; ui_renderer.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='wingdix_c.htm'>wingdix.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#pragma once</span>
+
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+
+<span class='pp'>#ifdef __cplusplus</span>
+<span class='kw'>extern</span> <span class='str'>&quot;C&quot;</span> {
+<span class='pp'>#endif</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGUIRENDERER</span> <span class='tp'>MAGUIRENDERER</span>;
+
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererCreate</span>(
+  <span class='tp'>UIGRAPHICSAPI</span> uiApi,
+  <span class='tp'>TEXTRENDERER</span> textRenderer,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='tp'>MAGUIRENDERER</span>** rendererOut,
+  LPTSTR reason,
+  <span class='tp'>UINT</span> reasonCount);
+<span class='kw'>void</span> <span class='fn'>magUiRendererDestroy</span>(<span class='tp'>MAGUIRENDERER</span>* renderer);
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererResize</span>(<span class='tp'>MAGUIRENDERER</span>* renderer, <span class='tp'>SIZE</span> clientSize);
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererCompose</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output);
+<span class='tp'>BOOL</span> <span class='fn'>magUiRendererComposeWithoutText</span>(
+  <span class='tp'>MAGUIRENDERER</span>* renderer,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='tp'>LPMAGPIXELBUFFER</span> output);
+<span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* <span class='fn'>magUiRendererGetGlyphAtlas</span>(<span class='kw'>const</span> <span class='tp'>MAGUIRENDERER</span>* renderer);
+<span class='tp'>UINT64</span> <span class='fn'>magUiRendererGetSurfaceGeneration</span>(<span class='kw'>const</span> <span class='tp'>MAGUIRENDERER</span>* renderer);
+
+<span class='pp'>#ifdef __cplusplus</span>
+}
+<span class='pp'>#endif</span>
+</pre>
+<p class="source-nav"><a href='ui_renderer_c.htm'>&larr; ui_renderer.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='wingdix_c.htm'>wingdix.c &rarr;</a></p>
+</body>
+</html>

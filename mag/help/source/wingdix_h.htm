@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>wingdix.h - Source Code</title>
+  <title>wingdix.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; wingdix.h</p>
 <h1>wingdix.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>185 lines</strong> &middot; 8005 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='wingdix_c.htm'>&larr; wingdix.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='winuserx_c.htm'>winuserx.c &rarr;</a></p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
 
 <span class='pp'>#define MAX_ENUM_MONITORS                (16U)</span>
 
@@ -127,70 +130,73 @@
 <span class='pp'>#define WGL_AUX8_ARB                      0x208F</span>
 <span class='pp'>#define WGL_AUX9_ARB                      0x2090</span>
 
-<span class='kw'>typedef</span> <span class='kw'>const</span> <span class='kw'>char</span>* (<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLGETEXTENSIONSSTRINGARBPROC</span>)(HDC);
-<span class='tp'>PFNWGLGETEXTENSIONSSTRINGARBPROC</span> wglGetExtensionsStringARB;
+<span class='kw'>typedef</span> <span class='kw'>const</span> <span class='kw'>char</span>* (<span class='kw'>WINAPI</span>* PFNWGLGETEXTENSIONSSTRINGARBPROC)(<span class='tp'>HDC</span>);
+PFNWGLGETEXTENSIONSSTRINGARBPROC <span class='tp'>wglGetExtensionsStringARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLCHOOSEPIXELFORMATARBPROC</span>) (HDC hdc, <span class='kw'>const</span> <span class='kw'>int</span>* piAttribIList, <span class='kw'>const</span> FLOAT* pfAttribFList, UINT nMaxFormats, <span class='kw'>int</span>* piFormats, UINT* nNumFormats);
-<span class='tp'>PFNWGLCHOOSEPIXELFORMATARBPROC</span> wglChoosePixelFormatARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLCHOOSEPIXELFORMATARBPROC) (<span class='tp'>HDC</span> hdc, <span class='kw'>const</span> <span class='kw'>int</span>* piAttribIList, <span class='kw'>const</span> <span class='tp'>FLOAT</span>* pfAttribFList, <span class='tp'>UINT</span> nMaxFormats, <span class='kw'>int</span>* piFormats, <span class='tp'>UINT</span>* nNumFormats);
+PFNWGLCHOOSEPIXELFORMATARBPROC <span class='tp'>wglChoosePixelFormatARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>HGLRC</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLCREATECONTEXTATTRIBSARBPROC</span>) (HDC hDC, HGLRC hShareContext, <span class='kw'>const</span> <span class='kw'>int</span>* attribList);
-<span class='tp'>PFNWGLCREATECONTEXTATTRIBSARBPROC</span> wglCreateContextAttribsARB;
+<span class='kw'>typedef</span> <span class='fn'>HGLRC</span>(<span class='kw'>WINAPI</span>* PFNWGLCREATECONTEXTATTRIBSARBPROC) (<span class='tp'>HDC</span> hDC, HGLRC hShareContext, <span class='kw'>const</span> <span class='kw'>int</span>* attribList);
+PFNWGLCREATECONTEXTATTRIBSARBPROC <span class='tp'>wglCreateContextAttribsARB</span>;
 
-<span class='kw'>typedef</span> <span class='kw'>int</span> (<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLGETSWAPINTERVALEXTPROC</span>) (<span class='kw'>void</span>);
-<span class='tp'>PFNWGLGETSWAPINTERVALEXTPROC</span> wglGetSwapIntervalEXT;
+<span class='kw'>typedef</span> <span class='kw'>int</span> (<span class='kw'>WINAPI</span>* PFNWGLGETSWAPINTERVALEXTPROC) (<span class='kw'>void</span>);
+PFNWGLGETSWAPINTERVALEXTPROC <span class='tp'>wglGetSwapIntervalEXT</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLSWAPINTERVALEXTPROC</span>) (<span class='kw'>int</span> interval);
-<span class='tp'>PFNWGLSWAPINTERVALEXTPROC</span> wglSwapIntervalEXT;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLSWAPINTERVALEXTPROC) (<span class='kw'>int</span> interval);
+PFNWGLSWAPINTERVALEXTPROC <span class='tp'>wglSwapIntervalEXT</span>;
 
 <span class='fn'>DECLARE_HANDLE</span>(HPBUFFERARB);
-<span class='kw'>typedef</span> <span class='fn'>HPBUFFERARB</span> (<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLCREATEPBUFFERARBPROC</span>)(HDC, <span class='kw'>int</span>, <span class='kw'>int</span>, <span class='kw'>int</span>, <span class='kw'>const</span> <span class='kw'>int</span>*);
-<span class='tp'>PFNWGLCREATEPBUFFERARBPROC</span>     wglCreatePbufferARB;
+<span class='kw'>typedef</span> <span class='fn'>HPBUFFERARB</span> (<span class='kw'>WINAPI</span>* PFNWGLCREATEPBUFFERARBPROC)(<span class='tp'>HDC</span>, <span class='kw'>int</span>, <span class='kw'>int</span>, <span class='kw'>int</span>, <span class='kw'>const</span> <span class='kw'>int</span>*);
+PFNWGLCREATEPBUFFERARBPROC     <span class='tp'>wglCreatePbufferARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>HDC</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLGETPBUFFERDCARBPROC</span>)(HPBUFFERARB);
-<span class='tp'>PFNWGLGETPBUFFERDCARBPROC</span>      wglGetPbufferDCARB;
+<span class='kw'>typedef</span> <span class='tp'>HDC</span>(<span class='kw'>WINAPI</span>* PFNWGLGETPBUFFERDCARBPROC)(HPBUFFERARB);
+PFNWGLGETPBUFFERDCARBPROC      <span class='tp'>wglGetPbufferDCARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLRELEASEPBUFFERDCARBPROC</span>)(HPBUFFERARB, HDC);
-<span class='tp'>PFNWGLRELEASEPBUFFERDCARBPROC</span>   wglReleasePbufferDCARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLRELEASEPBUFFERDCARBPROC)(HPBUFFERARB, <span class='tp'>HDC</span>);
+PFNWGLRELEASEPBUFFERDCARBPROC   <span class='tp'>wglReleasePbufferDCARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLDESTROYPBUFFERARBPROC</span>)(HPBUFFERARB);
-<span class='tp'>PFNWGLDESTROYPBUFFERARBPROC</span>    wglDestroyPbufferARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLDESTROYPBUFFERARBPROC)(HPBUFFERARB);
+PFNWGLDESTROYPBUFFERARBPROC    <span class='tp'>wglDestroyPbufferARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLQUERYPBUFFERARBPROC</span>)(HPBUFFERARB, <span class='kw'>int</span>, <span class='kw'>int</span>*);
-<span class='tp'>PFNWGLQUERYPBUFFERARBPROC</span>      wglQueryPbufferARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLQUERYPBUFFERARBPROC)(HPBUFFERARB, <span class='kw'>int</span>, <span class='kw'>int</span>*);
+PFNWGLQUERYPBUFFERARBPROC      <span class='tp'>wglQueryPbufferARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLBINDTEXIMAGEARBPROC</span>)(HPBUFFERARB, <span class='kw'>int</span>);
-<span class='tp'>PFNWGLBINDTEXIMAGEARBPROC</span>      wglBindTexImageARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLBINDTEXIMAGEARBPROC)(HPBUFFERARB, <span class='kw'>int</span>);
+PFNWGLBINDTEXIMAGEARBPROC      <span class='tp'>wglBindTexImageARB</span>;
 
-<span class='kw'>typedef</span> <span class='fn'>BOOL</span>(<span class='kw'>WINAPI</span>* <span class='tp'>PFNWGLRELEASETEXIMAGEARBPROC</span>)(HPBUFFERARB, <span class='kw'>int</span>);
-<span class='tp'>PFNWGLRELEASETEXIMAGEARBPROC</span>   wglReleaseTexImageARB;
+<span class='kw'>typedef</span> <span class='tp'>BOOL</span>(<span class='kw'>WINAPI</span>* PFNWGLRELEASETEXIMAGEARBPROC)(HPBUFFERARB, <span class='kw'>int</span>);
+PFNWGLRELEASETEXIMAGEARBPROC   <span class='tp'>wglReleaseTexImageARB</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MONITORINFO2</span>
 {
-  CHAR          deviceName[CCHDEVICENAME + <span class='num'>1</span>];
-  BYTE          unused;
-  WCHAR         deviceNameW[CCHDEVICENAME + <span class='num'>1</span>];
+  <span class='tp'>CHAR</span>          deviceName[CCHDEVICENAME + <span class='num'>1</span>];
+  <span class='tp'>BYTE</span>          <span class='tp'>unused</span>;
+  <span class='tp'>WCHAR</span>         deviceNameW[CCHDEVICENAME + <span class='num'>1</span>];
   DEVMODE       deviceMode;
   MONITORINFOEX monitorInfoEx;
 } <span class='tp'>MONITORINFO2</span>, * <span class='tp'>LPMONITORINFO2</span>;
 
 <span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>DISPLAYINFO</span>
 {
-  RECT         rc;
-  UINT         numMonitors;
-  <span class='tp'>MONITORINFO2</span> monitors[MAX_ENUM_MONITORS];
+  <span class='tp'>RECT</span>         <span class='tp'>rc</span>;
+  <span class='tp'>UINT</span>         numMonitors;
+  <span class='tp'>MONITORINFO2</span> monitors[<span class='mc'>MAX_ENUM_MONITORS</span>];
 } <span class='tp'>DISPLAYINFO</span>, * <span class='tp'>LPDISPLAYINFO</span>;
 
 <span class='kw'>void</span> <span class='fn'>wglInit</span>(<span class='kw'>void</span>);
 
-<span class='kw'>int</span> <span class='fn'>wglFindPixelFormat</span>(HDC hDC, <span class='kw'>const</span> <span class='kw'>int</span>* piAttribIList, <span class='kw'>const</span> FLOAT* pfAttribFList);
+<span class='kw'>void</span> <span class='fn'>wglLoadExtensions</span>(<span class='kw'>void</span>);
 
-BOOL <span class='fn'>gdiGetDisplayInfo</span>(<span class='tp'>LPDISPLAYINFO</span> lpdi);
+<span class='kw'>int</span> <span class='fn'>wglFindPixelFormat</span>(<span class='tp'>HDC</span> hDC, <span class='kw'>const</span> <span class='kw'>int</span>* piAttribIList, <span class='kw'>const</span> <span class='tp'>FLOAT</span>* pfAttribFList);
+
+<span class='tp'>BOOL</span> <span class='fn'>gdiGetDisplayInfo</span>(<span class='tp'>LPDISPLAYINFO</span> lpdi);
 
 <span class='pp'>#define OBS_COMPLETELYCOVERED       0</span>
 <span class='pp'>#define OBS_PARTIALLYVISIBLE        1</span>
 <span class='pp'>#define OBS_COMPLETELYVISIBLE       2</span>
 
-<span class='kw'>int</span> <span class='fn'>gdiCheckOcclusionStatus</span>(HWND hwnd);
+<span class='kw'>int</span> <span class='fn'>gdiCheckOcclusionStatus</span>(<span class='tp'>HWND</span> hwnd);
 </pre>
+<p class="source-nav"><a href='wingdix_c.htm'>&larr; wingdix.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='winuserx_c.htm'>winuserx.c &rarr;</a></p>
 </body>
 </html>

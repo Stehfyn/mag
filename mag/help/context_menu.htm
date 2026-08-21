@@ -13,92 +13,69 @@
 <h1>Context Menu</h1>
 
 <p>
-  Right-clicking anywhere on the magnifier window frame opens the context menu.
-  The menu provides quick access to the view mode, settings, help, and exit commands.
+  Right-click MAG's frame or tray icon to open the context menu. The active view mode
+  is checked. Window, Follow Mouse, and Lens are mutually exclusive. The menu is a
+  single flat command list; Help navigation is inside the compiled Help viewer.
 </p>
 
+<div class="help-figure figure-menu">
+  <img src="images/mag-context-menu.png" alt="Actual MAG context menu with Window selected, followed by Follow Mouse, Lens, Settings, Help, and Exit.">
+  <p class="caption">The complete MAG context menu, captured from the application on an isolated Windows desktop.</p>
+</div>
+
 <table>
-  <tr>
-    <th>Item</th>
-    <th>Description</th>
-  </tr>
+  <tr><th>Item</th><th>Description</th></tr>
   <tr>
     <td class="key">Window</td>
-    <td>
-      Uses the magnifier window position as the capture anchor. At 1.0x scale, the
-      captured image lines up with the desktop area directly behind the window.
-    </td>
+    <td>Anchors capture to MAG's screen position. At 1.0&times;, the source aligns with the desktop behind MAG unless minimap panning has pinned another source origin.</td>
   </tr>
   <tr>
     <td class="key">Follow Mouse</td>
-    <td>
-      Centers the captured area on the cursor while the magnifier window stays in
-      place. The capture is clipped to the current capture bounds and still fills the
-      window without stretching the texture. While tracking, the window remains
-      interactive. Press <strong>Space</strong> to return to <em>Window</em> mode.
-    </td>
+    <td>Keeps MAG stationary while centering the captured source on the pointer. MAG remains interactive; press Space to return to Window mode.</td>
   </tr>
   <tr>
     <td class="key">Lens</td>
-    <td>
-      Moves the magnifier as a cursor-following lens. The lens is topmost,
-      non-activating, and click-through so input goes to the window underneath.
-      Overlay controls are disabled in this mode.
-    </td>
+    <td>Moves MAG with the pointer as a topmost, non-activating, click-through lens. Pointer input reaches the application below and overlay controls are disabled.</td>
   </tr>
   <tr>
-    <td class="key">Settings</td>
-    <td>
-      Opens the settings dialog. The current graphics backend is <strong>OpenGL</strong>.
-      Capture backend choices are <strong>GDI BitBlt</strong>, <strong>DXGI Desktop
-      Duplication</strong>, <strong>Windows Graphics Capture</strong>,
-      <strong>DWM Thumbnail</strong>, and <strong>DWM Private Visual</strong>.
-      The dialog also contains the <strong>Mouse-relative wheel zoom</strong> option,
-      which is disabled by default.
-    </td>
+    <td class="key">Settings...</td>
+    <td>Opens the complete renderer, capture, UI, text, presentation, composition, copy-policy, alpha, pacing, and adapter configuration dialog. See <a href="settings.htm">Settings Reference</a>.</td>
   </tr>
   <tr>
     <td class="key">Help</td>
-    <td>Opens this help document.</td>
+    <td>Opens the complete compiled Help viewer. Use its Contents, Index, and Search tabs to navigate every topic.</td>
   </tr>
   <tr>
     <td class="key">Exit</td>
-    <td>Closes MAG.</td>
+    <td>Closes MAG, removes its tray icon, closes Help windows, and releases active graphics/capture resources.</td>
   </tr>
 </table>
 
-<div class="tip">
-  <strong>Tip:</strong> <em>Window</em>, <em>Follow Mouse</em>, and <em>Lens</em> are
-  mutually exclusive. Selecting one turns off the other two.
+<h2>Using Help</h2>
+<table>
+  <tr><th>Help tab</th><th>Use</th></tr>
+  <tr><td class="key">Contents</td><td>Browse the guided user topics, Settings families, graphics architecture, troubleshooting, and project source tree.</td></tr>
+  <tr><td class="key">Index</td><td>Find a feature, Windows API, presentation model, setting, symptom, or source area by name.</td></tr>
+  <tr><td class="key">Search</td><td>Search the full text of every user-facing topic and embedded project-source page.</td></tr>
+</table>
+
+<div class="help-figure figure-wide">
+  <img src="images/mag-help-contents.png" width="1000" alt="MAG HTML Help viewer showing the Contents tree and MAG start page.">
+  <p class="caption">The Help command opens this compiled CHM viewer. Use the left navigation pane; no Help submenus are added to MAG's context menu.</p>
 </div>
 
-<h2>Capture Backends</h2>
-<table>
-  <tr>
-    <th>Backend</th>
-    <th>Notes</th>
-  </tr>
-  <tr>
-    <td class="key">GDI BitBlt</td>
-    <td>Baseline desktop capture path.</td>
-  </tr>
-  <tr>
-    <td class="key">DXGI Desktop Duplication</td>
-    <td>Direct3D desktop duplication path with multi-monitor capture uploaded into one OpenGL texture.</td>
-  </tr>
-  <tr>
-    <td class="key">Windows Graphics Capture</td>
-    <td>Windows Graphics Capture based monitor capture path.</td>
-  </tr>
-  <tr>
-    <td class="key">DWM Thumbnail</td>
-    <td>DWM thumbnail based capture path.</td>
-  </tr>
-  <tr>
-    <td class="key">DWM Private Visual</td>
-    <td>Private DWM visual capture path.</td>
-  </tr>
-</table>
+<h3>Find a setting or API</h3>
+<div class="steps">
+  <div class="step">Select <strong>Index</strong> and type the first letters of the feature, such as <em>DWM Private Visual</em>, <em>Direct3D 12</em>, or <em>Strict zero-copy</em>.</div>
+  <div class="step">Select the matching term to open its primary topic.</div>
+  <div class="step">Use <strong>Search</strong> when you need every topic/source page containing a phrase or status message.</div>
+</div>
+
+<div class="note">
+  The Help item remains a single context-menu command. Topic navigation is contained
+  entirely inside the compiled Help viewer. The current C implementation is available
+  under <a href="source.htm">Developer Reference &rsaquo; Source Code</a>.
+</div>
 
 </body>
 </html>

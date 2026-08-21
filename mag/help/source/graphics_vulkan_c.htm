@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_vulkan.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_vulkan.c</p>
+<h1>graphics_vulkan.c</h1>
+<p>Vulkan loader/device/swapchain, resource, command, synchronization, and present path.</p>
+<div class="source-meta"><strong>1289 lines</strong> &middot; 40112 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_presentation_manager_h.htm'>&larr; graphics_presentation_manager.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='help_c.htm'>help.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#define VK_USE_PLATFORM_WIN32_KHR</span>
+<span class='pp'>#define VK_NO_PROTOTYPES</span>
+<span class='pp'>#include &lt;vulkan/vulkan.h&gt;</span>
+
+<span class='pp'>#define MAG_VK_FRAMES_IN_FLIGHT 2</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGVKFRAME
+{
+  VkCommandBuffer commandBuffer;
+  VkSemaphore     imageAvailable;
+  VkSemaphore     renderFinished;
+  VkFence         fence;
+  VkBuffer        uploadBuffer;
+  VkDeviceMemory  uploadMemory;
+  <span class='tp'>BYTE</span>*           mappedUpload;
+} MAGVKFRAME;
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGVULKANSTATE
+{
+  <span class='tp'>HMODULE</span>          module;
+  <span class='tp'>VkInstance</span>       instance;
+  <span class='tp'>VkSurfaceKHR</span>     surface;
+  VkPhysicalDevice physicalDevice;
+  <span class='tp'>VkDevice</span>         device;
+  <span class='tp'>VkQueue</span>          queue;
+  <span class='tp'>UINT</span>             queueFamily;
+  <span class='tp'>VkSwapchainKHR</span>   swapchain;
+  VkFormat         swapchainFormat;
+  VkExtent2D       extent;
+  <span class='tp'>VkImage</span>*         images;
+  VkBool32*        imageInitialized;
+  VkFence*         imageFences;
+  <span class='tp'>UINT</span>             imageCount;
+  VkCommandPool    commandPool;
+  MAGVKFRAME       frames[<span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>];
+  <span class='tp'>UINT</span>             currentFrame;
+  <span class='tp'>UINT64</span>           resourceGeneration;
+  <span class='tp'>MAGCPUCOMPOSITOR</span> compositor;
+  <span class='tp'>MAGPRESENTATIONSETTINGS</span> presentation;
+
+  PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+  PFN_vkCreateInstance vkCreateInstance;
+  PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
+  PFN_vkDestroyInstance vkDestroyInstance;
+  PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+  PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+  PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
+  PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
+  PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
+  PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties;
+  PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+  PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
+  PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
+  PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+  PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2;
+  PFN_vkCreateDevice vkCreateDevice;
+  PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
+  PFN_vkDestroyDevice vkDestroyDevice;
+  PFN_vkGetDeviceQueue vkGetDeviceQueue;
+  PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+  PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+  PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+  PFN_vkCreateCommandPool vkCreateCommandPool;
+  PFN_vkDestroyCommandPool vkDestroyCommandPool;
+  PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+  PFN_vkCreateSemaphore vkCreateSemaphore;
+  PFN_vkDestroySemaphore vkDestroySemaphore;
+  PFN_vkCreateFence vkCreateFence;
+  PFN_vkDestroyFence vkDestroyFence;
+  PFN_vkWaitForFences vkWaitForFences;
+  PFN_vkResetFences vkResetFences;
+  PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+  PFN_vkResetCommandBuffer vkResetCommandBuffer;
+  PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+  PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
+  PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
+  PFN_vkEndCommandBuffer vkEndCommandBuffer;
+  PFN_vkQueueSubmit vkQueueSubmit;
+  PFN_vkQueuePresentKHR vkQueuePresentKHR;
+  PFN_vkQueueWaitIdle vkQueueWaitIdle;
+  PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
+  PFN_vkCreateBuffer vkCreateBuffer;
+  PFN_vkDestroyBuffer vkDestroyBuffer;
+  PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+  PFN_vkAllocateMemory vkAllocateMemory;
+  PFN_vkFreeMemory vkFreeMemory;
+  PFN_vkBindBufferMemory vkBindBufferMemory;
+  PFN_vkMapMemory vkMapMemory;
+  PFN_vkUnmapMemory vkUnmapMemory;
+} MAGVULKANSTATE;
+
+<span class='pp'>#define MAG_VK_LOAD_GLOBAL(State, Name) \</span>
+  ((State)-&gt;Name = (PFN_##Name)(State)-&gt;<span class='fn'>vkGetInstanceProcAddr</span>(VK_NULL_HANDLE, #Name))
+<span class='pp'>#define MAG_VK_LOAD_INSTANCE(State, Name) \</span>
+  ((State)-&gt;Name = (PFN_##Name)(State)-&gt;<span class='fn'>vkGetInstanceProcAddr</span>((State)-&gt;instance, #Name))
+<span class='pp'>#define MAG_VK_LOAD_DEVICE(State, Name) \</span>
+  ((State)-&gt;Name = (PFN_##Name)(State)-&gt;<span class='fn'>vkGetDeviceProcAddr</span>((State)-&gt;device, #Name))
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanIsAvailable</span>(LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Vulkan Win32 presentation is unavailable on the private non-input test desktop.&quot;</span>), reasonCount);
+      }
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>HMODULE</span> module = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;vulkan-1.dll&quot;</span>));
+    <span class='tp'>BOOL</span> available = FALSE;
+
+    <span class='kw'>if</span> (module)
+    {
+      available = NULL != <span class='fn'>GetProcAddress</span>(module, <span class='str'>&quot;vkGetInstanceProcAddr&quot;</span>);
+      <span class='fn'>FreeLibrary</span>(module);
+    }
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      <span class='kw'>if</span> (available)
+      {
+        reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+      }
+      <span class='kw'>else</span>
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;The Vulkan loader is not installed.&quot;</span>), reasonCount);
+      }
+    }
+    <span class='kw'>return</span> available;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanLoadGlobalFunctions</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='tp'>TCHAR</span> layerFilter[<span class='num'>2</span>];
+
+    <span class='fn'>SetLastError</span>(ERROR_SUCCESS);
+    <span class='kw'>if</span> (!<span class='fn'>GetEnvironmentVariable</span>(
+          <span class='fn'>TEXT</span>(<span class='str'>&quot;VK_LOADER_LAYERS_DISABLE&quot;</span>),
+          layerFilter,
+          <span class='fn'>ARRAYSIZE</span>(layerFilter)) &amp;&amp;
+        ERROR_ENVVAR_NOT_FOUND == <span class='fn'>GetLastError</span>())
+    {
+      <span class='cm'>/* Implicit capture/overlay layers are outside MAG's backend contract and
+         can retain state from WGL/DXGI presenters across an API switch.  The
+         Vulkan loader explicitly supports this application-local safe mode. */</span>
+      <span class='fn'>SetEnvironmentVariable</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;VK_LOADER_LAYERS_DISABLE&quot;</span>), <span class='fn'>TEXT</span>(<span class='str'>&quot;~implicit~&quot;</span>));
+    }
+
+    <span class='tp'>state</span>-&gt;module = <span class='fn'>LoadLibrary</span>(<span class='fn'>TEXT</span>(<span class='str'>&quot;vulkan-1.dll&quot;</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;module)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;vkGetInstanceProcAddr =
+      (PFN_vkGetInstanceProcAddr)<span class='fn'>GetProcAddress</span>(<span class='tp'>state</span>-&gt;module, <span class='str'>&quot;vkGetInstanceProcAddr&quot;</span>);
+    <span class='kw'>return</span> <span class='tp'>state</span>-&gt;vkGetInstanceProcAddr &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_GLOBAL</span>(<span class='tp'>state</span>, vkCreateInstance) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_GLOBAL</span>(<span class='tp'>state</span>, vkEnumerateInstanceExtensionProperties);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanLoadInstanceFunctions</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>return</span>
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkDestroyInstance) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkCreateWin32SurfaceKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkDestroySurfaceKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkEnumeratePhysicalDevices) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceQueueFamilyProperties) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceSurfaceSupportKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkEnumerateDeviceExtensionProperties) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceSurfaceCapabilitiesKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceSurfaceFormatsKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceSurfacePresentModesKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceMemoryProperties) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetPhysicalDeviceProperties2) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkCreateDevice) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_INSTANCE</span>(<span class='tp'>state</span>, vkGetDeviceProcAddr);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanLoadDeviceFunctions</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>return</span>
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroyDevice) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkGetDeviceQueue) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCreateSwapchainKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroySwapchainKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkGetSwapchainImagesKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCreateCommandPool) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroyCommandPool) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkAllocateCommandBuffers) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCreateSemaphore) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroySemaphore) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCreateFence) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroyFence) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkWaitForFences) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkResetFences) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkAcquireNextImageKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkResetCommandBuffer) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkBeginCommandBuffer) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCmdPipelineBarrier) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCmdCopyBufferToImage) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkEndCommandBuffer) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkQueueSubmit) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkQueuePresentKHR) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkQueueWaitIdle) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDeviceWaitIdle) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkCreateBuffer) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkDestroyBuffer) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkGetBufferMemoryRequirements) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkAllocateMemory) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkFreeMemory) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkBindBufferMemory) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkMapMemory) &amp;&amp;
+      <span class='mc'>MAG_VK_LOAD_DEVICE</span>(<span class='tp'>state</span>, vkUnmapMemory);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanHasDeviceExtension</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  VkPhysicalDevice physicalDevice,
+  <span class='tp'>LPCSTR</span> extensionName)
+{
+    VkExtensionProperties* properties;
+    <span class='tp'>UINT</span> <span class='tp'>count</span> = <span class='num'>0</span>;
+    <span class='tp'>UINT</span> i;
+    <span class='tp'>BOOL</span> found = FALSE;
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkEnumerateDeviceExtensionProperties</span>(
+          physicalDevice,
+          NULL,
+          &amp;<span class='tp'>count</span>,
+          NULL) || !<span class='tp'>count</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    properties = (VkExtensionProperties*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      (<span class='tp'>SIZE_T</span>)<span class='tp'>count</span> * <span class='kw'>sizeof</span>(*properties));
+    <span class='kw'>if</span> (!properties)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (VK_SUCCESS == <span class='tp'>state</span>-&gt;<span class='fn'>vkEnumerateDeviceExtensionProperties</span>(
+          physicalDevice,
+          NULL,
+          &amp;<span class='tp'>count</span>,
+          properties))
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (<span class='num'>0</span> == <span class='fn'>lstrcmpA</span>(properties[i].extensionName, extensionName))
+        {
+          found = TRUE;
+          <span class='kw'>break</span>;
+        }
+      }
+    }
+
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, properties);
+    <span class='kw'>return</span> found;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanSelectPhysicalDevice</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    VkPhysicalDevice* devices;
+    <span class='tp'>UINT</span> deviceCount = <span class='num'>0</span>;
+    <span class='tp'>UINT</span> deviceIndex;
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkEnumeratePhysicalDevices</span>(<span class='tp'>state</span>-&gt;instance, &amp;deviceCount, NULL) ||
+        !deviceCount)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    devices = (VkPhysicalDevice*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      (<span class='tp'>SIZE_T</span>)deviceCount * <span class='kw'>sizeof</span>(*devices));
+    <span class='kw'>if</span> (!devices)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkEnumeratePhysicalDevices</span>(<span class='tp'>state</span>-&gt;instance, &amp;deviceCount, devices))
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, devices);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>for</span> (deviceIndex = <span class='num'>0</span>; deviceIndex &lt; deviceCount; ++deviceIndex)
+    {
+      VkPhysicalDeviceIDProperties <span class='tp'>id</span> =
+        { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+      VkPhysicalDeviceProperties2 properties =
+        { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &amp;<span class='tp'>id</span> };
+      VkQueueFamilyProperties* queues;
+      <span class='tp'>UINT</span> queueCount = <span class='num'>0</span>;
+      <span class='tp'>UINT</span> queueIndex;
+
+      <span class='kw'>if</span> (!<span class='fn'>magGraphicsVulkanHasDeviceExtension</span>(
+            <span class='tp'>state</span>,
+            devices[deviceIndex],
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+      {
+        <span class='kw'>continue</span>;
+      }
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceProperties2</span>(devices[deviceIndex], &amp;properties);
+      <span class='kw'>if</span> (!<span class='tp'>id</span>.deviceLUIDValid ||
+          <span class='num'>0</span> != <span class='fn'>memcmp</span>(
+            <span class='tp'>id</span>.deviceLUID,
+            &amp;<span class='tp'>state</span>-&gt;presentation.hardware.adapterLuid,
+            VK_LUID_SIZE))
+      {
+        <span class='kw'>continue</span>;
+      }
+
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceQueueFamilyProperties</span>(
+        devices[deviceIndex],
+        &amp;queueCount,
+        NULL);
+      <span class='kw'>if</span> (!queueCount)
+      {
+        <span class='kw'>continue</span>;
+      }
+
+      queues = (VkQueueFamilyProperties*)<span class='fn'>HeapAlloc</span>(
+        <span class='fn'>GetProcessHeap</span>(),
+        <span class='num'>0</span>,
+        (<span class='tp'>SIZE_T</span>)queueCount * <span class='kw'>sizeof</span>(*queues));
+      <span class='kw'>if</span> (!queues)
+      {
+        <span class='kw'>continue</span>;
+      }
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceQueueFamilyProperties</span>(
+        devices[deviceIndex],
+        &amp;queueCount,
+        queues);
+
+      <span class='kw'>for</span> (queueIndex = <span class='num'>0</span>; queueIndex &lt; queueCount; ++queueIndex)
+      {
+        VkBool32 presentSupported = VK_FALSE;
+
+        <span class='kw'>if</span> ((queues[queueIndex].queueFlags &amp; VK_QUEUE_GRAPHICS_BIT) &amp;&amp;
+            VK_SUCCESS == <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfaceSupportKHR</span>(
+              devices[deviceIndex],
+              queueIndex,
+              <span class='tp'>state</span>-&gt;surface,
+              &amp;presentSupported) &amp;&amp;
+            presentSupported)
+        {
+          <span class='tp'>state</span>-&gt;physicalDevice = devices[deviceIndex];
+          <span class='tp'>state</span>-&gt;queueFamily = queueIndex;
+          <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, queues);
+          <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, devices);
+          <span class='kw'>return</span> TRUE;
+        }
+      }
+
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, queues);
+    }
+
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, devices);
+    <span class='kw'>return</span> FALSE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreateDevice</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>const</span> <span class='tp'>FLOAT</span> priority = <span class='num'>1.0f</span>;
+    <span class='kw'>const</span> <span class='tp'>LPCSTR</span> extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    VkDeviceQueueCreateInfo queueInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
+    VkDeviceCreateInfo deviceInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+
+    queueInfo.queueFamilyIndex = <span class='tp'>state</span>-&gt;queueFamily;
+    queueInfo.queueCount = <span class='num'>1</span>;
+    queueInfo.pQueuePriorities = &amp;priority;
+    deviceInfo.queueCreateInfoCount = <span class='num'>1</span>;
+    deviceInfo.pQueueCreateInfos = &amp;queueInfo;
+    deviceInfo.enabledExtensionCount = <span class='fn'>ARRAYSIZE</span>(extensions);
+    deviceInfo.ppEnabledExtensionNames = extensions;
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateDevice</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          &amp;deviceInfo,
+          NULL,
+          &amp;<span class='tp'>state</span>-&gt;device) ||
+        !<span class='fn'>magGraphicsVulkanLoadDeviceFunctions</span>(<span class='tp'>state</span>))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkGetDeviceQueue</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;queueFamily, <span class='num'>0</span>, &amp;<span class='tp'>state</span>-&gt;queue);
+    <span class='kw'>return</span> VK_NULL_HANDLE != <span class='tp'>state</span>-&gt;queue;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT</span> <span class='fn'>magGraphicsVulkanFindMemoryType</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  <span class='tp'>UINT</span> typeBits,
+  VkMemoryPropertyFlags requiredFlags)
+{
+    VkPhysicalDeviceMemoryProperties properties;
+    <span class='tp'>UINT</span> i;
+
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceMemoryProperties</span>(<span class='tp'>state</span>-&gt;physicalDevice, &amp;properties);
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; properties.memoryTypeCount; ++i)
+    {
+      <span class='kw'>if</span> ((typeBits &amp; (<span class='num'>1U</span> &lt;&lt; i)) &amp;&amp;
+          (properties.memoryTypes[i].propertyFlags &amp; requiredFlags) == requiredFlags)
+      {
+        <span class='kw'>return</span> i;
+      }
+    }
+    <span class='kw'>return</span> MAXUINT;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreateUploadBuffer</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  MAGVKFRAME* frame,
+  VkDeviceSize size)
+{
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VkMemoryRequirements requirements;
+    VkMemoryAllocateInfo allocationInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    <span class='tp'>UINT</span> memoryType;
+
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateBuffer</span>(<span class='tp'>state</span>-&gt;device, &amp;bufferInfo, NULL, &amp;frame-&gt;uploadBuffer))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkGetBufferMemoryRequirements</span>(<span class='tp'>state</span>-&gt;device, frame-&gt;uploadBuffer, &amp;requirements);
+    memoryType = <span class='fn'>magGraphicsVulkanFindMemoryType</span>(
+      <span class='tp'>state</span>,
+      requirements.memoryTypeBits,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    <span class='kw'>if</span> (MAXUINT == memoryType)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    allocationInfo.allocationSize = requirements.size;
+    allocationInfo.memoryTypeIndex = memoryType;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkAllocateMemory</span>(
+          <span class='tp'>state</span>-&gt;device,
+          &amp;allocationInfo,
+          NULL,
+          &amp;frame-&gt;uploadMemory) ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkBindBufferMemory</span>(
+          <span class='tp'>state</span>-&gt;device,
+          frame-&gt;uploadBuffer,
+          frame-&gt;uploadMemory,
+          <span class='num'>0</span>) ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkMapMemory</span>(
+          <span class='tp'>state</span>-&gt;device,
+          frame-&gt;uploadMemory,
+          <span class='num'>0</span>,
+          size,
+          <span class='num'>0</span>,
+          (<span class='kw'>void</span>**)&amp;frame-&gt;mappedUpload))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsVulkanDestroyUploadResources</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>; ++i)
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].uploadMemory &amp;&amp; <span class='tp'>state</span>-&gt;frames[i].mappedUpload)
+      {
+        <span class='tp'>state</span>-&gt;<span class='fn'>vkUnmapMemory</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].uploadMemory);
+        <span class='tp'>state</span>-&gt;frames[i].mappedUpload = NULL;
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].uploadBuffer)
+      {
+        <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroyBuffer</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].uploadBuffer, NULL);
+        <span class='tp'>state</span>-&gt;frames[i].uploadBuffer = VK_NULL_HANDLE;
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].uploadMemory)
+      {
+        <span class='tp'>state</span>-&gt;<span class='fn'>vkFreeMemory</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].uploadMemory, NULL);
+        <span class='tp'>state</span>-&gt;frames[i].uploadMemory = VK_NULL_HANDLE;
+      }
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreateUploadResources</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  <span class='tp'>SIZE</span> reservoirSize)
+{
+    VkDeviceSize byteCount;
+    <span class='tp'>UINT</span> i;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || reservoirSize.cx &lt; <span class='num'>1</span> || reservoirSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    byteCount = (VkDeviceSize)(<span class='tp'>UINT</span>)reservoirSize.cx *
+      (VkDeviceSize)(<span class='tp'>UINT</span>)reservoirSize.cy * <span class='num'>4U</span>;
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>; ++i)
+    {
+      <span class='kw'>if</span> (!<span class='fn'>magGraphicsVulkanCreateUploadBuffer</span>(<span class='tp'>state</span>, &amp;<span class='tp'>state</span>-&gt;frames[i], byteCount))
+      {
+        <span class='fn'>magGraphicsVulkanDestroyUploadResources</span>(<span class='tp'>state</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsVulkanDestroySwapchainResources</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;swapchain)
+    {
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroySwapchainKHR</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;swapchain, NULL);
+      <span class='tp'>state</span>-&gt;swapchain = VK_NULL_HANDLE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;images)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>-&gt;images);
+      <span class='tp'>state</span>-&gt;images = NULL;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;imageInitialized)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>-&gt;imageInitialized);
+      <span class='tp'>state</span>-&gt;imageInitialized = NULL;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;imageFences)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>-&gt;imageFences);
+      <span class='tp'>state</span>-&gt;imageFences = NULL;
+    }
+    <span class='tp'>state</span>-&gt;imageCount = <span class='num'>0</span>;
+    <span class='fn'>ZeroMemory</span>(&amp;<span class='tp'>state</span>-&gt;extent, <span class='kw'>sizeof</span>(<span class='tp'>state</span>-&gt;extent));
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreateSwapchainResources</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  <span class='tp'>SIZE</span> clientSize)
+{
+    VkSurfaceCapabilitiesKHR caps;
+    VkSurfaceFormatKHR* formats = NULL;
+    VkPresentModeKHR* presentModes = NULL;
+    VkSurfaceFormatKHR surfaceFormat;
+    VkSwapchainCreateInfoKHR swapInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    VkExtent2D extent;
+    <span class='tp'>VkSwapchainKHR</span> candidateSwapchain = VK_NULL_HANDLE;
+    <span class='tp'>VkImage</span>* candidateImages = NULL;
+    VkBool32* candidateInitialized = NULL;
+    VkFence* candidateFences = NULL;
+    <span class='tp'>UINT</span> formatCount = <span class='num'>0</span>;
+    <span class='tp'>UINT</span> presentModeCount = <span class='num'>0</span>;
+    <span class='tp'>UINT</span> imageCount;
+    <span class='tp'>UINT</span> i;
+    <span class='tp'>BOOL</span> foundBgra = FALSE;
+    <span class='tp'>BOOL</span> success = FALSE;
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfaceCapabilitiesKHR</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          <span class='tp'>state</span>-&gt;surface,
+          &amp;caps) ||
+        !(caps.supportedUsageFlags &amp; VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfaceFormatsKHR</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          <span class='tp'>state</span>-&gt;surface,
+          &amp;formatCount,
+          NULL) ||
+        !formatCount)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    formats = (VkSurfaceFormatKHR*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      (<span class='tp'>SIZE_T</span>)formatCount * <span class='kw'>sizeof</span>(*formats));
+    <span class='kw'>if</span> (!formats ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfaceFormatsKHR</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          <span class='tp'>state</span>-&gt;surface,
+          &amp;formatCount,
+          formats))
+    {
+      <span class='kw'>if</span> (formats)
+      {
+        <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, formats);
+      }
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    surfaceFormat = formats[<span class='num'>0</span>];
+    <span class='kw'>if</span> (VK_FORMAT_UNDEFINED == surfaceFormat.<span class='tp'>format</span>)
+    {
+      surfaceFormat.<span class='tp'>format</span> = VK_FORMAT_B8G8R8A8_UNORM;
+      surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      foundBgra = TRUE;
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; formatCount; ++i)
+      {
+        <span class='kw'>if</span> (VK_FORMAT_B8G8R8A8_UNORM == formats[i].<span class='tp'>format</span> &amp;&amp;
+            VK_COLOR_SPACE_SRGB_NONLINEAR_KHR == formats[i].colorSpace)
+        {
+          surfaceFormat = formats[i];
+          foundBgra = TRUE;
+          <span class='kw'>break</span>;
+        }
+      }
+    }
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, formats);
+    formats = NULL;
+    <span class='kw'>if</span> (!foundBgra)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    <span class='kw'>if</span> (UINT32_MAX != caps.currentExtent.width)
+    {
+      extent = caps.currentExtent;
+    }
+    <span class='kw'>else</span>
+    {
+      extent.width = <span class='mc'>CLAMP</span>((<span class='tp'>UINT</span>)clientSize.cx, caps.minImageExtent.width, caps.maxImageExtent.width);
+      extent.height = <span class='mc'>CLAMP</span>((<span class='tp'>UINT</span>)clientSize.cy, caps.minImageExtent.height, caps.maxImageExtent.height);
+    }
+    <span class='kw'>if</span> (!extent.width || !extent.height)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    imageCount = <span class='tp'>state</span>-&gt;presentation.bufferCount;
+    <span class='kw'>if</span> (imageCount &lt; caps.minImageCount ||
+        (caps.maxImageCount &amp;&amp; imageCount &gt; caps.maxImageCount))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    <span class='kw'>if</span> (MAG_LAYER_ALPHA_PER_PIXEL_PREMULTIPLIED == <span class='tp'>state</span>-&gt;presentation.alphaMode)
+    {
+      compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    }
+    <span class='kw'>if</span> (!(caps.supportedCompositeAlpha &amp; compositeAlpha))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfacePresentModesKHR</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          <span class='tp'>state</span>-&gt;surface,
+          &amp;presentModeCount,
+          NULL) || !presentModeCount)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+    presentModes = (VkPresentModeKHR*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      (<span class='tp'>SIZE_T</span>)presentModeCount * <span class='kw'>sizeof</span>(*presentModes));
+    <span class='kw'>if</span> (!presentModes ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetPhysicalDeviceSurfacePresentModesKHR</span>(
+          <span class='tp'>state</span>-&gt;physicalDevice,
+          <span class='tp'>state</span>-&gt;surface,
+          &amp;presentModeCount,
+          presentModes))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+    <span class='kw'>if</span> (<span class='num'>0</span> == <span class='tp'>state</span>-&gt;presentation.syncInterval)
+    {
+      <span class='kw'>const</span> VkPresentModeKHR preferred[] =
+      {
+        VK_PRESENT_MODE_MAILBOX_KHR,
+        VK_PRESENT_MODE_IMMEDIATE_KHR,
+        VK_PRESENT_MODE_FIFO_RELAXED_KHR,
+        VK_PRESENT_MODE_FIFO_KHR,
+      };
+      <span class='tp'>UINT</span> preferenceCount = <span class='tp'>state</span>-&gt;presentation.allowTearing
+        ? <span class='fn'>ARRAYSIZE</span>(preferred)
+        : <span class='num'>1U</span>;
+      <span class='tp'>UINT</span> preference;
+
+      <span class='kw'>for</span> (preference = <span class='num'>0</span>; preference &lt; preferenceCount; ++preference)
+      {
+        <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; presentModeCount; ++i)
+        {
+          <span class='kw'>if</span> (presentModes[i] == preferred[preference])
+          {
+            presentMode = preferred[preference];
+            preference = preferenceCount;
+            <span class='kw'>break</span>;
+          }
+        }
+      }
+    }
+    <span class='kw'>else</span>
+    {
+      <span class='cm'>/* MAILBOX preserves vertical synchronization while replacing queued
+         stale frames with the newest transition frame.  FIFO remains the
+         mandatory fallback when MAILBOX is unavailable. */</span>
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; presentModeCount; ++i)
+      {
+        <span class='kw'>if</span> (VK_PRESENT_MODE_MAILBOX_KHR == presentModes[i])
+        {
+          presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+          <span class='kw'>break</span>;
+        }
+      }
+    }
+
+    swapInfo.surface = <span class='tp'>state</span>-&gt;surface;
+    swapInfo.minImageCount = imageCount;
+    swapInfo.imageFormat = surfaceFormat.<span class='tp'>format</span>;
+    swapInfo.imageColorSpace = surfaceFormat.colorSpace;
+    swapInfo.imageExtent = extent;
+    swapInfo.imageArrayLayers = <span class='num'>1</span>;
+    swapInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swapInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapInfo.preTransform = caps.currentTransform;
+    swapInfo.compositeAlpha = compositeAlpha;
+    swapInfo.presentMode = presentMode;
+    swapInfo.clipped = VK_TRUE;
+    swapInfo.oldSwapchain = <span class='tp'>state</span>-&gt;swapchain;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateSwapchainKHR</span>(
+          <span class='tp'>state</span>-&gt;device,
+          &amp;swapInfo,
+          NULL,
+          &amp;candidateSwapchain))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetSwapchainImagesKHR</span>(
+          <span class='tp'>state</span>-&gt;device,
+          candidateSwapchain,
+          &amp;imageCount,
+          NULL) || !imageCount)
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    candidateImages = (<span class='tp'>VkImage</span>*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      <span class='num'>0</span>,
+      (<span class='tp'>SIZE_T</span>)imageCount * <span class='kw'>sizeof</span>(*candidateImages));
+    candidateInitialized = (VkBool32*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      (<span class='tp'>SIZE_T</span>)imageCount * <span class='kw'>sizeof</span>(*candidateInitialized));
+    candidateFences = (VkFence*)<span class='fn'>HeapAlloc</span>(
+      <span class='fn'>GetProcessHeap</span>(),
+      HEAP_ZERO_MEMORY,
+      (<span class='tp'>SIZE_T</span>)imageCount * <span class='kw'>sizeof</span>(*candidateFences));
+    <span class='kw'>if</span> (!candidateImages || !candidateInitialized || !candidateFences ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkGetSwapchainImagesKHR</span>(
+          <span class='tp'>state</span>-&gt;device,
+          candidateSwapchain,
+          &amp;imageCount,
+          candidateImages))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+
+    <span class='cm'>/* The old chain stays valid until the replacement is completely built.
+       Queue retirement happens only after candidate creation, so a failure can
+       never expose an HWND with no presentable images. */</span>
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;swapchain &amp;&amp; VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkQueueWaitIdle</span>(<span class='tp'>state</span>-&gt;queue))
+    {
+      <span class='kw'>goto</span> cleanup;
+    }
+    <span class='fn'>magGraphicsVulkanDestroySwapchainResources</span>(<span class='tp'>state</span>);
+    <span class='tp'>state</span>-&gt;swapchain = candidateSwapchain;
+    candidateSwapchain = VK_NULL_HANDLE;
+    <span class='tp'>state</span>-&gt;images = candidateImages;
+    candidateImages = NULL;
+    <span class='tp'>state</span>-&gt;imageInitialized = candidateInitialized;
+    candidateInitialized = NULL;
+    <span class='tp'>state</span>-&gt;imageFences = candidateFences;
+    candidateFences = NULL;
+    <span class='tp'>state</span>-&gt;imageCount = imageCount;
+    <span class='tp'>state</span>-&gt;extent = extent;
+    <span class='tp'>state</span>-&gt;swapchainFormat = surfaceFormat.<span class='tp'>format</span>;
+    ++<span class='tp'>state</span>-&gt;resourceGeneration;
+    success = TRUE;
+
+cleanup:
+    <span class='kw'>if</span> (formats)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, formats);
+    }
+    <span class='kw'>if</span> (presentModes)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, presentModes);
+    }
+    <span class='kw'>if</span> (candidateImages)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, candidateImages);
+    }
+    <span class='kw'>if</span> (candidateInitialized)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, candidateInitialized);
+    }
+    <span class='kw'>if</span> (candidateFences)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, candidateFences);
+    }
+    <span class='kw'>if</span> (candidateSwapchain)
+    {
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroySwapchainKHR</span>(<span class='tp'>state</span>-&gt;device, candidateSwapchain, NULL);
+    }
+    <span class='kw'>return</span> success;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreateSyncResources</span>(MAGVULKANSTATE* <span class='tp'>state</span>)
+{
+    VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    VkCommandBufferAllocateInfo commandInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    VkCommandBuffer commandBuffers[<span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>];
+    VkSemaphoreCreateInfo semaphoreInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkFenceCreateInfo fenceInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    <span class='tp'>UINT</span> i;
+
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = <span class='tp'>state</span>-&gt;queueFamily;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateCommandPool</span>(
+          <span class='tp'>state</span>-&gt;device,
+          &amp;poolInfo,
+          NULL,
+          &amp;<span class='tp'>state</span>-&gt;commandPool))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    commandInfo.commandPool = <span class='tp'>state</span>-&gt;commandPool;
+    commandInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    commandInfo.commandBufferCount = <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkAllocateCommandBuffers</span>(
+          <span class='tp'>state</span>-&gt;device,
+          &amp;commandInfo,
+          commandBuffers))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>; ++i)
+    {
+      <span class='tp'>state</span>-&gt;frames[i].commandBuffer = commandBuffers[i];
+      <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateSemaphore</span>(
+            <span class='tp'>state</span>-&gt;device,
+            &amp;semaphoreInfo,
+            NULL,
+            &amp;<span class='tp'>state</span>-&gt;frames[i].imageAvailable) ||
+          VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateSemaphore</span>(
+            <span class='tp'>state</span>-&gt;device,
+            &amp;semaphoreInfo,
+            NULL,
+            &amp;<span class='tp'>state</span>-&gt;frames[i].renderFinished) ||
+          VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateFence</span>(
+            <span class='tp'>state</span>-&gt;device,
+            &amp;fenceInfo,
+            NULL,
+            &amp;<span class='tp'>state</span>-&gt;frames[i].fence))
+      {
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsVulkanDestroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState);
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  <span class='kw'>void</span>** stateOut)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span>;
+    <span class='kw'>const</span> <span class='tp'>LPCSTR</span> extensions[] =
+    {
+      VK_KHR_SURFACE_EXTENSION_NAME,
+      VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+    };
+    VkApplicationInfo applicationInfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+    VkInstanceCreateInfo instanceInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+    VkWin32SurfaceCreateInfoKHR surfaceInfo = { VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
+    <span class='tp'>SIZE</span> reservoirSize;
+
+    <span class='kw'>if</span> (!stateOut || !presentation || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *stateOut = NULL;
+
+    <span class='tp'>state</span> = (MAGVULKANSTATE*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !<span class='fn'>magGraphicsVulkanLoadGlobalFunctions</span>(<span class='tp'>state</span>))
+    {
+      <span class='fn'>magGraphicsVulkanDestroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;presentation = *presentation;
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(hWnd, clientSize);
+
+    applicationInfo.pApplicationName = <span class='str'>&quot;mag&quot;</span>;
+    applicationInfo.applicationVersion = <span class='fn'>VK_MAKE_API_VERSION</span>(<span class='num'>0</span>, <span class='num'>1</span>, <span class='num'>0</span>, <span class='num'>0</span>);
+    applicationInfo.pEngineName = <span class='str'>&quot;mag&quot;</span>;
+    applicationInfo.engineVersion = <span class='fn'>VK_MAKE_API_VERSION</span>(<span class='num'>0</span>, <span class='num'>1</span>, <span class='num'>0</span>, <span class='num'>0</span>);
+    applicationInfo.apiVersion = VK_API_VERSION_1_1;
+    instanceInfo.pApplicationInfo = &amp;applicationInfo;
+    instanceInfo.enabledExtensionCount = <span class='fn'>ARRAYSIZE</span>(extensions);
+    instanceInfo.ppEnabledExtensionNames = extensions;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateInstance</span>(&amp;instanceInfo, NULL, &amp;<span class='tp'>state</span>-&gt;instance) ||
+        !<span class='fn'>magGraphicsVulkanLoadInstanceFunctions</span>(<span class='tp'>state</span>))
+    {
+      <span class='fn'>magGraphicsVulkanDestroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    surfaceInfo.hinstance = <span class='fn'>GetModuleHandle</span>(NULL);
+    surfaceInfo.hwnd = hWnd;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkCreateWin32SurfaceKHR</span>(
+          <span class='tp'>state</span>-&gt;instance,
+          &amp;surfaceInfo,
+          NULL,
+          &amp;<span class='tp'>state</span>-&gt;surface) ||
+        !<span class='fn'>magGraphicsVulkanSelectPhysicalDevice</span>(<span class='tp'>state</span>) ||
+        !<span class='fn'>magGraphicsVulkanCreateDevice</span>(<span class='tp'>state</span>) ||
+        !<span class='fn'>magGraphicsVulkanCreateSyncResources</span>(<span class='tp'>state</span>) ||
+        !<span class='fn'>magGraphicsVulkanCreateUploadResources</span>(<span class='tp'>state</span>, reservoirSize) ||
+        !<span class='fn'>magGraphicsVulkanCreateSwapchainResources</span>(<span class='tp'>state</span>, clientSize) ||
+        !<span class='fn'>magGraphicsReserveCpuCompositor</span>(
+          &amp;<span class='tp'>state</span>-&gt;compositor,
+          (<span class='tp'>UINT</span>)reservoirSize.cx,
+          (<span class='tp'>UINT</span>)reservoirSize.cy))
+    {
+      <span class='fn'>magGraphicsVulkanDestroy</span>(hWnd, <span class='tp'>state</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    *stateOut = <span class='tp'>state</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsVulkanDestroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span> = (MAGVULKANSTATE*)opaqueState;
+    <span class='tp'>UINT</span> i;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device &amp;&amp; <span class='tp'>state</span>-&gt;vkDeviceWaitIdle)
+    {
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkDeviceWaitIdle</span>(<span class='tp'>state</span>-&gt;device);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device &amp;&amp; <span class='tp'>state</span>-&gt;vkDestroySwapchainKHR)
+    {
+      <span class='fn'>magGraphicsVulkanDestroySwapchainResources</span>(<span class='tp'>state</span>);
+      <span class='fn'>magGraphicsVulkanDestroyUploadResources</span>(<span class='tp'>state</span>);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>; ++i)
+      {
+        <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].fence)
+        {
+          <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroyFence</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].fence, NULL);
+        }
+        <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].renderFinished)
+        {
+          <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroySemaphore</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].renderFinished, NULL);
+        }
+        <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;frames[i].imageAvailable)
+        {
+          <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroySemaphore</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;frames[i].imageAvailable, NULL);
+        }
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;commandPool)
+      {
+        <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroyCommandPool</span>(<span class='tp'>state</span>-&gt;device, <span class='tp'>state</span>-&gt;commandPool, NULL);
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;vkDestroyDevice)
+      {
+        <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroyDevice</span>(<span class='tp'>state</span>-&gt;device, NULL);
+      }
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;surface &amp;&amp; <span class='tp'>state</span>-&gt;vkDestroySurfaceKHR)
+    {
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroySurfaceKHR</span>(<span class='tp'>state</span>-&gt;instance, <span class='tp'>state</span>-&gt;surface, NULL);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;instance &amp;&amp; <span class='tp'>state</span>-&gt;vkDestroyInstance)
+    {
+      <span class='tp'>state</span>-&gt;<span class='fn'>vkDestroyInstance</span>(<span class='tp'>state</span>-&gt;instance, NULL);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;module)
+    {
+      <span class='fn'>FreeLibrary</span>(<span class='tp'>state</span>-&gt;module);
+    }
+    <span class='fn'>magGraphicsDestroyCpuCompositor</span>(&amp;<span class='tp'>state</span>-&gt;compositor);
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanResize</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>SIZE</span> clientSize)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span> = (MAGVULKANSTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> ((<span class='tp'>UINT</span>)clientSize.cx == <span class='tp'>state</span>-&gt;extent.width &amp;&amp;
+        (<span class='tp'>UINT</span>)clientSize.cy == <span class='tp'>state</span>-&gt;extent.height)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>return</span> <span class='fn'>magGraphicsVulkanCreateSwapchainResources</span>(<span class='tp'>state</span>, clientSize);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanSetPresentationEnabled</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='tp'>BOOL</span> enabled)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span> = (MAGVULKANSTATE*)opaqueState;
+    <span class='tp'>RECT</span> clientRect;
+    <span class='tp'>SIZE</span> clientSize;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !<span class='tp'>state</span>-&gt;device)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (!enabled)
+    {
+      <span class='cm'>/* Keep the WSI object parked.  Recreating it after a WGL context has
+         existed in this process enters vendor ICD teardown/re-entry paths that
+         are not stable on all 32-bit drivers.  A parked swap chain owns no
+         frame submissions and its last image simply remains latched. */</span>
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;swapchain)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+    <span class='kw'>if</span> (!<span class='fn'>GetClientRect</span>(hWnd, &amp;clientRect))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    clientSize.cx = <span class='fn'>max</span>(<span class='num'>1L</span>, clientRect.right - clientRect.<span class='tp'>left</span>);
+    clientSize.cy = <span class='fn'>max</span>(<span class='num'>1L</span>, clientRect.bottom - clientRect.top);
+    <span class='kw'>return</span> <span class='fn'>magGraphicsVulkanCreateSwapchainResources</span>(<span class='tp'>state</span>, clientSize);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanRecordCopy</span>(
+  MAGVULKANSTATE* <span class='tp'>state</span>,
+  MAGVKFRAME* frame,
+  <span class='tp'>UINT</span> imageIndex)
+{
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VkImageMemoryBarrier toTransfer = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    VkImageMemoryBarrier toPresent = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    VkBufferImageCopy copy = { <span class='num'>0</span> };
+
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkResetCommandBuffer</span>(frame-&gt;commandBuffer, <span class='num'>0</span>) ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkBeginCommandBuffer</span>(frame-&gt;commandBuffer, &amp;beginInfo))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    toTransfer.srcAccessMask = <span class='num'>0</span>;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toTransfer.oldLayout = <span class='tp'>state</span>-&gt;imageInitialized[imageIndex]
+      ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+      : VK_IMAGE_LAYOUT_UNDEFINED;
+    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image = <span class='tp'>state</span>-&gt;images[imageIndex];
+    toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toTransfer.subresourceRange.levelCount = <span class='num'>1</span>;
+    toTransfer.subresourceRange.layerCount = <span class='num'>1</span>;
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkCmdPipelineBarrier</span>(
+      frame-&gt;commandBuffer,
+      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>1</span>,
+      &amp;toTransfer);
+
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = <span class='num'>1</span>;
+    copy.imageExtent.width = <span class='tp'>state</span>-&gt;extent.width;
+    copy.imageExtent.height = <span class='tp'>state</span>-&gt;extent.height;
+    copy.imageExtent.depth = <span class='num'>1</span>;
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkCmdCopyBufferToImage</span>(
+      frame-&gt;commandBuffer,
+      frame-&gt;uploadBuffer,
+      <span class='tp'>state</span>-&gt;images[imageIndex],
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      <span class='num'>1</span>,
+      &amp;copy);
+
+    toPresent.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toPresent.dstAccessMask = <span class='num'>0</span>;
+    toPresent.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.image = <span class='tp'>state</span>-&gt;images[imageIndex];
+    toPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toPresent.subresourceRange.levelCount = <span class='num'>1</span>;
+    toPresent.subresourceRange.layerCount = <span class='num'>1</span>;
+    <span class='tp'>state</span>-&gt;<span class='fn'>vkCmdPipelineBarrier</span>(
+      frame-&gt;commandBuffer,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+      <span class='num'>0</span>,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>0</span>,
+      NULL,
+      <span class='num'>1</span>,
+      &amp;toPresent);
+
+    <span class='kw'>return</span> VK_SUCCESS == <span class='tp'>state</span>-&gt;<span class='fn'>vkEndCommandBuffer</span>(frame-&gt;commandBuffer);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsVulkanRender</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* sourceFrame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span> = (MAGVULKANSTATE*)opaqueState;
+    MAGVKFRAME* frame;
+    <span class='tp'>MAGPIXELBUFFER</span> composed;
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+    <span class='tp'>UINT</span> imageIndex;
+    <span class='tp'>VkResult</span> result;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(intent);
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !sourceFrame ||
+        sourceFrame-&gt;width != <span class='tp'>state</span>-&gt;extent.width ||
+        sourceFrame-&gt;height != <span class='tp'>state</span>-&gt;extent.height ||
+        !<span class='fn'>magGraphicsComposeFrame</span>(&amp;<span class='tp'>state</span>-&gt;compositor, sourceFrame, ui, &amp;composed))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    frame = &amp;<span class='tp'>state</span>-&gt;frames[<span class='tp'>state</span>-&gt;currentFrame];
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkWaitForFences</span>(
+          <span class='tp'>state</span>-&gt;device,
+          <span class='num'>1</span>,
+          &amp;frame-&gt;fence,
+          VK_TRUE,
+          UINT64_MAX))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    result = <span class='tp'>state</span>-&gt;<span class='fn'>vkAcquireNextImageKHR</span>(
+      <span class='tp'>state</span>-&gt;device,
+      <span class='tp'>state</span>-&gt;swapchain,
+      UINT64_MAX,
+      frame-&gt;imageAvailable,
+      VK_NULL_HANDLE,
+      &amp;imageIndex);
+    <span class='kw'>if</span> (VK_ERROR_OUT_OF_DATE_KHR == result)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (VK_SUCCESS != result &amp;&amp; VK_SUBOPTIMAL_KHR != result)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;imageFences[imageIndex] &amp;&amp;
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkWaitForFences</span>(
+          <span class='tp'>state</span>-&gt;device,
+          <span class='num'>1</span>,
+          &amp;<span class='tp'>state</span>-&gt;imageFences[imageIndex],
+          VK_TRUE,
+          UINT64_MAX))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;imageFences[imageIndex] = frame-&gt;fence;
+
+    <span class='fn'>CopyMemory</span>(
+      frame-&gt;mappedUpload,
+      composed.<span class='tp'>pixels</span>,
+      (<span class='tp'>SIZE_T</span>)composed.stride * composed.height);
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsVulkanRecordCopy</span>(<span class='tp'>state</span>, frame, imageIndex) ||
+        VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkResetFences</span>(<span class='tp'>state</span>-&gt;device, <span class='num'>1</span>, &amp;frame-&gt;fence))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    submitInfo.waitSemaphoreCount = <span class='num'>1</span>;
+    submitInfo.pWaitSemaphores = &amp;frame-&gt;imageAvailable;
+    submitInfo.pWaitDstStageMask = &amp;waitStage;
+    submitInfo.commandBufferCount = <span class='num'>1</span>;
+    submitInfo.pCommandBuffers = &amp;frame-&gt;commandBuffer;
+    submitInfo.signalSemaphoreCount = <span class='num'>1</span>;
+    submitInfo.pSignalSemaphores = &amp;frame-&gt;renderFinished;
+    <span class='kw'>if</span> (VK_SUCCESS != <span class='tp'>state</span>-&gt;<span class='fn'>vkQueueSubmit</span>(<span class='tp'>state</span>-&gt;queue, <span class='num'>1</span>, &amp;submitInfo, frame-&gt;fence))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='tp'>state</span>-&gt;imageInitialized[imageIndex] = VK_TRUE;
+
+    presentInfo.waitSemaphoreCount = <span class='num'>1</span>;
+    presentInfo.pWaitSemaphores = &amp;frame-&gt;renderFinished;
+    presentInfo.swapchainCount = <span class='num'>1</span>;
+    presentInfo.pSwapchains = &amp;<span class='tp'>state</span>-&gt;swapchain;
+    presentInfo.pImageIndices = &amp;imageIndex;
+    result = <span class='tp'>state</span>-&gt;<span class='fn'>vkQueuePresentKHR</span>(<span class='tp'>state</span>-&gt;queue, &amp;presentInfo);
+    <span class='tp'>state</span>-&gt;currentFrame = (<span class='tp'>state</span>-&gt;currentFrame + <span class='num'>1U</span>) % <span class='mc'>MAG_VK_FRAMES_IN_FLIGHT</span>;
+    <span class='kw'>return</span> VK_SUCCESS == result || VK_SUBOPTIMAL_KHR == result;
+}
+
+<span class='kw'>static</span> <span class='tp'>HANDLE</span> <span class='fn'>magGraphicsVulkanGetFrameWaitHandle</span>(<span class='kw'>void</span>* <span class='tp'>state</span>)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(<span class='tp'>state</span>);
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magGraphicsVulkanGetResourceGeneration</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGVULKANSTATE* <span class='tp'>state</span> = (MAGVULKANSTATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span> ? <span class='tp'>state</span>-&gt;resourceGeneration + <span class='tp'>state</span>-&gt;compositor.generation : <span class='num'>0</span>;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsVulkanBackend =
+{
+  GRAPHICS_API_VULKAN,
+  <span class='fn'>TEXT</span>(<span class='str'>&quot;Vulkan&quot;</span>),
+  TRUE,
+  magGraphicsVulkanIsAvailable,
+  magGraphicsVulkanCreate,
+  magGraphicsVulkanDestroy,
+  magGraphicsVulkanResize,
+  magGraphicsVulkanSetPresentationEnabled,
+  magGraphicsVulkanRender,
+  magGraphicsVulkanGetFrameWaitHandle,
+  magGraphicsVulkanGetResourceGeneration,
+  NULL,
+  NULL,
+};
+</pre>
+<p class="source-nav"><a href='graphics_presentation_manager_h.htm'>&larr; graphics_presentation_manager.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='help_c.htm'>help.c &rarr;</a></p>
+</body>
+</html>

@@ -3,16 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>d3dkmtx.h - Source Code</title>
+  <title>d3dkmtx.h - MAG Source Code</title>
   <link rel="stylesheet" type="text/css" href="../help.css">
 </head>
 <body>
 <p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; d3dkmtx.h</p>
 <h1>d3dkmtx.h</h1>
+<p>Project-owned C declarations, types, constants, and ABI surface.</p>
+<div class="source-meta"><strong>62 lines</strong> &middot; 1580 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='d3dkmtx_c.htm'>&larr; d3dkmtx.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dcompabi_h.htm'>dcompabi.h &rarr;</a></p>
 <pre class="source-code"><span class='pp'>#pragma once</span>
 
-<span class='pp'>#include "framework.h"</span>
+<span class='pp'>#include &quot;framework.h&quot;</span>
 
-BOOL <span class='fn'>D3DKMTWaitForVerticalBlank</span>(HWND hWnd);</pre>
+<span class='kw'>typedef</span> <span class='kw'>struct</span> <span class='tp'>MAGD3DKMTDISPLAYPLANECAPS</span>
+{
+  <span class='tp'>BOOL</span> <span class='tp'>queried</span>;
+  <span class='tp'>BOOL</span> directFlip;
+  <span class='tp'>BOOL</span> independentFlip;
+  <span class='tp'>BOOL</span> multiPlaneOverlay;
+  <span class='tp'>BOOL</span> multiPlaneOverlayDecode;
+  <span class='tp'>BOOL</span> panelFitter;
+  <span class='tp'>BOOL</span> mpo3Ddi;
+  <span class='tp'>BOOL</span> mpoKernelCaps;
+  <span class='tp'>BOOL</span> mpoHudKernel;
+  <span class='tp'>BOOL</span> mpoHud;
+  <span class='tp'>BOOL</span> mpoSecondary;
+  <span class='tp'>BOOL</span> independentFlipSecondary;
+  <span class='tp'>BOOL</span> mpoStretch;
+  <span class='tp'>BOOL</span> overlayCapsKnown;
+  <span class='tp'>BOOL</span> postCompositionCaps;
+  <span class='tp'>BOOL</span> overlayRotation;
+  <span class='tp'>BOOL</span> overlayRotationWithoutIndependentFlip;
+  <span class='tp'>BOOL</span> overlayVerticalFlip;
+  <span class='tp'>BOOL</span> overlayHorizontalFlip;
+  <span class='tp'>BOOL</span> overlayStretchRgb;
+  <span class='tp'>BOOL</span> overlayStretchYuv;
+  <span class='tp'>BOOL</span> overlayBilinearFilter;
+  <span class='tp'>BOOL</span> overlayHighFilter;
+  <span class='tp'>BOOL</span> overlayShared;
+  <span class='tp'>BOOL</span> overlayImmediate;
+  <span class='tp'>BOOL</span> overlayPlane0ForVirtualModeOnly;
+  <span class='tp'>BOOL</span> overlayVersion3Ddi;
+  <span class='tp'>BOOL</span> displayCapsKnown;
+  <span class='tp'>BOOL</span> displayPreferPhysicallyContiguous;
+  <span class='tp'>BOOL</span> displayCursorScaledWithMpoPlane0;
+  <span class='tp'>BOOL</span> displayCursorNoXorWithMpo;
+  <span class='tp'>BOOL</span> scanoutCapsKnown;
+  <span class='tp'>BOOL</span> crossAdapterSupportKnown;
+  <span class='tp'>BOOL</span> wddm3CapsKnown;
+  <span class='tp'>BOOL</span> hardwareFlipQueueSupported;
+  <span class='tp'>BOOL</span> hardwareFlipQueueEnabled;
+  <span class='tp'>BOOL</span> displayableSupported;
+  <span class='tp'>UINT</span> hardwareFlipQueueSupportState;
+  <span class='tp'>UINT</span> vidPnSourceId;
+  <span class='tp'>UINT</span> maxPlanes;
+  <span class='tp'>UINT</span> maxRgbPlanes;
+  <span class='tp'>UINT</span> maxYuvPlanes;
+  <span class='tp'>UINT</span> overlayCaps;
+  <span class='tp'>UINT</span> scanoutCaps;
+  <span class='tp'>UINT</span> crossAdapterSupportTier;
+  <span class='tp'>FLOAT</span> maxStretchFactor;
+  <span class='tp'>FLOAT</span> maxShrinkFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxStretchFactor;
+  <span class='tp'>FLOAT</span> postCompositionMaxShrinkFactor;
+} <span class='tp'>MAGD3DKMTDISPLAYPLANECAPS</span>;
+
+<span class='tp'>BOOL</span> <span class='fn'>D3DKMTWaitForVerticalBlank</span>(<span class='tp'>HWND</span> hWnd);
+<span class='tp'>BOOL</span> <span class='fn'>D3DKMTQueryDisplayPlaneCaps</span>(
+  <span class='tp'>LPCWSTR</span> deviceName,
+  <span class='tp'>MAGD3DKMTDISPLAYPLANECAPS</span>* caps);
+</pre>
+<p class="source-nav"><a href='d3dkmtx_c.htm'>&larr; d3dkmtx.c</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='dcompabi_h.htm'>dcompabi.h &rarr;</a></p>
 </body>
 </html>

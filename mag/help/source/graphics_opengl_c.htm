@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>graphics_opengl.c - MAG Source Code</title>
+  <link rel="stylesheet" type="text/css" href="../help.css">
+</head>
+<body>
+<p class="breadcrumb"><a href="../index.htm">MAG Help</a> &rsaquo; <a href="../source.htm">Source Code</a> &rsaquo; graphics_opengl.c</p>
+<h1>graphics_opengl.c</h1>
+<p>WGL/OpenGL context, texture, overlay/text, and SwapBuffers path.</p>
+<div class="source-meta"><strong>546 lines</strong> &middot; 15938 bytes &middot; project-owned source &middot; generated from the current checkout</div>
+<p class="source-nav"><a href='graphics_layered_h.htm'>&larr; graphics_layered.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_presentation_manager_c.htm'>graphics_presentation_manager.c &rarr;</a></p>
+<pre class="source-code"><span class='pp'>#include &quot;framework.h&quot;</span>
+<span class='pp'>#include &quot;graphics.h&quot;</span>
+<span class='pp'>#include &quot;presentation.h&quot;</span>
+
+<span class='pp'>#include &lt;gl/GL.h&gt;</span>
+
+<span class='kw'>typedef</span> <span class='kw'>struct</span> MAGOPENGLSTATE
+{
+  <span class='tp'>HDC</span>    hDC;
+  HGLRC  hRC;
+  <span class='tp'>GLuint</span> texture;
+  <span class='tp'>GLuint</span> glyphTexture;
+  <span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* glyphAtlasIdentity;
+  <span class='tp'>UINT</span>   width;
+  <span class='tp'>UINT</span>   height;
+  <span class='tp'>UINT</span>   capacityWidth;
+  <span class='tp'>UINT</span>   capacityHeight;
+  <span class='tp'>UINT64</span> resourceGeneration;
+  <span class='tp'>UINT</span>   syncInterval;
+} MAGOPENGLSTATE;
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLIsAvailable</span>(LPTSTR reason, <span class='tp'>UINT</span> reasonCount)
+{
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsIsInputDesktop</span>())
+    {
+      <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+      {
+        <span class='fn'>lstrcpyn</span>(reason, <span class='fn'>TEXT</span>(<span class='str'>&quot;Window-system OpenGL is unavailable on the private non-input test desktop.&quot;</span>), reasonCount);
+      }
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (reason &amp;&amp; reasonCount)
+    {
+      reason[<span class='num'>0</span>] = <span class='fn'>TEXT</span>(<span class='str'>'\0'</span>);
+    }
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLCreateTexture</span>(MAGOPENGLSTATE* <span class='tp'>state</span>, <span class='tp'>SIZE</span> clientSize)
+{
+    <span class='tp'>SIZE</span> reservoirSize;
+    <span class='tp'>GLint</span> maximumTextureSize = <span class='num'>0</span>;
+
+    <span class='kw'>if</span> (clientSize.cx &lt; <span class='num'>1</span> || clientSize.cy &lt; <span class='num'>1</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='tp'>state</span>-&gt;width = (<span class='tp'>UINT</span>)clientSize.cx;
+    <span class='tp'>state</span>-&gt;height = (<span class='tp'>UINT</span>)clientSize.cy;
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;texture &amp;&amp;
+        <span class='tp'>state</span>-&gt;width &lt;= <span class='tp'>state</span>-&gt;capacityWidth &amp;&amp;
+        <span class='tp'>state</span>-&gt;height &lt;= <span class='tp'>state</span>-&gt;capacityHeight)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    reservoirSize = <span class='fn'>magGraphicsChooseReservoirSize</span>(NULL, clientSize);
+    reservoirSize.cx = <span class='fn'>max</span>(reservoirSize.cx, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityWidth);
+    reservoirSize.cy = <span class='fn'>max</span>(reservoirSize.cy, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;capacityHeight);
+    <span class='fn'>glGetIntegerv</span>(GL_MAX_TEXTURE_SIZE, &amp;maximumTextureSize);
+    <span class='kw'>if</span> (maximumTextureSize &lt; clientSize.cx || maximumTextureSize &lt; clientSize.cy)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='num'>0</span> &lt; maximumTextureSize)
+    {
+      reservoirSize.cx = <span class='fn'>min</span>(reservoirSize.cx, maximumTextureSize);
+      reservoirSize.cy = <span class='fn'>min</span>(reservoirSize.cy, maximumTextureSize);
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;texture)
+    {
+      <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='num'>0</span>);
+      <span class='fn'>glDeleteTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;texture);
+      <span class='tp'>state</span>-&gt;texture = <span class='num'>0</span>;
+    }
+
+    <span class='fn'>glGenTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;texture);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;texture)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='tp'>state</span>-&gt;texture);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    <span class='fn'>glTexImage2D</span>(GL_TEXTURE_2D, <span class='num'>0</span>, GL_RGBA, reservoirSize.cx, reservoirSize.cy, <span class='num'>0</span>, <span class='mc'>GL_BGRA</span>, GL_UNSIGNED_BYTE, NULL);
+
+    <span class='tp'>state</span>-&gt;capacityWidth = (<span class='tp'>UINT</span>)reservoirSize.cx;
+    <span class='tp'>state</span>-&gt;capacityHeight = (<span class='tp'>UINT</span>)reservoirSize.cy;
+    ++<span class='tp'>state</span>-&gt;resourceGeneration;
+    <span class='kw'>return</span> GL_NO_ERROR == <span class='fn'>glGetError</span>();
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLCreate</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='tp'>SIZE</span> clientSize,
+  <span class='kw'>const</span> <span class='kw'>struct</span> <span class='tp'>MAGPRESENTATIONSETTINGS</span>* presentation,
+  <span class='kw'>void</span>** stateOut)
+{
+    PIXELFORMATDESCRIPTOR pfd = { <span class='kw'>sizeof</span>(pfd) };
+    MAGOPENGLSTATE* <span class='tp'>state</span>;
+    <span class='kw'>int</span> pixelFormat;
+
+    <span class='kw'>if</span> (!stateOut || !presentation)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    *stateOut = NULL;
+    <span class='fn'>SetLastError</span>(ERROR_SUCCESS);
+
+    <span class='tp'>state</span> = (MAGOPENGLSTATE*)<span class='fn'>HeapAlloc</span>(<span class='fn'>GetProcessHeap</span>(), HEAP_ZERO_MEMORY, <span class='kw'>sizeof</span>(*<span class='tp'>state</span>));
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    pfd.nVersion = <span class='num'>1</span>;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_SUPPORT_COMPOSITION;
+    <span class='kw'>if</span> (MAG_PRESENT_HARDWARE_LEGACY_COPY_TO_FRONT_BUFFER == presentation-&gt;target ||
+        MAG_PRESENT_COMPOSED_COPY_GPU_GDI == presentation-&gt;target)
+    {
+      pfd.dwFlags |= PFD_SWAP_COPY;
+    }
+    <span class='kw'>else</span>
+    {
+      pfd.dwFlags |= PFD_SWAP_EXCHANGE;
+    }
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = <span class='num'>32</span>;
+    pfd.cAlphaBits = <span class='num'>8</span>;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+
+    <span class='tp'>state</span>-&gt;hDC = <span class='fn'>GetDC</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;hDC)
+    {
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='fn'>SetLastError</span>(<span class='num'>0xE001</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    pixelFormat = <span class='fn'>GetPixelFormat</span>(<span class='tp'>state</span>-&gt;hDC);
+    <span class='kw'>if</span> (!pixelFormat)
+    {
+      pixelFormat = <span class='fn'>ChoosePixelFormat</span>(<span class='tp'>state</span>-&gt;hDC, &amp;pfd);
+      <span class='kw'>if</span> (!pixelFormat || !<span class='fn'>SetPixelFormat</span>(<span class='tp'>state</span>-&gt;hDC, pixelFormat, &amp;pfd))
+      {
+        <span class='fn'>ReleaseDC</span>(hWnd, <span class='tp'>state</span>-&gt;hDC);
+        <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+        <span class='fn'>SetLastError</span>(<span class='num'>0xE002</span>);
+        <span class='kw'>return</span> FALSE;
+      }
+    }
+
+    <span class='tp'>state</span>-&gt;hRC = <span class='fn'>wglCreateContext</span>(<span class='tp'>state</span>-&gt;hDC);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;hRC || !<span class='fn'>wglMakeCurrent</span>(<span class='tp'>state</span>-&gt;hDC, <span class='tp'>state</span>-&gt;hRC))
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hRC)
+      {
+        <span class='fn'>wglDeleteContext</span>(<span class='tp'>state</span>-&gt;hRC);
+      }
+      <span class='fn'>ReleaseDC</span>(hWnd, <span class='tp'>state</span>-&gt;hDC);
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='fn'>SetLastError</span>(<span class='num'>0xE003</span>);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>wglLoadExtensions</span>();
+    <span class='fn'>glMatrixMode</span>(GL_PROJECTION);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glOrtho</span>(-<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>, -<span class='num'>1.0</span>, <span class='num'>1.0</span>);
+    <span class='fn'>glMatrixMode</span>(GL_MODELVIEW);
+    <span class='fn'>glLoadIdentity</span>();
+    <span class='fn'>glEnable</span>(GL_BLEND);
+    <span class='fn'>glBlendFunc</span>(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+
+    <span class='kw'>if</span> (<span class='tp'>wglSwapIntervalEXT</span>)
+    {
+      <span class='tp'>wglSwapIntervalEXT</span>((<span class='kw'>int</span>)presentation-&gt;syncInterval);
+    }
+    <span class='tp'>state</span>-&gt;syncInterval = presentation-&gt;syncInterval;
+
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsOpenGLCreateTexture</span>(<span class='tp'>state</span>, clientSize))
+    {
+      <span class='kw'>const</span> <span class='tp'>GLenum</span> error = <span class='fn'>glGetError</span>();
+      <span class='kw'>const</span> <span class='tp'>DWORD</span> failure = error ? (<span class='num'>0xE100</span> | (<span class='tp'>DWORD</span>)error) : <span class='num'>0xE004</span>;
+      <span class='fn'>wglMakeCurrent</span>(NULL, NULL);
+      <span class='fn'>wglDeleteContext</span>(<span class='tp'>state</span>-&gt;hRC);
+      <span class='fn'>ReleaseDC</span>(hWnd, <span class='tp'>state</span>-&gt;hDC);
+      <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+      <span class='fn'>SetLastError</span>(failure);
+      <span class='kw'>return</span> FALSE;
+    }
+
+    *stateOut = <span class='tp'>state</span>;
+    <span class='kw'>return</span> TRUE;
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLDestroy</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState)
+{
+    MAGOPENGLSTATE* <span class='tp'>state</span> = (MAGOPENGLSTATE*)opaqueState;
+
+    <span class='kw'>if</span> (!<span class='tp'>state</span>)
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDC &amp;&amp; <span class='tp'>state</span>-&gt;hRC &amp;&amp; <span class='fn'>wglMakeCurrent</span>(<span class='tp'>state</span>-&gt;hDC, <span class='tp'>state</span>-&gt;hRC))
+    {
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;texture)
+      {
+        <span class='fn'>glDeleteTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;texture);
+      }
+      <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;glyphTexture)
+      {
+        <span class='fn'>glDeleteTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;glyphTexture);
+      }
+    }
+
+    <span class='kw'>if</span> (<span class='fn'>wglGetCurrentContext</span>() == <span class='tp'>state</span>-&gt;hRC)
+    {
+      <span class='fn'>wglMakeCurrent</span>(NULL, NULL);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hRC)
+    {
+      <span class='fn'>wglDeleteContext</span>(<span class='tp'>state</span>-&gt;hRC);
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;hDC)
+    {
+      <span class='fn'>ReleaseDC</span>(hWnd, <span class='tp'>state</span>-&gt;hDC);
+    }
+    <span class='fn'>HeapFree</span>(<span class='fn'>GetProcessHeap</span>(), <span class='num'>0</span>, <span class='tp'>state</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLResize</span>(<span class='tp'>HWND</span> hWnd, <span class='kw'>void</span>* opaqueState, <span class='tp'>SIZE</span> clientSize)
+{
+    MAGOPENGLSTATE* <span class='tp'>state</span> = (MAGOPENGLSTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+
+    <span class='kw'>return</span> <span class='tp'>state</span> &amp;&amp;
+      <span class='fn'>wglMakeCurrent</span>(<span class='tp'>state</span>-&gt;hDC, <span class='tp'>state</span>-&gt;hRC) &amp;&amp;
+      <span class='fn'>magGraphicsOpenGLCreateTexture</span>(<span class='tp'>state</span>, clientSize);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLSetPresentationEnabled</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='tp'>BOOL</span> enabled)
+{
+    MAGOPENGLSTATE* <span class='tp'>state</span> = (MAGOPENGLSTATE*)opaqueState;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !<span class='tp'>state</span>-&gt;hDC || !<span class='tp'>state</span>-&gt;hRC)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='kw'>if</span> (enabled)
+    {
+      <span class='kw'>return</span> <span class='fn'>wglGetCurrentContext</span>() == <span class='tp'>state</span>-&gt;hRC ||
+        <span class='fn'>wglMakeCurrent</span>(<span class='tp'>state</span>-&gt;hDC, <span class='tp'>state</span>-&gt;hRC);
+    }
+
+    <span class='kw'>return</span> <span class='fn'>wglGetCurrentContext</span>() != <span class='tp'>state</span>-&gt;hRC ||
+      <span class='fn'>wglMakeCurrent</span>(NULL, NULL);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='kw'>const</span> MAGOPENGLSTATE* <span class='tp'>state</span>, <span class='tp'>FLOAT</span> <span class='tp'>x</span>, <span class='tp'>FLOAT</span> y)
+{
+    <span class='fn'>glVertex2f</span>(
+      -<span class='num'>1.0f</span> + (<span class='num'>2.0f</span> * <span class='tp'>x</span> / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;width),
+      <span class='num'>1.0f</span> - (<span class='num'>2.0f</span> * y / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;height));
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLFillRect</span>(<span class='kw'>const</span> MAGOPENGLSTATE* <span class='tp'>state</span>, <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='fn'>glColor4f</span>(command-&gt;color.<span class='tp'>r</span>, command-&gt;color.g, command-&gt;color.b, command-&gt;color.a);
+    <span class='fn'>glBegin</span>(GL_QUADS);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.top);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.right, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.top);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.right, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.bottom);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.bottom);
+    <span class='fn'>glEnd</span>();
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLStrokeRect</span>(<span class='kw'>const</span> MAGOPENGLSTATE* <span class='tp'>state</span>, <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command)
+{
+    <span class='fn'>glColor4f</span>(command-&gt;color.<span class='tp'>r</span>, command-&gt;color.g, command-&gt;color.b, command-&gt;color.a);
+    <span class='fn'>glLineWidth</span>(command-&gt;thickness);
+    <span class='fn'>glBegin</span>(GL_LINE_LOOP);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.top);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.right, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.top);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.right, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.bottom);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)command-&gt;<span class='tp'>rect</span>.bottom);
+    <span class='fn'>glEnd</span>();
+    <span class='fn'>glLineWidth</span>(<span class='num'>1.0f</span>);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLEnsureGlyphAtlas</span>(
+  MAGOPENGLSTATE* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* atlas)
+{
+    <span class='kw'>if</span> (!atlas || !atlas-&gt;<span class='tp'>alpha</span> || !atlas-&gt;width || !atlas-&gt;height ||
+        atlas-&gt;stride != atlas-&gt;width)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;glyphTexture &amp;&amp; <span class='tp'>state</span>-&gt;glyphAtlasIdentity == atlas)
+    {
+      <span class='kw'>return</span> TRUE;
+    }
+
+    <span class='kw'>if</span> (<span class='tp'>state</span>-&gt;glyphTexture)
+    {
+      <span class='fn'>glDeleteTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;glyphTexture);
+      <span class='tp'>state</span>-&gt;glyphTexture = <span class='num'>0</span>;
+    }
+
+    <span class='fn'>glGenTextures</span>(<span class='num'>1</span>, &amp;<span class='tp'>state</span>-&gt;glyphTexture);
+    <span class='kw'>if</span> (!<span class='tp'>state</span>-&gt;glyphTexture)
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='tp'>state</span>-&gt;glyphTexture);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, <span class='num'>0x812F</span>);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    <span class='fn'>glTexParameteri</span>(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    <span class='fn'>glPixelStorei</span>(GL_UNPACK_ALIGNMENT, <span class='num'>1</span>);
+    <span class='fn'>glTexImage2D</span>(
+      GL_TEXTURE_2D,
+      <span class='num'>0</span>,
+      GL_ALPHA,
+      atlas-&gt;width,
+      atlas-&gt;height,
+      <span class='num'>0</span>,
+      GL_ALPHA,
+      GL_UNSIGNED_BYTE,
+      atlas-&gt;<span class='tp'>alpha</span>);
+    <span class='tp'>state</span>-&gt;glyphAtlasIdentity = atlas;
+    <span class='kw'>return</span> GL_NO_ERROR == <span class='fn'>glGetError</span>();
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLTexturedVertex</span>(
+  <span class='kw'>const</span> MAGOPENGLSTATE* <span class='tp'>state</span>,
+  <span class='tp'>FLOAT</span> <span class='tp'>x</span>,
+  <span class='tp'>FLOAT</span> y,
+  <span class='tp'>FLOAT</span> s,
+  <span class='tp'>FLOAT</span> t)
+{
+    <span class='fn'>glTexCoord2f</span>(s, t);
+    <span class='fn'>magGraphicsOpenGLVertex</span>(<span class='tp'>state</span>, <span class='tp'>x</span>, y);
+}
+
+<span class='kw'>static</span> <span class='kw'>void</span> <span class='fn'>magGraphicsOpenGLDrawText</span>(
+  MAGOPENGLSTATE* <span class='tp'>state</span>,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWCOMMAND</span>* command,
+  <span class='kw'>const</span> <span class='tp'>MAGGLYPHATLAS</span>* atlas)
+{
+    <span class='tp'>RECT</span> bounds = { <span class='num'>0</span>, <span class='num'>0</span>, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;width, (<span class='tp'>LONG</span>)<span class='tp'>state</span>-&gt;height };
+    <span class='tp'>LONG</span> destinationX = command-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span>;
+    <span class='kw'>const</span> <span class='tp'>LONG</span> destinationY = command-&gt;<span class='tp'>rect</span>.top;
+    <span class='tp'>UINT</span> characterIndex;
+
+    <span class='kw'>if</span> (!<span class='fn'>magGraphicsOpenGLEnsureGlyphAtlas</span>(<span class='tp'>state</span>, atlas))
+    {
+      <span class='kw'>return</span>;
+    }
+
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='tp'>state</span>-&gt;glyphTexture);
+    <span class='fn'>glTexEnvi</span>(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    <span class='fn'>glColor4f</span>(command-&gt;color.<span class='tp'>r</span>, command-&gt;color.g, command-&gt;color.b, command-&gt;color.a);
+    <span class='fn'>glBegin</span>(GL_QUADS);
+    <span class='kw'>for</span> (characterIndex = <span class='num'>0</span>;
+         command-&gt;text[characterIndex] &amp;&amp; destinationX &lt; command-&gt;<span class='tp'>rect</span>.right;
+         ++characterIndex)
+    {
+      <span class='tp'>WCHAR</span> character = command-&gt;text[characterIndex];
+      <span class='tp'>UINT</span> glyphIndex;
+      <span class='kw'>const</span> <span class='tp'>MAGGLYPHINFO</span>* glyph;
+      <span class='tp'>RECT</span> destination;
+      <span class='tp'>RECT</span> clip;
+      <span class='tp'>RECT</span> boundedClip;
+      <span class='tp'>FLOAT</span> s0;
+      <span class='tp'>FLOAT</span> t0;
+      <span class='tp'>FLOAT</span> s1;
+      <span class='tp'>FLOAT</span> t1;
+
+      <span class='kw'>if</span> (character &lt; atlas-&gt;firstCharacter ||
+          character &gt;= atlas-&gt;firstCharacter + atlas-&gt;glyphCount)
+      {
+        character = L<span class='str'>'?'</span>;
+      }
+      glyphIndex = character - atlas-&gt;firstCharacter;
+      glyph = &amp;atlas-&gt;glyphs[glyphIndex];
+      <span class='fn'>SetRect</span>(
+        &amp;destination,
+        destinationX,
+        destinationY,
+        destinationX + <span class='mc'>RECTWIDTH</span>(glyph-&gt;<span class='tp'>rect</span>),
+        destinationY + <span class='mc'>RECTHEIGHT</span>(glyph-&gt;<span class='tp'>rect</span>));
+      <span class='kw'>if</span> (<span class='fn'>IntersectRect</span>(&amp;clip, &amp;destination, &amp;command-&gt;<span class='tp'>rect</span>) &amp;&amp;
+          <span class='fn'>IntersectRect</span>(&amp;boundedClip, &amp;clip, &amp;bounds))
+      {
+        clip = boundedClip;
+        s0 = (<span class='tp'>FLOAT</span>)(glyph-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> + clip.<span class='tp'>left</span> - destination.<span class='tp'>left</span>) / (<span class='tp'>FLOAT</span>)atlas-&gt;width;
+        t0 = (<span class='tp'>FLOAT</span>)(glyph-&gt;<span class='tp'>rect</span>.top + clip.top - destination.top) / (<span class='tp'>FLOAT</span>)atlas-&gt;height;
+        s1 = (<span class='tp'>FLOAT</span>)(glyph-&gt;<span class='tp'>rect</span>.<span class='tp'>left</span> + clip.right - destination.<span class='tp'>left</span>) / (<span class='tp'>FLOAT</span>)atlas-&gt;width;
+        t1 = (<span class='tp'>FLOAT</span>)(glyph-&gt;<span class='tp'>rect</span>.top + clip.bottom - destination.top) / (<span class='tp'>FLOAT</span>)atlas-&gt;height;
+        <span class='fn'>magGraphicsOpenGLTexturedVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)clip.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)clip.top, s0, t0);
+        <span class='fn'>magGraphicsOpenGLTexturedVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)clip.right, (<span class='tp'>FLOAT</span>)clip.top, s1, t0);
+        <span class='fn'>magGraphicsOpenGLTexturedVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)clip.right, (<span class='tp'>FLOAT</span>)clip.bottom, s1, t1);
+        <span class='fn'>magGraphicsOpenGLTexturedVertex</span>(<span class='tp'>state</span>, (<span class='tp'>FLOAT</span>)clip.<span class='tp'>left</span>, (<span class='tp'>FLOAT</span>)clip.bottom, s0, t1);
+      }
+      destinationX += glyph-&gt;advance;
+    }
+    <span class='fn'>glEnd</span>();
+    <span class='fn'>glDisable</span>(GL_TEXTURE_2D);
+}
+
+<span class='kw'>static</span> <span class='tp'>BOOL</span> <span class='fn'>magGraphicsOpenGLRender</span>(
+  <span class='tp'>HWND</span> hWnd,
+  <span class='kw'>void</span>* opaqueState,
+  <span class='kw'>const</span> <span class='tp'>MAGPIXELBUFFER</span>* frame,
+  <span class='kw'>const</span> <span class='tp'>MAGUIDRAWLIST</span>* ui,
+  <span class='kw'>const</span> <span class='tp'>MAGPRESENTINTENT</span>* intent)
+{
+    MAGOPENGLSTATE* <span class='tp'>state</span> = (MAGOPENGLSTATE*)opaqueState;
+    <span class='tp'>UINT</span> i;
+    <span class='kw'>const</span> <span class='tp'>FLOAT</span> uMax = <span class='tp'>state</span> &amp;&amp; <span class='tp'>state</span>-&gt;capacityWidth
+      ? (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;width / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityWidth
+      : <span class='num'>1.0f</span>;
+    <span class='kw'>const</span> <span class='tp'>FLOAT</span> vMax = <span class='tp'>state</span> &amp;&amp; <span class='tp'>state</span>-&gt;capacityHeight
+      ? (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;height / (<span class='tp'>FLOAT</span>)<span class='tp'>state</span>-&gt;capacityHeight
+      : <span class='num'>1.0f</span>;
+
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(hWnd);
+    <span class='kw'>if</span> (!<span class='tp'>state</span> || !frame || !frame-&gt;<span class='tp'>pixels</span> ||
+        frame-&gt;width != <span class='tp'>state</span>-&gt;width || frame-&gt;height != <span class='tp'>state</span>-&gt;height ||
+        !<span class='fn'>wglMakeCurrent</span>(<span class='tp'>state</span>-&gt;hDC, <span class='tp'>state</span>-&gt;hRC))
+    {
+      <span class='kw'>return</span> FALSE;
+    }
+
+    <span class='fn'>glViewport</span>(<span class='num'>0</span>, <span class='num'>0</span>, <span class='tp'>state</span>-&gt;width, <span class='tp'>state</span>-&gt;height);
+    <span class='fn'>glDisable</span>(GL_BLEND);
+    <span class='fn'>glDisable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glColorMask</span>(<span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>);
+    <span class='fn'>glClearColor</span>(<span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>0.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glClear</span>(GL_COLOR_BUFFER_BIT);
+
+    <span class='fn'>glEnable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glBindTexture</span>(GL_TEXTURE_2D, <span class='tp'>state</span>-&gt;texture);
+    <span class='fn'>glPixelStorei</span>(GL_UNPACK_ALIGNMENT, <span class='num'>4</span>);
+    <span class='fn'>glPixelStorei</span>(<span class='num'>0x0CF2</span> <span class='cm'>/* GL_UNPACK_ROW_LENGTH */</span>, (<span class='tp'>GLint</span>)(frame-&gt;stride / <span class='num'>4U</span>));
+    <span class='fn'>glTexSubImage2D</span>(GL_TEXTURE_2D, <span class='num'>0</span>, <span class='num'>0</span>, <span class='num'>0</span>, <span class='tp'>state</span>-&gt;width, <span class='tp'>state</span>-&gt;height, <span class='mc'>GL_BGRA</span>, GL_UNSIGNED_BYTE, frame-&gt;<span class='tp'>pixels</span>);
+    <span class='fn'>glPixelStorei</span>(<span class='num'>0x0CF2</span> <span class='cm'>/* GL_UNPACK_ROW_LENGTH */</span>, <span class='num'>0</span>);
+
+    <span class='fn'>glColor4f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glColorMask</span>(<span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_FALSE</span>);
+    <span class='fn'>glBegin</span>(GL_QUADS);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>0.0f</span>, frame-&gt;rowOrder == MAG_ROW_ORDER_TOP_DOWN ? vMax : <span class='num'>0.0f</span>);
+    <span class='fn'>glVertex2f</span>(-<span class='num'>1.0f</span>, -<span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(uMax, frame-&gt;rowOrder == MAG_ROW_ORDER_TOP_DOWN ? vMax : <span class='num'>0.0f</span>);
+    <span class='fn'>glVertex2f</span>(<span class='num'>1.0f</span>, -<span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(uMax, frame-&gt;rowOrder == MAG_ROW_ORDER_TOP_DOWN ? <span class='num'>0.0f</span> : vMax);
+    <span class='fn'>glVertex2f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glTexCoord2f</span>(<span class='num'>0.0f</span>, frame-&gt;rowOrder == MAG_ROW_ORDER_TOP_DOWN ? <span class='num'>0.0f</span> : vMax);
+    <span class='fn'>glVertex2f</span>(-<span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glEnd</span>();
+
+    <span class='fn'>glDisable</span>(GL_TEXTURE_2D);
+    <span class='fn'>glEnable</span>(GL_BLEND);
+    <span class='fn'>glBlendFunc</span>(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    <span class='kw'>if</span> (ui)
+    {
+      <span class='kw'>for</span> (i = <span class='num'>0</span>; i &lt; ui-&gt;<span class='tp'>count</span>; ++i)
+      {
+        <span class='kw'>if</span> (MAG_UI_DRAW_FILL_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsOpenGLFillRect</span>(<span class='tp'>state</span>, &amp;ui-&gt;commands[i]);
+        }
+        <span class='kw'>else</span> <span class='kw'>if</span> (MAG_UI_DRAW_STROKE_RECT == ui-&gt;commands[i].<span class='tp'>type</span>)
+        {
+          <span class='fn'>magGraphicsOpenGLStrokeRect</span>(<span class='tp'>state</span>, &amp;ui-&gt;commands[i]);
+        }
+        <span class='kw'>else</span> <span class='kw'>if</span> (MAG_UI_DRAW_TEXT == ui-&gt;commands[i].<span class='tp'>type</span> &amp;&amp; ui-&gt;glyphAtlas)
+        {
+          <span class='fn'>magGraphicsOpenGLDrawText</span>(<span class='tp'>state</span>, &amp;ui-&gt;commands[i], ui-&gt;glyphAtlas);
+        }
+      }
+    }
+
+    <span class='fn'>glColorMask</span>(<span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>, <span class='mc'>GL_TRUE</span>);
+    <span class='fn'>glColor4f</span>(<span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>, <span class='num'>1.0f</span>);
+    <span class='fn'>glFlush</span>();
+    <span class='kw'>if</span> (intent &amp;&amp; !intent-&gt;synchronize &amp;&amp; <span class='tp'>wglSwapIntervalEXT</span>)
+    {
+      <span class='tp'>wglSwapIntervalEXT</span>(<span class='num'>0</span>);
+    }
+    {
+      <span class='tp'>BOOL</span> presented = <span class='fn'>SwapBuffers</span>(<span class='tp'>state</span>-&gt;hDC);
+      <span class='kw'>if</span> (intent &amp;&amp; !intent-&gt;synchronize &amp;&amp; <span class='tp'>wglSwapIntervalEXT</span>)
+      {
+        <span class='tp'>wglSwapIntervalEXT</span>((<span class='kw'>int</span>)<span class='tp'>state</span>-&gt;syncInterval);
+      }
+      <span class='kw'>return</span> presented;
+    }
+}
+
+<span class='kw'>static</span> <span class='tp'>HANDLE</span> <span class='fn'>magGraphicsOpenGLGetFrameWaitHandle</span>(<span class='kw'>void</span>* <span class='tp'>state</span>)
+{
+    <span class='fn'>UNREFERENCED_PARAMETER</span>(<span class='tp'>state</span>);
+    <span class='kw'>return</span> NULL;
+}
+
+<span class='kw'>static</span> <span class='tp'>UINT64</span> <span class='fn'>magGraphicsOpenGLGetResourceGeneration</span>(<span class='kw'>void</span>* opaqueState)
+{
+    MAGOPENGLSTATE* <span class='tp'>state</span> = (MAGOPENGLSTATE*)opaqueState;
+    <span class='kw'>return</span> <span class='tp'>state</span> ? <span class='tp'>state</span>-&gt;resourceGeneration : <span class='num'>0</span>;
+}
+
+<span class='kw'>const</span> <span class='tp'>MAGGRAPHICSBACKEND</span> g_magGraphicsOpenGLBackend =
+{
+  GRAPHICS_API_OPENGL,
+  <span class='fn'>TEXT</span>(<span class='str'>&quot;OpenGL&quot;</span>),
+  TRUE,
+  magGraphicsOpenGLIsAvailable,
+  magGraphicsOpenGLCreate,
+  magGraphicsOpenGLDestroy,
+  magGraphicsOpenGLResize,
+  magGraphicsOpenGLSetPresentationEnabled,
+  magGraphicsOpenGLRender,
+  magGraphicsOpenGLGetFrameWaitHandle,
+  magGraphicsOpenGLGetResourceGeneration,
+  NULL,
+  NULL,
+};
+</pre>
+<p class="source-nav"><a href='graphics_layered_h.htm'>&larr; graphics_layered.h</a> &nbsp; | &nbsp; <a href="../source.htm">file index</a> &nbsp; | &nbsp; <a href='graphics_presentation_manager_c.htm'>graphics_presentation_manager.c &rarr;</a></p>
+</body>
+</html>
